@@ -256,14 +256,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         usageLogWatcher?.start()
     }
 
-    /// Coalesces FSEvents-driven refreshes so a busy transcript directory produces ONE refresh
+    /// Coalesces timer and FSEvents-driven refreshes so a busy transcript directory produces ONE refresh
     /// per quiet/cooldown window instead of back-to-back full refreshes. The previous "throttle"
     /// stamped its cooldown when a refresh STARTED (with a 5s window shorter than the ~7s refresh
     /// and no in-flight guard), so under sustained agent write load it fired continuously —
     /// ~8.6GB of writes in ~10 min. See RefreshCoalescer for the corrected state machine.
-    private let refreshCoalescer = RefreshCoalescer()
+    private let refreshCoalescer = RefreshCoalescer(config: .init(minIntervalSeconds: 30))
+    private var pendingSelectedPeriodRefresh = false
 
-    private func scheduleUsageLogRefresh() {
+    private func scheduleUsageLogRefresh(refreshSelectedPeriod: Bool = false) {
+        pendingSelectedPeriodRefresh = pendingSelectedPeriodRefresh || refreshSelectedPeriod
         refreshCoalescer.noteEvent(now: Date())
         pumpCoalescer()
     }
@@ -275,11 +277,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         case .idle:
             return
         case .fireNow:
-            watcherLog("FSEVENTS coalescer: firing refresh")
-            RefreshTracer.shared.instant(name: "fsevents_trigger", category: "fsevents", tid: .fsevents)
+            usageLogDebounceWork?.cancel()
+            usageLogDebounceWork = nil
+            let refreshSelectedPeriod = pendingSelectedPeriodRefresh
+            pendingSelectedPeriodRefresh = false
+            watcherLog("AUTO coalescer: firing refresh")
+            RefreshTracer.shared.instant(name: "automatic_trigger", category: "refresh", tid: .refresh)
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                await self.performAutomaticRefresh(refreshSelectedPeriod: false)
+                await self.performAutomaticRefresh(refreshSelectedPeriod: refreshSelectedPeriod)
                 self.refreshCoalescer.refreshDidFinish(now: Date())
                 self.pumpCoalescer()
             }
@@ -295,12 +301,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         }
     }
 
-    private var lastRefreshStartedAt: Date = .distantPast
-
-    /// Simplified automatic refresh — no in-flight guard, no re-entrancy protection.
-    /// The old version used automaticRefreshInFlight which got permanently stuck.
-    /// Now we just fire-and-forget: if a refresh is already running, the store's
-    /// badgeInFlight guard in refreshTodayBadge handles de-duplication.
+    /// Timer and filesystem refreshes share the same in-flight guard and completion cooldown.
     private func performAutomaticRefresh(refreshSelectedPeriod: Bool) async {
         let start = Date()
         watcherLog("REFRESH starting...")
@@ -335,9 +336,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
                 name: "timer_tick", category: "refresh", tid: .refresh,
                 args: ["interval_s": .int(Int(intervalSeconds))]
             )
-            Task { @MainActor [weak self] in
-                await self?.performAutomaticRefresh(refreshSelectedPeriod: true)
-            }
+            self?.scheduleUsageLogRefresh(refreshSelectedPeriod: true)
         }
         timer.resume()
         refreshTimer = timer
