@@ -6,7 +6,7 @@ private final class AuditClock: @unchecked Sendable {
     private let lock = NSLock()
     private var date = Date(timeIntervalSince1970: 1_780_000_000)
     func now() -> Date { lock.lock(); defer { lock.unlock() }; return date }
-    func advance() { lock.lock(); date.addTimeInterval(21); lock.unlock() }
+    func advance(_ seconds: TimeInterval = 21) { lock.lock(); date.addTimeInterval(seconds); lock.unlock() }
 }
 private actor AuditGate {
     var count = 0
@@ -21,6 +21,29 @@ private actor AuditGate {
 }
 @Suite("Resource audit safety assertions", .serialized)
 struct ResourceAuditTests {
+    @Test @MainActor
+    func repeatedFailuresBackOffAcrossRefreshPaths() async {
+        let clock = AuditClock()
+        actor Counter {
+            var count = 0
+            func fail() throws -> MenubarPayload { count += 1; throw DataClientError.timeout() }
+        }
+        let counter = Counter()
+        let store = AppStore(fetchPayload: { _, _, _ in try await counter.fail() }, now: { clock.now() })
+        await store.refreshTodayBadge()
+        await store.refreshTodayBadge()
+        await store.refresh(includeOptimize: false)
+        #expect(await counter.count == 1)
+        clock.advance(30)
+        await store.refreshTodayBadge()
+        #expect(await counter.count == 2)
+        clock.advance(30)
+        await store.refreshTodayBadge()
+        #expect(await counter.count == 2)
+        clock.advance(30)
+        await store.refreshTodayBadge()
+        #expect(await counter.count == 3)
+    }
     @Test @MainActor
     func slowBadgeMustNotAllowAnotherBadgeAfterTwentySeconds() async {
         let gate = AuditGate()

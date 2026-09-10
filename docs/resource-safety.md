@@ -5,6 +5,7 @@ The September 2026 audit traced filesystem events, timer/wake recovery, badge/de
 ## Controls
 
 - The existing 30-second completion cooldown coalesces automatic refreshes. Badge and detail share per-key ownership, with one lane each and a global maximum of two CLI fetch processes. Each queue is capped at 32; cancelled waiters never launch later.
+- Failed requests back off from 30 seconds to five minutes per key across all refresh entry points; health recovery cannot bypass that deadline.
 - Cancellation, timeout and output overflow terminate the child, escalate to SIGKILL and reap it before releasing its permit. Live pipes enforce 20 MiB stdout and 256 KiB stderr limits. Child lifetime is at most 60 seconds plus termination/reaping.
 - A PID lease serializes status ingestion across processes, with bounded waiting and dead-owner recovery.
 - Unchanged parsed files survive process restarts in a versioned disk cache, invalidated by source identity, size, timestamps, WAL changes and pricing. Changed snapshots are not cached. Cache entries are at most 16 MiB and the disk budget is 256 MiB. Yesterday is revalidated every five minutes; identical index/daily-cache writes are skipped.
@@ -16,6 +17,6 @@ The September 2026 audit traced filesystem events, timer/wake recovery, badge/de
 
 Regression tests cover overlapping badge/detail requests, five concurrent period requests, cancellation, ignored SIGTERM, output overflow, cancelled queued permits, snapshot growth, oversized records, cache invalidation, stable-cache no-write behavior, lock contention and dead owners. macOS CI runs the Swift suite in addition to the Node suite.
 
-Local verification on September 10: 613 JavaScript tests (isolated home provider discovery), 61 Swift tests, TypeScript compilation, universal macOS app build. A successful warm Today/All refresh against the actual local history took 3.05 seconds, 1.91 seconds user CPU and 255 MB peak RSS. These are measurements on one computer, not universal performance guarantees.
+Local verification on September 10: 613 JavaScript tests (isolated home provider discovery), 62 Swift tests, TypeScript compilation, universal macOS app build. A successful warm Today/All refresh against the actual local history took 3.05 seconds, 1.91 seconds user CPU and 255 MB peak RSS. These are measurements on one computer, not universal performance guarantees.
 
 The app and CLI are version 0.2.51. Local installation does not distribute fixes to other users; a public release remains a separate delivery step.

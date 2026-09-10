@@ -92,12 +92,12 @@ if [[ -f "${ICON_SRC}" ]]; then
   echo "▸ App icon installed."
 fi
 
-# Copy SwiftPM resource bundles (fonts, images). The generated resource_bundle_accessor.swift
-# looks at Bundle.main.bundleURL (= the .app root for app bundles), so place them there.
+# Keep SwiftPM resources inside Contents/Resources so codesign can seal the bundle.
+# The app resolves this packaged location before falling back to Bundle.module in development.
 echo "▸ Copying resource bundles..."
 for rb in "${BIN_PATH}"/*.bundle; do
   [[ -d "${rb}" ]] || continue
-  cp -R "${rb}" "${BUNDLE}/"
+  cp -R "${rb}" "${BUNDLE}/Contents/Resources/"
   echo "  → $(basename "${rb}")"
 done
 
@@ -106,8 +106,8 @@ done
 # cases on managed Macs. A Developer ID signature (separate setup) would additionally
 # surface the publisher name in Finder; not required here.
 echo "▸ Ad-hoc signing..."
-codesign --force --sign - --timestamp=none --deep "${BUNDLE}" 2>/dev/null || true
-codesign --verify --deep --strict "${BUNDLE}" 2>/dev/null || echo "  (signature verify skipped)"
+codesign --force --sign - --timestamp=none --deep "${BUNDLE}"
+codesign --verify --deep --strict "${BUNDLE}"
 
 ZIP_NAME="ExeWatcherMenubar-${VERSION}.zip"
 ZIP_PATH="${DIST_DIR}/${ZIP_NAME}"

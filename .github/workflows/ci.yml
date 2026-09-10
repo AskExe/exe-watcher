@@ -61,3 +61,5 @@ jobs:
       - uses: actions/checkout@v4
       - name: Scheduler, cancellation, output budgets, and cache isolation
         run: swift test --package-path mac --filter ExeWatcherMenubarTests
+      - name: Build and verify signed macOS package
+        run: mac/Scripts/package-app.sh ci

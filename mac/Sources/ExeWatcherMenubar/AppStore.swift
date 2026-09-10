@@ -62,6 +62,8 @@ final class AppStore {
     private let now: AppStoreDateProvider
     private var cache: [PayloadCacheKey: CachedPayload] = [:]
     private var errorsByKey: [PayloadCacheKey: String] = [:]
+    private var retryAfter: [PayloadCacheKey: Date] = [:]
+    private var failureCounts: [PayloadCacheKey: Int] = [:]
 
     /// Badge has its own dedicated fetch slot so detail/prefetch fetches can never starve it.
     private let badgeAdmission = FetchAdmission(limit: 1)
@@ -279,6 +281,9 @@ final class AppStore {
             // The running request already serves this key; never queue an identical scan.
             return false
         }
+        // Shared by timer, filesystem, wake, prefetch and health-recovery paths.
+        // A permanently failing input must not consume a full scan budget every tick.
+        if let deadline = retryAfter[key], now() < deadline { return false }
         inFlightKeys.insert(key)
         let generation = refreshGeneration
         // Clear stale error on retry start so the UI shows "loading" instead of a stale error.
@@ -329,6 +334,8 @@ final class AppStore {
                 RefreshTracer.shared.endSpan(spanId, args: ["result": .string("generation_mismatch")])
                 return false
             }
+            failureCounts.removeValue(forKey: key)
+            retryAfter.removeValue(forKey: key)
             cache[key] = CachedPayload(payload: fresh, fetchedAt: now())
             errorsByKey[key] = nil
             RefreshTracer.shared.endSpan(spanId, args: ["result": .string("success")])
@@ -343,6 +350,9 @@ final class AppStore {
                 RefreshTracer.shared.endSpan(spanId, args: ["result": .string("generation_mismatch")])
                 return false
             }
+            let failures = min((failureCounts[key] ?? 0) + 1, 5)
+            failureCounts[key] = failures
+            retryAfter[key] = now().addingTimeInterval(min(300, 30 * pow(2, Double(failures - 1))))
             errorsByKey[key] = Self.describe(error: error)
             NSLog("Exe Watcher: fetch failed for \(key.period.rawValue)/\(key.provider.rawValue): \(error)")
             RefreshTracer.shared.endSpan(spanId, args: [
