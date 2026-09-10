@@ -1,3 +1,4 @@
+import { ResourceBudgetError } from '../resource-budget.js'
 import { readdir } from 'fs/promises'
 import { join } from 'path'
 import { homedir } from 'os'
@@ -82,7 +83,8 @@ async function findDbFiles(dir: string): Promise<string[]> {
     return entries
       .filter((f) => f.startsWith('opencode') && f.endsWith('.db'))
       .map((f) => join(dir, f))
-  } catch {
+  } catch (error) {
+    if (error instanceof ResourceBudgetError) throw error
     return []
   }
 }
@@ -95,13 +97,14 @@ function parseTimestamp(raw: number): string {
 function validateSchema(db: SqliteDatabase): boolean {
   try {
     db.query<{ cnt: number }>(
-      "SELECT COUNT(*) as cnt FROM session LIMIT 1"
+      "SELECT id FROM session LIMIT 1"
     )
     db.query<{ cnt: number }>(
-      "SELECT COUNT(*) as cnt FROM message LIMIT 1"
+      "SELECT id FROM message LIMIT 1"
     )
     return true
-  } catch {
+  } catch (error) {
+    if (error instanceof ResourceBudgetError) throw error
     return false
   }
 }
@@ -155,7 +158,8 @@ function createParser(
             const list = partsByMsg.get(part.message_id) ?? []
             list.push(parsed)
             partsByMsg.set(part.message_id, list)
-          } catch {
+          } catch (error) {
+            if (error instanceof ResourceBudgetError) throw error
             // skip corrupt part data
           }
         }
@@ -166,7 +170,8 @@ function createParser(
           let data: MessageData
           try {
             data = JSON.parse(msg.data) as MessageData
-          } catch {
+          } catch (error) {
+            if (error instanceof ResourceBudgetError) throw error
             continue
           }
 
@@ -258,11 +263,16 @@ async function discoverFromDb(dbPath: string): Promise<SessionSource[]> {
   let db: SqliteDatabase
   try {
     db = openDatabase(dbPath)
-  } catch {
+  } catch (error) {
+    if (error instanceof ResourceBudgetError) throw error
     return []
   }
 
   try {
+    if (!validateSchema(db)) {
+      process.stderr.write('exe-watcher: OpenCode storage format not recognized. Update Watcher to read this database.\n')
+      return []
+    }
     const rows = db.query<SessionRow>(
       'SELECT id, directory, title, time_created FROM session WHERE time_archived IS NULL AND parent_id IS NULL ORDER BY time_created DESC',
     )
@@ -272,7 +282,8 @@ async function discoverFromDb(dbPath: string): Promise<SessionSource[]> {
       project: row.directory ? sanitize(row.directory) : sanitize(row.title),
       provider: 'opencode',
     }))
-  } catch {
+  } catch (error) {
+    if (error instanceof ResourceBudgetError) throw error
     return []
   } finally {
     db.close()

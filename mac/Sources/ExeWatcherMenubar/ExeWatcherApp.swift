@@ -479,9 +479,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
     /// Register bundled custom fonts (Epilogue) so they're available via Font.custom().
     private func registerBundledFonts() {
+        let resourceBundle = Bundle.main.resourceURL
+            .flatMap { Bundle(url: $0.appendingPathComponent("ExeWatcherMenubar_ExeWatcherMenubar.bundle")) }
+            ?? Bundle.module
         let fontNames = ["Epilogue-Bold"]
         for name in fontNames {
-            guard let url = Bundle.module.url(forResource: name, withExtension: "ttf") else {
+            guard let url = resourceBundle.url(forResource: name, withExtension: "ttf") else {
                 NSLog("Exe Watcher: font \(name).ttf not found in bundle")
                 continue
             }

@@ -1,3 +1,4 @@
+import { chargeRead, ResourceBudgetError } from './resource-budget.js'
 import { createRequire } from 'node:module'
 
 /// Thin SQLite read-only wrapper over Node's built-in `node:sqlite` module (stable in
@@ -15,7 +16,7 @@ export type SqliteDatabase = {
 }
 
 type DatabaseSyncCtor = new (path: string, options?: { readOnly?: boolean }) => {
-  prepare(sql: string): { all(...params: unknown[]): Row[] }
+  prepare(sql: string): { all(...params: unknown[]): Row[]; iterate(...params: unknown[]): Iterable<Row> }
   close(): void
 }
 
@@ -94,7 +95,16 @@ export function openDatabase(path: string): SqliteDatabase {
 
   return {
     query<T extends Row = Row>(sql: string, params: unknown[] = []): T[] {
-      return db.prepare(sql).all(...params) as T[]
+      const rows: T[] = []
+      let bytes = 0
+      for (const row of db.prepare(sql).iterate(...params)) {
+        const size = Buffer.byteLength(JSON.stringify(row))
+        bytes += size
+        if (rows.length >= 100_000 || bytes > 32 * 1024 * 1024) throw new ResourceBudgetError('SQLite result budget')
+        chargeRead(size)
+        rows.push(row as T)
+      }
+      return rows
     },
     close() {
       db.close()

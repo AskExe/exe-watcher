@@ -1,3 +1,4 @@
+import { ResourceBudgetError, chargeRead } from '../resource-budget.js'
 import { claude } from './claude.js'
 import { codex } from './codex.js'
 import { copilot } from './copilot.js'
@@ -70,17 +71,6 @@ export function getDiscoveryWarnings(): string[] {
   return _lastDiscoveryWarnings
 }
 
-const PROVIDER_TIMEOUT_MS = 5_000
-
-function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<{ result: T | null; warning: string | null }> {
-  return Promise.race([
-    promise.then(result => ({ result, warning: null })),
-    new Promise<{ result: null; warning: string }>(resolve =>
-      setTimeout(() => resolve({ result: null, warning: `Provider "${label}" timed out after ${ms}ms — skipped` }), ms),
-    ),
-  ])
-}
-
 export async function discoverAllSessions(providerFilter?: string): Promise<SessionSource[]> {
   _lastDiscoveryWarnings = []
   const allProviders = await getAllProviders()
@@ -88,29 +78,19 @@ export async function discoverAllSessions(providerFilter?: string): Promise<Sess
     ? allProviders.filter(p => p.name === providerFilter)
     : allProviders
 
-  // Run each provider's discovery with independent timeout (Fix 3)
-  const results = await Promise.all(
-    filtered.map(async provider => {
-      try {
-        const { result, warning } = await withTimeout(
-          provider.discoverSessions(),
-          PROVIDER_TIMEOUT_MS,
-          provider.name,
-        )
-        if (warning) {
-          _lastDiscoveryWarnings.push(warning)
-          return [] as SessionSource[]
-        }
-        return result ?? []
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err)
-        _lastDiscoveryWarnings.push(`Provider "${provider.name}" discovery failed: ${msg}`)
-        return [] as SessionSource[]
-      }
-    }),
-  )
-
-  return results.flat()
+  // Await each discovery to completion. A Promise.race timeout abandoned live
+  // filesystem work and returned a partial-success total while that work kept running.
+  const results: SessionSource[] = []
+  for (const provider of filtered) {
+    chargeRead(0)
+    try { results.push(...await provider.discoverSessions()) }
+    catch (err) {
+      if (err instanceof ResourceBudgetError) throw err
+      const msg = err instanceof Error ? err.message : String(err)
+      _lastDiscoveryWarnings.push(`Provider "${provider.name}" discovery failed: ${msg}`)
+    }
+  }
+  return results
 }
 
 export async function getProvider(name: string): Promise<Provider | undefined> {

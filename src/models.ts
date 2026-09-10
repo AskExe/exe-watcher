@@ -428,3 +428,16 @@ function applyContextTier(costs: ModelCosts | null, inputTokens: number): ModelC
     cacheReadCostPerToken: tier.cacheReadCostPerToken ?? costs.cacheReadCostPerToken,
   }
 }
+
+let fingerprintPricing: Map<string, ModelCosts> | null | undefined
+let fingerprintAliases: typeof userAliases
+let fingerprintValue = ''
+/** Parsed result caches must not survive pricing or alias changes. */
+export function getPricingFingerprint(): string {
+  if (!fingerprintValue || fingerprintPricing !== pricingCache || fingerprintAliases !== userAliases) {
+    fingerprintPricing = pricingCache
+    fingerprintAliases = userAliases
+    fingerprintValue = createHash('sha256').update(JSON.stringify([Array.from(pricingCache ?? []), FALLBACK_PRICING, userAliases])).digest('hex').slice(0, 16)
+  }
+  return fingerprintValue
+}

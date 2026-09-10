@@ -121,161 +121,107 @@ struct DataClient {
     }
 
     private static func runCLI(subcommand: [String], timeoutSeconds: UInt64 = spawnTimeoutSeconds) async throws -> ProcessResult {
+        try await FetchAdmission.processes.acquire()
         let spanId = await MainActor.run {
-            RefreshTracer.shared.beginSpan(
-                name: "CLI Spawn", category: "cli", tid: .cli,
-                args: [
-                    "subcommand": .string(subcommand.joined(separator: " ")),
-                    "timeout_s": .int(Int(timeoutSeconds)),
-                ]
-            )
+            RefreshTracer.shared.beginSpan(name: "CLI Spawn", category: "cli", tid: .cli)
         }
-
-        let process = ExeWatcherCLI.makeProcess(subcommand: subcommand)
-        let tempDir = FileManager.default.temporaryDirectory
-        let token = UUID().uuidString
-        let stdoutURL = tempDir.appendingPathComponent("exe-watcher-\(token).stdout")
-        let stderrURL = tempDir.appendingPathComponent("exe-watcher-\(token).stderr")
-
-        FileManager.default.createFile(atPath: stdoutURL.path, contents: nil, attributes: [.posixPermissions: 0o600])
-        FileManager.default.createFile(atPath: stderrURL.path, contents: nil, attributes: [.posixPermissions: 0o600])
-
-        let stdoutHandle: FileHandle
-        let stderrHandle: FileHandle
         do {
-            stdoutHandle = try FileHandle(forWritingTo: stdoutURL)
-            stderrHandle = try FileHandle(forWritingTo: stderrURL)
+            let runner = CLIProcessRunner(process: ExeWatcherCLI.makeProcess(subcommand: subcommand), timeout: Double(timeoutSeconds))
+            let result = try await runner.run()
+            await FetchAdmission.processes.release()
+            await MainActor.run { RefreshTracer.shared.endSpan(spanId, args: ["result": .string("exited")]) }
+            return ProcessResult(stdout: result.0, stderr: String(data: result.1, encoding: .utf8) ?? "", exitCode: result.2)
         } catch {
-            await MainActor.run {
-                RefreshTracer.shared.endSpan(spanId, args: ["result": .string("spawn_error")])
-            }
-            throw DataClientError.spawn(error.localizedDescription)
+            await FetchAdmission.processes.release()
+            await MainActor.run { RefreshTracer.shared.endSpan(spanId, args: ["result": .string("error")]) }
+            throw error
         }
+    }
+}
+
+/// Owns the child through exit/reap. Pipes bound output while the child is running;
+/// no unbounded temporary output files and no cancelled child left consuming CPU.
+final class CLIProcessRunner: @unchecked Sendable {
+    private let process: Process
+    private let timeout: Double
+    private let lock = NSLock()
+    private var cancelled = false
+    init(process: Process, timeout: Double) { self.process = process; self.timeout = timeout }
+    private func cancel() { lock.lock(); cancelled = true; lock.unlock() }
+    private var isCancelled: Bool { lock.lock(); defer { lock.unlock() }; return cancelled }
+
+    func run() async throws -> (Data, Data, Int32) {
+        try Task.checkCancellation()
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                DispatchQueue.global(qos: .utility).async {
+                    do { continuation.resume(returning: try self.execute()) }
+                    catch { continuation.resume(throwing: error) }
+                }
+            }
+        } onCancel: { self.cancel() }
+    }
+
+    private func execute() throws -> (Data, Data, Int32) {
+        if isCancelled { throw CancellationError() }
+        let stdout = Pipe(), stderr = Pipe()
         defer {
-            try? stdoutHandle.close()
-            try? stderrHandle.close()
-            try? FileManager.default.removeItem(at: stdoutURL)
-            try? FileManager.default.removeItem(at: stderrURL)
+            try? stdout.fileHandleForReading.close(); try? stdout.fileHandleForWriting.close()
+            try? stderr.fileHandleForReading.close(); try? stderr.fileHandleForWriting.close()
         }
-
-        process.standardOutput = stdoutHandle
-        process.standardError = stderrHandle
-
-        do {
-            try process.run()
-        } catch {
-            await MainActor.run {
-                RefreshTracer.shared.endSpan(spanId, args: ["result": .string("spawn_error")])
-            }
-            throw DataClientError.spawn(error.localizedDescription)
+        process.standardOutput = stdout
+        process.standardError = stderr
+        for pipe in [stdout, stderr] {
+            let fd = pipe.fileHandleForReading.fileDescriptor
+            _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK)
         }
-
-        await MainActor.run {
-            RefreshTracer.shared.instant(
-                name: "process_started", category: "cli", tid: .cli,
-                args: ["pid": .int(Int(process.processIdentifier))]
-            )
-        }
-
-        let didTimeOut = await waitForExitOrTimeout(process, timeoutSeconds: timeoutSeconds)
-        try? stdoutHandle.close()
-        try? stderrHandle.close()
-
-        if didTimeOut {
-            await MainActor.run {
-                RefreshTracer.shared.endSpan(spanId, args: [
-                    "result": .string("timeout"),
-                    "timeout_s": .int(Int(timeoutSeconds)),
-                ])
-            }
-            throw DataClientError.timeout(seconds: timeoutSeconds)
-        }
-
-        let out = try readFile(stdoutURL, limit: maxPayloadBytes)
-        if out.count >= maxPayloadBytes {
-            await MainActor.run {
-                RefreshTracer.shared.endSpan(spanId, args: ["result": .string("output_too_large")])
-            }
-            throw DataClientError.outputTooLarge
-        }
-
-        let err = try readFile(stderrURL, limit: maxStderrBytes)
-        let stderrString = String(data: err, encoding: .utf8) ?? ""
-
-        await MainActor.run {
-            RefreshTracer.shared.endSpan(spanId, args: [
-                "result": .string("success"),
-                "exit_code": .int(Int(process.terminationStatus)),
-                "stdout_bytes": .int(out.count),
-                "stderr_bytes": .int(err.count),
-            ])
-        }
-
-        return ProcessResult(stdout: out, stderr: stderrString, exitCode: process.terminationStatus)
-    }
-
-    /// Uses GCD for both exit detection and timeout enforcement. The previous implementation
-    /// polled `process.isRunning` with `Task.sleep`, which hangs indefinitely for accessory
-    /// apps because Swift's cooperative scheduler freely defers `.sleep` wakeups for
-    /// background/LSUIElement processes. `Process.terminationHandler` + `DispatchSourceTimer`
-    /// are wall-clock based and fire reliably regardless of app activation state.
-    private static func waitForExitOrTimeout(_ process: Process, timeoutSeconds: UInt64) async -> Bool {
-        await withCheckedContinuation { continuation in
-            // Both the termination handler and the timeout can fire — only the first one resumes.
-            let resumed = LockedFlag()
-
-            // --- Normal exit path (GCD callback, not Task.sleep) ---
-            process.terminationHandler = { _ in
-                if resumed.setIfFirst() {
-                    continuation.resume(returning: false)
+        do { try process.run() } catch { throw DataClientError.spawn(error.localizedDescription) }
+        try? stdout.fileHandleForWriting.close()
+        try? stderr.fileHandleForWriting.close()
+        let started = ProcessInfo.processInfo.systemUptime
+        var out = Data(), err = Data()
+        var failure: Error?
+        var stopAt: Double?
+        while true {
+            let now = ProcessInfo.processInfo.systemUptime
+            if failure == nil {
+                if isCancelled { failure = CancellationError() }
+                else if now - started >= timeout { failure = DataClientError.timeout(seconds: UInt64(timeout)) }
+                else {
+                    do {
+                        try drain(stdout.fileHandleForReading, into: &out, limit: maxPayloadBytes)
+                        try drain(stderr.fileHandleForReading, into: &err, limit: maxStderrBytes)
+                    } catch { failure = error }
                 }
             }
-
-            // --- Timeout path (GCD timer, not Task.sleep) ---
-            let timer = DispatchSource.makeTimerSource(queue: .global(qos: .userInitiated))
-            timer.schedule(deadline: .now() + Double(timeoutSeconds))
-            timer.setEventHandler {
-                timer.cancel()
-                guard resumed.setIfFirst() else { return }
-                process.terminate()
-                // Grace period: SIGKILL after 1s if SIGTERM didn't work.
-                DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 1) {
-                    if process.isRunning {
-                        kill(process.processIdentifier, SIGKILL)
-                    }
-                    process.waitUntilExit()
-                }
-                continuation.resume(returning: true)
+            if !process.isRunning { break }
+            if failure != nil {
+                if stopAt == nil { process.terminate(); stopAt = now }
+                else if now - stopAt! >= 0.2 { kill(process.processIdentifier, SIGKILL) }
             }
-            timer.resume()
+            Thread.sleep(forTimeInterval: 0.02)
         }
+        process.waitUntilExit()
+        if let failure { throw failure }
+        try drain(stdout.fileHandleForReading, into: &out, limit: maxPayloadBytes)
+        try drain(stderr.fileHandleForReading, into: &err, limit: maxStderrBytes)
+        if isCancelled { throw CancellationError() }
+        return (out, err, process.terminationStatus)
     }
 
-    /// Thread-safe one-shot flag. Guarantees a `withCheckedContinuation` is resumed exactly once
-    /// even when the termination handler and timeout fire on different queues near-simultaneously.
-    private final class LockedFlag: @unchecked Sendable {
-        private var flag = false
-        private let lock = NSLock()
-        /// Returns `true` on the first call, `false` on all subsequent calls.
-        func setIfFirst() -> Bool {
-            lock.lock()
-            defer { lock.unlock() }
-            if flag { return false }
-            flag = true
-            return true
+    private func drain(_ handle: FileHandle, into data: inout Data, limit: Int) throws {
+        var buffer = [UInt8](repeating: 0, count: 16 * 1024)
+        // Bound each pass so a continuously writing child cannot starve cancellation/timeout.
+        for _ in 0..<64 {
+            let count = Darwin.read(handle.fileDescriptor, &buffer, buffer.count)
+            if count < 0 {
+                if errno == EAGAIN || errno == EWOULDBLOCK { return }
+                if errno == EINTR { continue }
+                throw DataClientError.spawn("Could not read CLI output")
+            }
+            if count == 0 { return }
+            guard data.count + count <= limit else { throw DataClientError.outputTooLarge }
+            data.append(contentsOf: buffer.prefix(count))
         }
     }
-
-    private static func readFile(_ url: URL, limit: Int) throws -> Data {
-        let handle = try FileHandle(forReadingFrom: url)
-        defer { try? handle.close() }
-        var data = Data()
-        while data.count < limit {
-            let chunk = handle.readData(ofLength: min(64 * 1024, limit - data.count))
-            if chunk.isEmpty { break }
-            data.append(chunk)
-        }
-        return data
-    }
-
 }

@@ -303,9 +303,9 @@ struct CacheIsolationTests {
         #expect(store.payload.current.cost == 2)
     }
 
-    @Test("colliding fetch queues one-deep and re-fetches after in-flight completes")
+    @Test("colliding fetches share the current scan without a redundant follow-up")
     @MainActor
-    func pendingKeyRefire() async throws {
+    func pendingKeyDoesNotRefire() async throws {
         let counter = CallCounter()
         let gate = Gate()
 
@@ -323,21 +323,21 @@ struct CacheIsolationTests {
         }
         try await Task.sleep(nanoseconds: 10_000_000)
 
-        // Second fetch for the same key — should queue in pendingKeys, not drop.
+        // Additional same-key requests are served by the current fetch.
         await store.refresh(includeOptimize: false)
 
-        // Third fetch for the same key — pendingKeys is a Set, so this collapses with the second.
+        // Repeated demand must not create an immediate rescan.
         await store.refresh(includeOptimize: false)
 
-        // Release the gate — first fetch completes, then pending re-fetch fires automatically.
+        // Release the one fetch.
         await gate.open()
         _ = await firstFetch.value
 
-        // Allow the pending re-fetch Task to run.
+        // Ensure no delayed duplicate was enqueued.
         try await Task.sleep(nanoseconds: 50_000_000)
 
-        // Exactly 2 fetches: the original + one queued re-fetch (not 3).
-        #expect(await counter.value() == 2)
-        #expect(store.payload.current.cost == 2)
+        // Exactly one fetch, including after the collision window.
+        #expect(await counter.value() == 1)
+        #expect(store.payload.current.cost == 1)
     }
 }

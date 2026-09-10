@@ -1,3 +1,6 @@
+import { getCacheDir } from './cache-dir.js'
+import { acquireFileLock } from './file-lock.js'
+import { ResourceBudgetError } from './resource-budget.js'
 import { existsSync, readFileSync, statSync } from 'fs'
 import { join } from 'path'
 import { homedir } from 'os'
@@ -388,9 +391,9 @@ program
       const cache = await withDailyCacheLock(async () => {
         let c = await loadDailyCache(dailyCacheScope)
 
-        // Evict yesterday (and any stale future entries) so the gap fill recomputes them.
+        // Revalidate late-arriving historical usage at most once every five minutes.
         const hadYesterday = c.days.some(d => d.date >= yesterdayStr)
-        if (hadYesterday) {
+        if (hadYesterday && (!c.revalidatedAt || Date.now() - c.revalidatedAt >= 5 * 60_000)) {
           const freshDays = c.days.filter(d => d.date < yesterdayStr)
           const latestFresh = freshDays.length > 0 ? freshDays[freshDays.length - 1]?.date ?? null : null
           c = { ...c, days: freshDays, lastComputedDate: latestFresh }
@@ -420,6 +423,7 @@ program
           // Don't advance lastComputedDate for backward fills
           const coveredThrough = gapEnd.getTime() >= yesterdayEnd.getTime() ? yesterdayStr : undefined
           c = addNewDays(c, gapDays, yesterdayStr, coveredThrough ? { coveredThrough } : undefined)
+          c.revalidatedAt = Date.now()
           await saveDailyCache(c)
         }
 
@@ -438,6 +442,7 @@ program
             const backProjects = filterProjectsByName(await parseAllSessions(backRange, 'all'), opts.project, opts.exclude)
             const backDays = fillMissingDays(backRange.start, backRange.end, aggregateProjectsIntoDays(backProjects))
             c = addNewDays(c, backDays, yesterdayStr)
+            c.revalidatedAt = Date.now()
             await saveDailyCache(c)
           }
         }
@@ -461,6 +466,7 @@ program
         allTodayProjects = await parseAllSessions(todayRange, 'all')
         todayProjects = fp(allTodayProjects)
       } catch (err: unknown) {
+        if (err instanceof ResourceBudgetError) throw err
         const msg = err instanceof Error ? err.message : String(err)
         const warn = `parseAllSessions failed: ${msg}`
         warnings.push(warn)
@@ -600,6 +606,7 @@ program
             : fp(await parseAllSessions(scanRange, isAllProviders ? 'all' : pf))
           optimize = await scanAndDetect(optimizeProjects, scanRange)
         } catch (err: unknown) {
+          if (err instanceof ResourceBudgetError) throw err
           const msg = err instanceof Error ? err.message : String(err)
           const warn = `optimize parse failed: ${msg}`
           warnings.push(warn)
@@ -625,6 +632,7 @@ program
           }
         }
       } catch (err: unknown) {
+        if (err instanceof ResourceBudgetError) throw err
         const msg = err instanceof Error ? err.message : String(err)
         process.stderr.write(`[exe-watcher] agent-stats.json found but failed to parse: ${msg}\n`)
       }
@@ -1063,6 +1071,7 @@ program
           lines.push(`agent-stats.json:  ✗ invalid schema`)
         }
       } catch (err: unknown) {
+        if (err instanceof ResourceBudgetError) throw err
         const msg = err instanceof Error ? err.message : String(err)
         lines.push(`agent-stats.json:  ✗ parse error: ${msg}`)
       }
@@ -1070,6 +1079,14 @@ program
 
     console.log(lines.join('\n'))
   })
+
+// One menubar ingestion owner across processes. Queueing and dead-owner recovery
+// are bounded; cancellation leaves a PID lease that the next launch can reclaim.
+let releaseScan: (() => Promise<void>) | undefined
+program.hook('preAction', async (_root, command) => {
+  if (command.name() === 'status') releaseScan = await acquireFileLock(join(getCacheDir(), 'scan.lock'))
+})
+program.hook('postAction', async () => { await releaseScan?.(); releaseScan = undefined })
 
 // Default action: install menubar app on macOS when no subcommand given
 if (process.argv.length <= 2 && process.platform === 'darwin') {
@@ -1094,5 +1111,9 @@ if (process.argv.length <= 2 && process.platform === 'darwin') {
     })
   }
 } else {
-  program.parse()
+  program.parseAsync().catch(async error => {
+    await releaseScan?.()
+    console.error(error instanceof Error ? error.message : String(error))
+    process.exitCode = 1
+  })
 }

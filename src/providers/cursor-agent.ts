@@ -1,3 +1,5 @@
+import { ResourceBudgetError } from '../resource-budget.js'
+import { readSessionFile } from '../fs-utils.js'
 import { createHash } from 'crypto'
 import { existsSync } from 'fs'
 import { readdir, readFile, stat } from 'fs/promises'
@@ -294,13 +296,15 @@ function createParser(
                 }
                 summariesByConversationId[conversationId] = summary
               }
-            } catch {
+            } catch (error) {
+              if (error instanceof ResourceBudgetError) throw error
               summary = undefined
             }
           }
         }
 
-        const transcript = await readFile(source.path, 'utf-8')
+        const transcript = await readSessionFile(source.path)
+        if (transcript === null) return
         const parsed = parseTranscript(transcript)
 
         if (!parsed.recognized) {

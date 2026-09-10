@@ -62,12 +62,13 @@ final class AppStore {
     private let now: AppStoreDateProvider
     private var cache: [PayloadCacheKey: CachedPayload] = [:]
     private var errorsByKey: [PayloadCacheKey: String] = [:]
+    private var retryAfter: [PayloadCacheKey: Date] = [:]
+    private var failureCounts: [PayloadCacheKey: Int] = [:]
 
     /// Badge has its own dedicated fetch slot so detail/prefetch fetches can never starve it.
-    private var badgeInFlight: Bool = false
-    /// One-deep queue: when inFlightKeys blocks a refresh, mark the key as pending so it
-    /// re-fetches immediately after the current inflight completes.
-    private var pendingKeys: Set<PayloadCacheKey> = []
+    private let badgeAdmission = FetchAdmission(limit: 1)
+    private let detailAdmission = FetchAdmission(limit: 1)
+    private var fetchTasks: [PayloadCacheKey: Task<MenubarPayload, Error>] = [:]
     /// Handle to the most recent prefetch Task so we can cancel it before spawning a new one.
     private var activePrefetchTask: Task<Void, Never>?
     /// Incremented when macOS resumes/unlocks and we intentionally discard stale in-flight
@@ -242,10 +243,9 @@ final class AppStore {
             ]
         )
         refreshGeneration &+= 1
-        badgeInFlight = false
-        inFlightKeys.removeAll()
-        pendingKeys.removeAll()
-        activeFetchCount = 0
+        // Keep ownership until cancelled work actually exits; old completions cannot
+        // clear a new generation's guards or admit another child prematurely.
+        for task in fetchTasks.values { task.cancel() }
         activePrefetchTask?.cancel()
         activePrefetchTask = nil
     }
@@ -260,68 +260,31 @@ final class AppStore {
         await refreshKey(target, includeOptimize: includeOptimize)
     }
 
-    /// Force-refresh the always-visible menu bar badge. This intentionally bypasses the 30s
-    /// cache TTL: the timer also runs every 30s, and small scheduling jitter can otherwise make
-    /// a tick land just before TTL expiry and skip the fetch, causing the badge to appear stuck
-    /// or update every other tick during active sessions.
-    /// Timestamp-based guard: prevents concurrent CLI spawns that pile up and hang.
-    /// Unlike the old boolean flag, this uses a timestamp so it auto-expires after 20s
-    /// even if the previous fetch never returned.
-    private var badgeFetchStartedAt: Date = .distantPast
-    private static let badgeFetchGuardSeconds: TimeInterval = 20
-
+    /// Badge and detail requests share same-key ownership. The reserved badge lane
+    /// remains within the total two-fetch budget instead of bypassing accounting.
     func refreshTodayBadge() async {
         let target = key(period: .today, provider: .all, includeOptimize: false)
         lastBadgeRefreshAttemptAt = now()
-
-        // Prevent concurrent CLI spawns. Auto-expires after 20s so it can never permanently stick.
-        let elapsed = now().timeIntervalSince(badgeFetchStartedAt)
-        if elapsed < Self.badgeFetchGuardSeconds {
-            watcherLog("BADGE skipped (fetch running for \(String(format: "%.0f", elapsed))s)")
-            return
-        }
-
-        badgeFetchStartedAt = now()
-        defer { badgeFetchStartedAt = .distantPast }
-        let spanId = RefreshTracer.shared.beginSpan(
-            name: "Badge Refresh", category: "refresh", tid: .refresh,
-            args: ["period": .string("today"), "provider": .string("all")]
-        )
-        watcherLog("BADGE fetch starting...")
-        do {
-            let fresh = try await fetchPayload(target.period, target.provider, false)
-            cache[target] = CachedPayload(payload: fresh, fetchedAt: now())
-            errorsByKey[target] = nil
+        guard !inFlightKeys.contains(target) else { return }
+        let success = await refreshKey(target, includeOptimize: false)
+        if success {
             lastBadgeRefreshSuccessAt = now()
             lastBadgeRefreshError = nil
-            watcherLog("BADGE fetch success — cost=$\(String(format: "%.2f", fresh.current.cost))")
-            RefreshTracer.shared.endSpan(spanId, args: [
-                "result": .string("success"),
-                "cost": .double(fresh.current.cost),
-            ])
-            healthMonitor?.recordFetchResult(success: true)
-        } catch {
-            let desc = Self.describe(error: error)
-            errorsByKey[target] = desc
-            lastBadgeRefreshError = desc
-            watcherLog("BADGE fetch FAILED: \(desc)")
-            RefreshTracer.shared.endSpan(spanId, args: [
-                "result": .string("error"),
-                "error": .string(desc),
-            ])
-            healthMonitor?.recordFetchResult(success: false)
+        } else if let error = errorsByKey[target] {
+            lastBadgeRefreshError = error
         }
     }
 
     @discardableResult
     private func refreshKey(_ key: PayloadCacheKey, includeOptimize: Bool) async -> Bool {
         guard !inFlightKeys.contains(key) else {
-            // One-deep queue: mark for re-fetch when the current inflight completes.
-            pendingKeys.insert(key)
+            // The running request already serves this key; never queue an identical scan.
             return false
         }
+        // Shared by timer, filesystem, wake, prefetch and health-recovery paths.
+        // A permanently failing input must not consume a full scan budget every tick.
+        if let deadline = retryAfter[key], now() < deadline { return false }
         inFlightKeys.insert(key)
-        activeFetchCount += 1
         let generation = refreshGeneration
         // Clear stale error on retry start so the UI shows "loading" instead of a stale error.
         errorsByKey[key] = nil
@@ -334,36 +297,62 @@ final class AppStore {
                 "include_optimize": .bool(includeOptimize),
             ]
         )
+        let isBadge = key.period == .today && key.provider == .all && !includeOptimize
+        let admission = isBadge ? badgeAdmission : detailAdmission
+        let fetcher = fetchPayload
+        let task = Task<MenubarPayload, Error> {
+            try await admission.acquire()
+            do {
+                try Task.checkCancellation()
+                self.activeFetchCount += 1
+                defer { self.activeFetchCount -= 1 }
+                let result = try await fetcher(key.period, key.provider, includeOptimize)
+                try Task.checkCancellation()
+                await admission.release()
+                return result
+            } catch {
+                await admission.release()
+                throw error
+            }
+        }
+        fetchTasks[key] = task
         defer {
-            // ALWAYS clean up in-flight state. The generation check must only gate
-            // cache writes, not cleanup — otherwise a generation bump during a fetch
-            // permanently locks the key in inFlightKeys.
             inFlightKeys.remove(key)
-            activeFetchCount = max(0, activeFetchCount - 1)
-            if generation == refreshGeneration {
-                if pendingKeys.remove(key) != nil {
-                    Task { @MainActor in
-                        await self.refreshKey(key, includeOptimize: includeOptimize)
-                    }
+            fetchTasks.removeValue(forKey: key)
+            if generation != refreshGeneration && (isBadge || key == currentBaseKey) {
+                Task { @MainActor in
+                    if isBadge { await self.refreshTodayBadge() }
+                    else { await self.refreshVisibleSelection() }
                 }
             }
         }
         do {
-            let fresh = try await fetchPayload(key.period, key.provider, includeOptimize)
+            let fresh = try await withTaskCancellationHandler {
+                try await task.value
+            } onCancel: { task.cancel() }
             guard generation == refreshGeneration else {
                 RefreshTracer.shared.endSpan(spanId, args: ["result": .string("generation_mismatch")])
                 return false
             }
+            failureCounts.removeValue(forKey: key)
+            retryAfter.removeValue(forKey: key)
             cache[key] = CachedPayload(payload: fresh, fetchedAt: now())
             errorsByKey[key] = nil
             RefreshTracer.shared.endSpan(spanId, args: ["result": .string("success")])
             healthMonitor?.recordFetchResult(success: true)
             return true
         } catch {
+            if error is CancellationError {
+                RefreshTracer.shared.endSpan(spanId, args: ["result": .string("cancelled")])
+                return false
+            }
             guard generation == refreshGeneration else {
                 RefreshTracer.shared.endSpan(spanId, args: ["result": .string("generation_mismatch")])
                 return false
             }
+            let failures = min((failureCounts[key] ?? 0) + 1, 5)
+            failureCounts[key] = failures
+            retryAfter[key] = now().addingTimeInterval(min(300, 30 * pow(2, Double(failures - 1))))
             errorsByKey[key] = Self.describe(error: error)
             NSLog("Exe Watcher: fetch failed for \(key.period.rawValue)/\(key.provider.rawValue): \(error)")
             RefreshTracer.shared.endSpan(spanId, args: [
@@ -381,6 +370,7 @@ final class AppStore {
 
     /// Refresh payload for key only when missing or stale.
     private func refreshIfNeeded(_ key: PayloadCacheKey, includeOptimize: Bool) async {
+        guard !Task.isCancelled else { return }
         guard !isFresh(key) else { return }
         await refreshKey(key, includeOptimize: includeOptimize)
     }

@@ -54,3 +54,12 @@ jobs:
             jq -r '.results[] | "::error file=\(.path),line=\(.start.line)::\(.extra.message)"' semgrep-out.json
             exit 1
           fi
+
+  macos-resource-tests:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Scheduler, cancellation, output budgets, and cache isolation
+        run: swift test --package-path mac --filter ExeWatcherMenubarTests
+      - name: Build and verify signed macOS package
+        run: mac/Scripts/package-app.sh ci

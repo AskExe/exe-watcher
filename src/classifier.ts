@@ -15,6 +15,23 @@ const FILE_PATTERNS = /\.(py|js|ts|tsx|jsx|json|yaml|yml|toml|sql|sh|go|rs|java|
 const SCRIPT_PATTERNS = /\b(run\s+\S+\.\w+|execute|scrip?t|curl|api\s+\S+|endpoint|request\s+url|fetch\s+\S+|query|database|db\s+\S+)\b/i
 const URL_PATTERN = /https?:\/\/\S+/i
 
+const MESSAGE_PATTERNS = [TEST_PATTERNS, GIT_PATTERNS, BUILD_PATTERNS, INSTALL_PATTERNS,
+  DEBUG_KEYWORDS, FEATURE_KEYWORDS, REFACTOR_KEYWORDS, BRAINSTORM_KEYWORDS,
+  RESEARCH_KEYWORDS, FILE_PATTERNS, SCRIPT_PATTERNS, URL_PATTERN]
+
+/** Preserve every classifier signal from the full prompt without retaining megabytes
+ * of agent instructions in every cached turn. Prefix is for display only. */
+export function compactUserMessage(text: string, signals?: number): { userMessage: string; userMessageSignals: number } {
+  return {
+    userMessage: Buffer.from(text.slice(0, 512)).toString('utf8'),
+    userMessageSignals: signals ?? MESSAGE_PATTERNS.reduce((mask, pattern, index) => mask | (pattern.test(text) ? 1 << index : 0), 0),
+  }
+}
+function messageMatches(turn: ParsedTurn, pattern: RegExp): boolean {
+  return turn.userMessageSignals === undefined ? pattern.test(turn.userMessage)
+    : (turn.userMessageSignals & (1 << MESSAGE_PATTERNS.indexOf(pattern))) !== 0
+}
+
 const EDIT_TOOLS = new Set(['Edit', 'Write', 'FileEditTool', 'FileWriteTool', 'NotebookEdit', 'cursor:edit'])
 const READ_TOOLS = new Set(['Read', 'Grep', 'Glob', 'FileReadTool', 'GrepTool', 'GlobTool'])
 export const BASH_TOOLS = new Set(['Bash', 'BashTool', 'PowerShellTool'])
@@ -69,11 +86,10 @@ function classifyByToolPattern(turn: ParsedTurn): TaskCategory | null {
   const hasSkill = hasSkillTool(tools)
 
   if (hasBash && !hasEdits) {
-    const userMsg = turn.userMessage
-    if (TEST_PATTERNS.test(userMsg)) return 'testing'
-    if (GIT_PATTERNS.test(userMsg)) return 'devops'
-    if (BUILD_PATTERNS.test(userMsg)) return 'devops'
-    if (INSTALL_PATTERNS.test(userMsg)) return 'devops'
+    if (messageMatches(turn, TEST_PATTERNS)) return 'testing'
+    if (messageMatches(turn, GIT_PATTERNS)) return 'devops'
+    if (messageMatches(turn, BUILD_PATTERNS)) return 'devops'
+    if (messageMatches(turn, INSTALL_PATTERNS)) return 'devops'
   }
 
   if (hasEdits) return 'building'
@@ -89,28 +105,28 @@ function classifyByToolPattern(turn: ParsedTurn): TaskCategory | null {
   return null
 }
 
-function refineByKeywords(category: TaskCategory, userMessage: string): TaskCategory {
+function refineByKeywords(category: TaskCategory, turn: ParsedTurn): TaskCategory {
   if (category === 'building') {
-    if (DEBUG_KEYWORDS.test(userMessage)) return 'debugging'
+    if (messageMatches(turn, DEBUG_KEYWORDS)) return 'debugging'
     return 'building'
   }
 
   if (category === 'research') {
-    if (DEBUG_KEYWORDS.test(userMessage)) return 'debugging'
+    if (messageMatches(turn, DEBUG_KEYWORDS)) return 'debugging'
     return 'research'
   }
 
   return category
 }
 
-function classifyConversation(userMessage: string): TaskCategory {
-  if (BRAINSTORM_KEYWORDS.test(userMessage)) return 'research'
-  if (RESEARCH_KEYWORDS.test(userMessage)) return 'research'
-  if (DEBUG_KEYWORDS.test(userMessage)) return 'debugging'
-  if (FEATURE_KEYWORDS.test(userMessage)) return 'building'
-  if (FILE_PATTERNS.test(userMessage)) return 'building'
-  if (SCRIPT_PATTERNS.test(userMessage)) return 'building'
-  if (URL_PATTERN.test(userMessage)) return 'research'
+function classifyConversation(turn: ParsedTurn): TaskCategory {
+  if (messageMatches(turn, BRAINSTORM_KEYWORDS)) return 'research'
+  if (messageMatches(turn, RESEARCH_KEYWORDS)) return 'research'
+  if (messageMatches(turn, DEBUG_KEYWORDS)) return 'debugging'
+  if (messageMatches(turn, FEATURE_KEYWORDS)) return 'building'
+  if (messageMatches(turn, FILE_PATTERNS)) return 'building'
+  if (messageMatches(turn, SCRIPT_PATTERNS)) return 'building'
+  if (messageMatches(turn, URL_PATTERN)) return 'research'
   return 'research'
 }
 
@@ -146,13 +162,13 @@ export function classifyTurn(turn: ParsedTurn): ClassifiedTurn {
   let category: TaskCategory
 
   if (tools.length === 0) {
-    category = classifyConversation(turn.userMessage)
+    category = classifyConversation(turn)
   } else {
     const toolCategory = classifyByToolPattern(turn)
     if (toolCategory) {
-      category = refineByKeywords(toolCategory, turn.userMessage)
+      category = refineByKeywords(toolCategory, turn)
     } else {
-      category = classifyConversation(turn.userMessage)
+      category = classifyConversation(turn)
     }
   }
 

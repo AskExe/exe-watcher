@@ -2,13 +2,14 @@ import { readFile, mkdir, stat, rename } from 'fs/promises'
 import { open } from 'fs/promises'
 import { join } from 'path'
 import { randomBytes } from 'crypto'
+import { getPricingFingerprint } from './models.js'
+import { chargeRead, ResourceBudgetError } from './resource-budget.js'
 
 import { getCacheDir } from './cache-dir.js'
 import type { ParsedProviderCall } from './providers/types.js'
 
 type ResultCache = {
-  dbMtimeMs: number
-  dbSizeBytes: number
+  fingerprint: string
   calls: ParsedProviderCall[]
 }
 
@@ -18,13 +19,12 @@ function getCachePath(): string {
   return join(getCacheDir(), CACHE_FILE)
 }
 
-async function getDbFingerprint(dbPath: string): Promise<{ mtimeMs: number; size: number } | null> {
+export async function getDbFingerprint(dbPath: string): Promise<string | null> {
   try {
     const s = await stat(dbPath)
-    return { mtimeMs: s.mtimeMs, size: s.size }
-  } catch {
-    return null
-  }
+    const wal = await stat(`${dbPath}-wal`).catch(() => null)
+    return [dbPath, s.dev, s.ino, s.ctimeMs, s.mtimeMs, s.size, wal?.ino, wal?.ctimeMs, wal?.mtimeMs, wal?.size, getPricingFingerprint()].join(':')
+  } catch { return null }
 }
 
 export async function readCachedResults(dbPath: string): Promise<ParsedProviderCall[] | null> {
@@ -32,35 +32,40 @@ export async function readCachedResults(dbPath: string): Promise<ParsedProviderC
     const fp = await getDbFingerprint(dbPath)
     if (!fp) return null
 
+    const size = (await stat(getCachePath())).size
+    if (size > 16 * 1024 * 1024) return null
+    chargeRead(size)
     const raw = await readFile(getCachePath(), 'utf-8')
     const cache = JSON.parse(raw) as ResultCache
 
-    if (cache.dbMtimeMs === fp.mtimeMs && cache.dbSizeBytes === fp.size) {
+    if (cache.fingerprint === fp) {
       return cache.calls
     }
     return null
-  } catch {
+  } catch (err) {
+    if (err instanceof ResourceBudgetError) throw err
     return null
   }
 }
 
-export async function writeCachedResults(dbPath: string, calls: ParsedProviderCall[]): Promise<void> {
+export async function writeCachedResults(dbPath: string, calls: ParsedProviderCall[], expected?: string | null): Promise<void> {
   try {
     const fp = await getDbFingerprint(dbPath)
-    if (!fp) return
+    if (!fp || (expected !== undefined && expected !== fp)) return
 
     const dir = getCacheDir()
     await mkdir(dir, { recursive: true })
     const cache: ResultCache = {
-      dbMtimeMs: fp.mtimeMs,
-      dbSizeBytes: fp.size,
+      fingerprint: fp,
       calls,
     }
+    const payload = JSON.stringify(cache)
+    if (Buffer.byteLength(payload) > 16 * 1024 * 1024) return
     const finalPath = getCachePath()
     const tmpPath = `${finalPath}.${randomBytes(8).toString('hex')}.tmp`
     const handle = await open(tmpPath, 'w', 0o600)
     try {
-      await handle.writeFile(JSON.stringify(cache), { encoding: 'utf-8' })
+      await handle.writeFile(payload, { encoding: 'utf-8' })
       await handle.sync()
     } finally {
       await handle.close()

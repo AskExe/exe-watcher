@@ -64,6 +64,7 @@ export type DailyCache = {
   scopeKey: string
   lastComputedDate: string | null
   days: DailyEntry[]
+  revalidatedAt?: number
 }
 
 type AddNewDaysOptions = {
@@ -125,6 +126,7 @@ export async function saveDailyCache(cache: DailyCache): Promise<void> {
   const finalPath = getCachePath(scopeKey)
   const tempPath = `${finalPath}.${randomBytes(8).toString('hex')}.tmp`
   const payload = JSON.stringify({ ...cache, scopeKey })
+  if (await readFile(finalPath, 'utf8').catch(() => '') === payload) return
   const handle = await open(tempPath, 'w', 0o600)
   try {
     await handle.writeFile(payload, { encoding: 'utf-8' })
@@ -160,6 +162,7 @@ export function addNewDays(
     scopeKey: cache.scopeKey || DEFAULT_DAILY_CACHE_SCOPE,
     lastComputedDate: nextLast,
     days: merged,
+    revalidatedAt: cache.revalidatedAt,
   }
 }
 
