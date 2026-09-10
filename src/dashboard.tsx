@@ -1,10 +1,12 @@
+import { LatestLoad } from './latest-load.js'
+import { withScanBudget } from './resource-budget.js'
 import { homedir } from 'os'
 
 import React, { useState, useCallback, useEffect, useRef } from 'react'
 import { render, Box, Text, useInput, useApp, useWindowSize } from 'ink'
 import { CATEGORY_LABELS, type DateRange, type ProjectSummary, type TaskCategory } from './types.js'
 import { formatCost, formatTokens } from './format.js'
-import { parseAllSessions, filterProjectsByName } from './parser.js'
+import { parseAllSessions, filterProjectsByName, getDiscoveredProviderNames } from './parser.js'
 import { loadPricing } from './models.js'
 import { getAllProviders } from './providers/index.js'
 import { scanAndDetect, type WasteFinding, type WasteAction, type OptimizeResult } from './optimize.js'
@@ -259,6 +261,13 @@ function DailyActivity({ projects, days = 14, pw, bw }: { projects: ProjectSumma
   const dailyCalls: Record<string, number> = {}
   for (const project of projects) {
     for (const session of project.sessions) {
+      if (session.reportSummary) {
+        for (const [day, row] of Object.entries(session.reportSummary.daily)) {
+          dailyCosts[day] = (dailyCosts[day] ?? 0) + row.cost
+          dailyCalls[day] = (dailyCalls[day] ?? 0) + row.calls
+        }
+        continue
+      }
       for (const turn of session.turns) {
         if (!turn.timestamp) continue
         const day = dateKey(turn.timestamp)
@@ -605,8 +614,8 @@ function StatusBar({ width, showProvider, view, findingCount, optimizeAvailable,
         <Text color={ORANGE} bold>3</Text><Text dimColor> 30 days   </Text>
         <Text color={ORANGE} bold>4</Text><Text dimColor> month   </Text>
         <Text color={ORANGE} bold>5</Text><Text dimColor> all time</Text>
-        {!isOptimize && optimizeAvailable && findingCount != null && findingCount > 0 && (
-          <><Text dimColor>   </Text><Text color={ORANGE} bold>o</Text><Text dimColor> optimize</Text><Text color="#DC2626"> ({findingCount})</Text></>
+        {!isOptimize && optimizeAvailable && (
+          <><Text dimColor>   </Text><Text color={ORANGE} bold>o</Text><Text dimColor> optimize</Text>{findingCount ? <Text color="#DC2626"> ({findingCount})</Text> : null}</>
         )}
         {!isOptimize && compareAvailable && (
           <><Text dimColor>   </Text><Text color={ORANGE} bold>c</Text><Text dimColor> compare</Text></>
@@ -655,6 +664,10 @@ function InteractiveDashboard({ initialPeriod, initialProvider, refreshSeconds, 
   const [projects, setProjects] = useState<ProjectSummary[]>([])
   const [initialLoading, setInitialLoading] = useState(true)
   const [loading, setLoading] = useState(false)
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const loader = useRef(new LatestLoad())
+  const retryAt = useRef(0)
+  const failures = useRef(0)
   const [activeProvider, setActiveProvider] = useState(initialProvider)
   const [detectedProviders, setDetectedProviders] = useState<string[]>([])
   const [view, setView] = useState<View>('dashboard')
@@ -681,35 +694,10 @@ function InteractiveDashboard({ initialPeriod, initialProvider, refreshSeconds, 
     return () => clearInterval(id)
   }, [initialLoading])
 
-  // Initial data load — runs once on mount
+  // Use the same serialized loader for startup, period changes and timer refreshes.
   useEffect(() => {
-    let cancelled = false
-    async function boot() {
-      await loadPricing()
-      if (cancelled) return
-      const range = getDateRange(initialPeriod)
-      const data = await parseAllSessions(range, initialProvider)
-      if (cancelled) return
-      const filtered = filterProjectsByName(data, projectFilter, excludeFilter)
-      setProjects(filtered)
-      const usage = await getPlanUsageOrNull()
-      if (cancelled) return
-      setPlanUsage(usage ?? undefined)
-      setInitialLoading(false)
-    }
-    boot()
-    return () => { cancelled = true }
-  }, [])
-
-  useEffect(() => {
-    let cancelled = false
-    async function detect() {
-      const found: string[] = []
-      for (const p of await getAllProviders()) { const s = await p.discoverSessions(); if (s.length > 0) found.push(p.name) }
-      if (!cancelled) setDetectedProviders(found)
-    }
-    detect()
-    return () => { cancelled = true }
+    void reloadData(initialPeriod, initialProvider)
+    return () => { loader.current.cancel(); if (debounceRef.current) clearTimeout(debounceRef.current) }
   }, [])
 
   useEffect(() => {
@@ -725,50 +713,57 @@ function InteractiveDashboard({ initialPeriod, initialProvider, refreshSeconds, 
       }
       if (!cancelled) setProjectBudgets(budgets)
     }
-    loadBudgets()
+    void loadBudgets().catch(() => {})
     return () => { cancelled = true }
   }, [projects])
 
   useEffect(() => {
-    if (!optimizeAvailable) { setOptimizeResult(null); return }
+    if (!optimizeAvailable || view !== 'optimize' || loading || initialLoading || loadError) { setOptimizeResult(null); return }
     let cancelled = false
+    const controller = new AbortController()
     async function scan() {
       if (projects.length === 0) { setOptimizeResult(null); return }
-      const result = await scanAndDetect(projects, getDateRange(period))
-      if (!cancelled) setOptimizeResult(result)
+      const result = await loader.current.run(signal => withScanBudget(() => scanAndDetect(projects, getDateRange(period)), 200_000, AbortSignal.any([signal, controller.signal])))
+      if (!cancelled && result) setOptimizeResult(result)
     }
-    scan()
-    return () => { cancelled = true }
-  }, [projects, period, optimizeAvailable])
+    void scan().catch(error => { if (!cancelled) setLoadError(error instanceof Error ? error.message : String(error)) })
+    return () => { cancelled = true; controller.abort() }
+  }, [projects, period, optimizeAvailable, view, loading, initialLoading, loadError])
 
   const reloadData = useCallback(async (p: Period, prov: string) => {
     const generation = ++reloadGenerationRef.current
     setLoading(true)
     setOptimizeResult(null)
     try {
-      const range = getDateRange(p)
-      const data = await parseAllSessions(range, prov)
-      if (reloadGenerationRef.current !== generation) return
-
-      const filteredProjects = filterProjectsByName(data, projectFilter, excludeFilter)
-      if (reloadGenerationRef.current !== generation) return
-
-      setProjects(filteredProjects)
-      const usage = await getPlanUsageOrNull()
-      if (reloadGenerationRef.current !== generation) return
-      setPlanUsage(usage ?? undefined)
+      setLoadError(null)
+      const result = await loader.current.run(async signal => {
+        await loadPricing()
+        const data = await parseAllSessions(getDateRange(p), prov, true, signal)
+        if (signal.aborted) return undefined
+        return { projects: filterProjectsByName(data, projectFilter, excludeFilter), usage: await getPlanUsageOrNull(), providers: getDiscoveredProviderNames() }
+      })
+      if (!result || reloadGenerationRef.current !== generation) return
+      setProjects(result.projects)
+      setDetectedProviders(result.providers)
+      setPlanUsage(result.usage ?? undefined)
+      failures.current = 0
+      retryAt.current = 0
     } catch (error) {
-      console.error(error)
+      if (reloadGenerationRef.current === generation) {
+        setLoadError(error instanceof Error ? error.message : String(error))
+        retryAt.current = Date.now() + Math.min(300_000, 30_000 * 2 ** Math.min(failures.current++, 4))
+      }
     } finally {
       if (reloadGenerationRef.current === generation) {
         setLoading(false)
+        setInitialLoading(false)
       }
     }
   }, [projectFilter, excludeFilter])
 
   useEffect(() => {
     if (!refreshSeconds || refreshSeconds <= 0) return
-    const id = setInterval(() => { reloadData(period, activeProvider) }, refreshSeconds * 1000)
+    const id = setInterval(() => { if (!loader.current.busy && Date.now() >= retryAt.current) void reloadData(period, activeProvider) }, refreshSeconds * 1000)
     return () => clearInterval(id)
   }, [refreshSeconds, period, activeProvider, reloadData])
 
@@ -787,9 +782,10 @@ function InteractiveDashboard({ initialPeriod, initialProvider, refreshSeconds, 
   }, [period, activeProvider, reloadData])
 
   useInput((input, key) => {
-    if (input === 'q') { exit(); return }
-    if (input === 'o' && findingCount > 0 && view === 'dashboard' && optimizeAvailable) { setView('optimize'); return }
-    if ((input === 'b' || key.escape) && view === 'optimize') { setView('dashboard'); return }
+    if (input === 'q') { loader.current.cancel(); exit(); return }
+    if (input === 'r') { void reloadData(period, activeProvider); return }
+    if (input === 'o' && view === 'dashboard' && optimizeAvailable) { setView('optimize'); return }
+    if ((input === 'b' || key.escape) && view === 'optimize') { setLoadError(null); setView('dashboard'); return }
     if (input === 'c' && compareAvailable && view === 'dashboard') { setView('compare'); return }
     if (input === 'p' && multipleProviders && view !== 'compare') {
       const opts = ['all', ...detectedProviders]; const next = opts[(opts.indexOf(activeProvider) + 1) % opts.length] ?? 'all'
@@ -809,6 +805,16 @@ function InteractiveDashboard({ initialPeriod, initialProvider, refreshSeconds, 
 
   if (initialLoading) {
     return <LoadingScreen width={dashWidth} dots={loadingDots} />
+  }
+
+  if (loadError && !loading) {
+    return <Box flexDirection="column" width={dashWidth}>
+      <PeriodTabs active={period} providerName={activeProvider} />
+      <Panel title="Report could not refresh" color={ORANGE} width={dashWidth}>
+        <Text>{loadError}</Text>
+        <Text dimColor>Press r to retry, 1–5 to change period, or q to quit.</Text>
+      </Panel>
+    </Box>
   }
 
   if (loading) {
@@ -836,7 +842,9 @@ function InteractiveDashboard({ initialPeriod, initialProvider, refreshSeconds, 
         ? <CompareView projects={projects} onBack={() => setView('dashboard')} />
         : view === 'optimize' && optimizeResult
           ? <OptimizeView findings={optimizeResult.findings} costRate={optimizeResult.costRate} projects={projects} label={PERIOD_LABELS[period]} width={dashWidth} healthScore={optimizeResult.healthScore} healthGrade={optimizeResult.healthGrade} />
-          : <DashboardContent projects={projects} period={period} columns={columns} activeProvider={activeProvider} budgets={projectBudgets} planUsage={planUsage} />}
+          : view === 'optimize'
+            ? <Panel title="Optimization" color={ORANGE} width={dashWidth}><Text>Scanning…</Text></Panel>
+            : <DashboardContent projects={projects} period={period} columns={columns} activeProvider={activeProvider} budgets={projectBudgets} planUsage={planUsage} />}
       {view !== 'compare' && <StatusBar width={dashWidth} showProvider={multipleProviders} view={view} findingCount={findingCount} optimizeAvailable={optimizeAvailable} compareAvailable={compareAvailable} />}
     </Box>
   )
@@ -866,7 +874,7 @@ export async function renderDashboard(period: Period = 'week', provider: string 
     // Non-TTY (piped) — must load synchronously before rendering once.
     await loadPricing()
     const range = customRange ?? getDateRange(period)
-    const filteredProjects = filterProjectsByName(await parseAllSessions(range, provider), projectFilter, excludeFilter)
+    const filteredProjects = filterProjectsByName(await parseAllSessions(range, provider, true), projectFilter, excludeFilter)
     const planUsage = await getPlanUsageOrNull()
     const { unmount } = render(<StaticDashboard projects={filteredProjects} period={period} activeProvider={provider} planUsage={planUsage ?? undefined} />, { patchConsole: false })
     unmount()

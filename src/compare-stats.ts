@@ -1,3 +1,4 @@
+import { mergeCounters } from './report-summary.js'
 import { readdir, readFile } from 'fs/promises'
 import { join } from 'path'
 
@@ -37,6 +38,10 @@ export function aggregateModelStats(projects: ProjectSummary[]): ModelStats[] {
 
   for (const project of projects) {
     for (const session of project.sessions) {
+      if (session.reportSummary) {
+        for (const row of Object.values(session.reportSummary.models)) mergeCounters(ensure(row.model), row)
+        continue
+      }
       for (const turn of session.turns) {
         if (turn.assistantCalls.length === 0) continue
         const primaryModel = turn.assistantCalls[0]!.model
@@ -198,6 +203,12 @@ export function computeCategoryComparison(projects: ProjectSummary[], modelA: st
 
   for (const project of projects) {
     for (const session of project.sessions) {
+      if (session.reportSummary) {
+        for (const [model, map] of [[modelA, mapA], [modelB, mapB]] as const) {
+          for (const [category, row] of Object.entries(session.reportSummary.categories[model] ?? {})) mergeCounters(ensure(map, category), row)
+        }
+        continue
+      }
       for (const turn of session.turns) {
         if (turn.assistantCalls.length === 0) continue
         const primary = turn.assistantCalls[0]!.model
@@ -246,6 +257,11 @@ export function computeWorkingStyle(projects: ProjectSummary[], modelA: string, 
 
   for (const project of projects) {
     for (const session of project.sessions) {
+      if (session.reportSummary) {
+        if (session.reportSummary.styles[modelA]) mergeCounters(sA, session.reportSummary.styles[modelA]!)
+        if (session.reportSummary.styles[modelB]) mergeCounters(sB, session.reportSummary.styles[modelB]!)
+        continue
+      }
       for (const turn of session.turns) {
         if (turn.assistantCalls.length === 0) continue
         const primary = turn.assistantCalls[0]!.model

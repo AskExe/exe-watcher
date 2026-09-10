@@ -61,7 +61,7 @@ export async function cachedFileParse<T>(path: string, kind: string, parse: () =
       }
       let total = rows.reduce((n, r) => n + r.size, 0)
       for (const row of rows.sort((a, b) => a.mtime - b.mtime)) {
-        if (total <= MAX_DISK / 2) break
+        if (total <= MAX_DISK) break
         await unlink(row.path).catch(() => {})
         total -= row.size
       }

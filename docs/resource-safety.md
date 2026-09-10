@@ -20,3 +20,13 @@ Regression tests cover overlapping badge/detail requests, five concurrent period
 Local verification on September 10: 613 JavaScript tests (isolated home provider discovery), 62 Swift tests, TypeScript compilation, universal macOS app build. A successful warm Today/All refresh against the actual local history took 3.05 seconds, 1.91 seconds user CPU and 255 MB peak RSS. These are measurements on one computer, not universal performance guarantees.
 
 The app and CLI are version 0.2.51. Local installation does not distribute fixes to other users; a public release remains a separate delivery step.
+
+## Full Report correction (0.2.52)
+
+The terminal dashboard previously started optimization eagerly and retained full per-call results across period changes. Selecting All Time could exhaust the 256 MiB V8 heap and abort Node. Report scans now compact each session into exact daily/model/category/working-style summaries, retaining no per-call arrays after aggregation. Repeated fragments of the same provider session are merged. The ordinary parser remains available for consumers that require individual turns.
+
+Startup, keyboard period/provider changes and refresh timers share a serialized latest-request loader. Superseded scans receive cancellation through the filesystem budget; queued intermediate selections do not run. Optimization starts on demand and reads files serially. Errors render a recoverable panel with retry and period-navigation controls, and automatic failure retries back off. The heap guard derives its threshold from the actual V8 heap limit, rather than exceeding the configured heap ceiling. Under-budget disk caches are no longer pruned to half their size on every new process.
+
+Foreground summary scans allow up to 8 GiB read and two million processed records while retaining the 30-second and heap bounds. Background scans retain their 1 GiB and 200,000-record limits. Explicit reports have a larger input working set without retaining the full history in memory.
+
+Verification: 617 JavaScript tests; exact raw-versus-summary total, activity and comparison assertions; cancellation/coalescing/error-retry tests. A real PTY run switched Week → All Time → Today and exited normally, rendering 295,989 local calls across 674 projects without resource errors. The summary scan retained about 90 MB heap; the interactive process peaked around 475 MB RSS, including transient parsing and runtime memory. V8 old space remained capped at 256 MiB.

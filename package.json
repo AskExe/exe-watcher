@@ -1,6 +1,6 @@
 {
   "name": "exe-watcher",
-  "version": "0.2.51",
+  "version": "0.2.52",
   "description": "The owl watching your AI coding spend — cost, tokens, agents, and projects in your terminal and menu bar",
   "type": "module",
   "main": "./dist/cli.js",

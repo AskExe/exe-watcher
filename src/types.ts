@@ -96,6 +96,7 @@ export type ClassifiedTurn = ParsedTurn & {
 }
 
 export type SessionSummary = {
+  reportSummary?: import('./report-summary.js').ReportSummary
   sessionId: string
   project: string
   firstTimestamp: string
