@@ -1,3 +1,6 @@
+import { AsyncLocalStorage } from 'node:async_hooks'
+import { compactReportSession, mergeReportSession } from './report-summary.js'
+const reportMode = new AsyncLocalStorage<boolean>()
 import { cachedFileParse } from './parsed-file-cache.js'
 import { chargeRecord, withScanBudget } from './resource-budget.js'
 import { readdir, stat } from 'fs/promises'
@@ -264,7 +267,7 @@ function buildSessionSummary(
     }
   }
 
-  return {
+  const summary: SessionSummary = {
     sessionId,
     project,
     firstTimestamp: firstTs || turns[0]?.timestamp || '',
@@ -282,6 +285,7 @@ function buildSessionSummary(
     bashBreakdown,
     categoryBreakdown,
   }
+  return reportMode.getStore() ? compactReportSession(summary) : summary
 }
 
 async function parseSessionFile(
@@ -473,6 +477,7 @@ async function parseProviderSources(
   if (!provider) return []
 
   const sessionMap = new Map<string, { project: string; turns: ClassifiedTurn[] }>()
+  const compactSessions = new Map<string, SessionSummary>()
 
   for (const source of sources) {
     if (dateRange) {
@@ -494,6 +499,7 @@ async function parseProviderSources(
       return result
     }, warnings)
     _parseWarnings.push(...warnings)
+    const touched = new Set<string>()
     for (const call of calls) {
       chargeRecord()
       if (seenKeys.has(call.deduplicationKey)) continue
@@ -507,6 +513,7 @@ async function parseProviderSources(
       const turn = providerCallToTurn(call)
       const classified = classifyTurn(turn)
       const key = `${providerName}:${call.sessionId}:${source.project}`
+      touched.add(key)
 
       const existing = sessionMap.get(key)
       if (existing) {
@@ -515,11 +522,24 @@ async function parseProviderSources(
         sessionMap.set(key, { project: source.project, turns: [classified] })
       }
     }
-
-
+    if (reportMode.getStore()) {
+      for (const key of touched) {
+        const entry = sessionMap.get(key)!
+        const summary = buildSessionSummary(key.split(':')[1] ?? key, entry.project, entry.turns)
+        const previous = compactSessions.get(key)
+        if (previous) mergeReportSession(previous, summary)
+        else compactSessions.set(key, summary)
+        sessionMap.delete(key)
+      }
+    }
   }
 
   const projectMap = new Map<string, SessionSummary[]>()
+  for (const summary of compactSessions.values()) {
+    const existing = projectMap.get(summary.project) ?? []
+    existing.push(summary)
+    projectMap.set(summary.project, existing)
+  }
   for (const [key, { project, turns }] of sessionMap) {
     const sessionId = key.split(':')[1] ?? key
     const session = buildSessionSummary(sessionId, project, turns)
@@ -545,7 +565,7 @@ async function parseProviderSources(
 }
 
 const CACHE_TTL_MS = 60_000
-const MAX_CACHE_ENTRIES = 10
+const MAX_CACHE_ENTRIES = 1
 const sessionCache = new Map<string, { data: ProjectSummary[]; ts: number }>()
 const inFlightSourceContexts = new Map<string, Promise<{ sources: Array<{ provider: string; project: string; path: string }>; fingerprint: string }>>()
 /** Resolved source contexts cached for the lifetime of the process. The CLI
@@ -669,18 +689,19 @@ export function filterProjectsByName(
   return result
 }
 
-export async function parseAllSessions(dateRange?: DateRange, providerFilter?: string): Promise<ProjectSummary[]> {
-  return withScanBudget(() => parseAllSessionsWithinBudget(dateRange, providerFilter))
+export async function parseAllSessions(dateRange?: DateRange, providerFilter?: string, summaryOnly = false, signal?: AbortSignal): Promise<ProjectSummary[]> {
+  return reportMode.run(summaryOnly, () => withScanBudget(() => parseAllSessionsWithinBudget(dateRange, providerFilter), summaryOnly ? 2_000_000 : 200_000, signal, (summaryOnly ? 8 : 1) * 1024 ** 3))
 }
 
 async function parseAllSessionsWithinBudget(dateRange?: DateRange, providerFilter?: string): Promise<ProjectSummary[]> {
   _parseWarnings = []
   const sourceContext = await getSourceContext(providerFilter)
   const allSources = sourceContext.sources
-  const key = cacheKey(dateRange, providerFilter, sourceContext.fingerprint)
+  const key = `${reportMode.getStore() ? 'summary' : 'full'}:${cacheKey(dateRange, providerFilter, sourceContext.fingerprint)}`
   const cached = sessionCache.get(key)
   if (cached && Date.now() - cached.ts < CACHE_TTL_MS) return cached.data
 
+  sessionCache.clear()
   const seenMsgIds = new Set<string>()
   const seenKeys = new Set<string>()
 
@@ -718,4 +739,9 @@ async function parseAllSessionsWithinBudget(dateRange?: DateRange, providerFilte
   const result = Array.from(mergedMap.values()).sort((a, b) => b.totalCostUSD - a.totalCostUSD)
   cachePut(key, result)
   return result
+}
+
+/** Provider discovery already performed by the serialized report load. */
+export function getDiscoveredProviderNames(): string[] {
+  return [...new Set([...resolvedSourceContexts.values()].flatMap(c => c.result.sources.map(s => s.provider)))]
 }

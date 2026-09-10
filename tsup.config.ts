@@ -10,6 +10,6 @@ export default defineConfig({
   sourcemap: true,
   dts: false,
   banner: {
-    js: '#!/usr/bin/env -S node --max-old-space-size=256',
+    js: '#!/usr/bin/env -S node --max-old-space-size=256 --expose-gc',
   },
 })

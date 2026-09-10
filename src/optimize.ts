@@ -154,7 +154,7 @@ type ScanData = {
 // JSONL scanner
 // ============================================================================
 
-const FILE_READ_CONCURRENCY = 16
+const FILE_READ_CONCURRENCY = 1
 const RESULT_CACHE_TTL_MS = 60_000
 const RECENT_WINDOW_HOURS = 48
 const RECENT_WINDOW_MS = RECENT_WINDOW_HOURS * 60 * 60 * 1000
