@@ -2,7 +2,7 @@ import { readdir, stat } from 'fs/promises'
 import { basename, join } from 'path'
 import { homedir } from 'os'
 
-import { readSessionFile } from '../fs-utils.js'
+import { readSessionFile, readSessionFirstLine } from '../fs-utils.js'
 import { calculateCost } from '../models.js'
 import type { Provider, SessionSource, SessionParser, ParsedProviderCall } from './types.js'
 
@@ -70,9 +70,7 @@ function sanitizeProject(cwd: string): string {
 }
 
 async function readFirstLine(filePath: string): Promise<CodexEntry | null> {
-  const content = await readSessionFile(filePath)
-  if (content === null) return null
-  const line = content.split('\n')[0]
+  const line = await readSessionFirstLine(filePath)
   if (!line?.trim()) return null
   try {
     return JSON.parse(line) as CodexEntry

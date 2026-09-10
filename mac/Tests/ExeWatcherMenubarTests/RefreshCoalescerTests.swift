@@ -120,3 +120,30 @@ func sustainedLoadIsRateCappedNotBackToBack() {
     #expect(starts.count >= 4, "expected the timer to still fire periodically, got \(starts.count)")
     #expect(starts.count < 17, "must be strictly fewer than the back-to-back count")
 }
+
+@Test
+func timerAndFilesystemEventsShareThirtySecondCompletionBudget() {
+    let c = RefreshCoalescer(config: .init(minIntervalSeconds: 30), startClock: base.addingTimeInterval(-1000))
+    var finish: Date?
+    var starts: [Date] = []
+    // A timer every 30 seconds plus continuous filesystem activity. Include a slow
+    // 40-second refresh to prove timers cannot overlap it or bypass its cooldown.
+    for second in 0...180 {
+        let now = base.addingTimeInterval(Double(second))
+        if let end = finish, now >= end {
+            c.refreshDidFinish(now: now)
+            finish = nil
+        }
+        c.noteEvent(now: now)
+        if second % 30 == 0 { c.noteEvent(now: now) }
+        if c.evaluate(now: now) == .fireNow {
+            #expect(finish == nil)
+            starts.append(now)
+            finish = now.addingTimeInterval(40)
+        }
+    }
+    #expect(starts.count == 3)
+    for i in 1..<starts.count {
+        #expect(starts[i].timeIntervalSince(starts[i - 1]) >= 70)
+    }
+}

@@ -1,4 +1,4 @@
-import { readFile, stat } from 'fs/promises'
+import { open, readFile, stat } from 'fs/promises'
 import { readFileSync, statSync, createReadStream, openSync, fstatSync, readSync, closeSync, constants } from 'fs'
 import { createInterface } from 'readline'
 
@@ -22,6 +22,41 @@ async function readViaStream(filePath: string): Promise<string> {
   const rl = createInterface({ input: stream, crlfDelay: Infinity })
   for await (const line of rl) chunks.push(line)
   return chunks.join('\n')
+}
+
+/** Read only the metadata header during discovery, never the transcript body.
+ * Bounded even for malformed files without a newline; close on every exit path.
+ */
+export async function readSessionFirstLine(filePath: string): Promise<string | null> {
+  const handle = await open(filePath, 'r').catch(() => null)
+  if (!handle) return null
+  try {
+    // Keep the existing parser's file-size limit. Codex headers can themselves
+    // contain megabytes of instructions, so a smaller header cap drops valid sessions.
+    if ((await handle.stat()).size > MAX_SESSION_FILE_BYTES) return null
+    const chunks: Buffer[] = []
+    const buffer = Buffer.allocUnsafe(64 * 1024)
+    let offset = 0
+    while (offset < MAX_SESSION_FILE_BYTES) {
+      const length = Math.min(offset === 0 ? 4096 : buffer.length, MAX_SESSION_FILE_BYTES - offset)
+      const { bytesRead } = await handle.read(buffer, 0, length, offset)
+      if (bytesRead === 0) return Buffer.concat(chunks).toString('utf-8').replace(/\r$/, '')
+      const chunk = buffer.subarray(0, bytesRead)
+      const newline = chunk.indexOf(10)
+      if (newline >= 0) {
+        chunks.push(chunk.subarray(0, newline))
+        return Buffer.concat(chunks).toString('utf-8').replace(/\r$/, '')
+      }
+      chunks.push(Buffer.from(chunk))
+      offset += bytesRead
+    }
+    return Buffer.concat(chunks).toString('utf-8').replace(/\r$/, '')
+  } catch (err) {
+    warn(`header read failed for ${filePath}: ${(err as NodeJS.ErrnoException).code ?? 'unknown'}`)
+    return null
+  } finally {
+    await handle.close()
+  }
 }
 
 export async function readSessionFile(filePath: string): Promise<string | null> {
