@@ -61,3 +61,18 @@ it('cancels filesystem work through the shared scan budget', async () => {
   const controller=new AbortController();controller.abort()
   await expect(withScanBudget(async()=>chargeRead(1),200_000,controller.signal)).rejects.toThrow('scan cancelled')
 })
+
+it('collects discarded JSON before enforcing the retained-heap guard', async () => {
+  const actual = process.memoryUsage()
+  let heapUsed = 1024 ** 3
+  const collect = vi.fn(() => { heapUsed = 40 * 1024 ** 2 })
+  vi.spyOn(process, 'memoryUsage').mockImplementation(() => ({ ...actual, heapUsed }))
+  vi.stubGlobal('gc', collect)
+  try {
+    await expect(withScanBudget(async () => chargeRead(0))).resolves.toBeUndefined()
+    expect(collect).toHaveBeenCalledTimes(1)
+    heapUsed = 1024 ** 3
+    collect.mockImplementation(() => {})
+    await expect(withScanBudget(async () => chargeRead(0))).rejects.toThrow('parser heap budget')
+  } finally { vi.restoreAllMocks(); vi.unstubAllGlobals() }
+})

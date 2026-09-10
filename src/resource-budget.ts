@@ -18,7 +18,12 @@ export function chargeRead(bytes: number): void {
   if (budget.bytes > budget.maxBytes) throw new ResourceBudgetError(`${budget.maxBytes / 1024 ** 3} GiB read budget per scan`)
   if (Date.now() - budget.started > 30_000) throw new ResourceBudgetError('30 second scan budget')
   const heapBudget = Math.min(384 * 1024 * 1024, getHeapStatistics().heap_size_limit * 0.65)
-  if (process.memoryUsage().heapUsed > heapBudget) throw new ResourceBudgetError('parser heap budget')
+  if (process.memoryUsage().heapUsed > heapBudget) {
+    // heapUsed includes collectible JSON from previous files. Collect before treating
+    // transient allocations as retained history; the launcher exposes GC for this boundary.
+    global.gc?.()
+    if (process.memoryUsage().heapUsed > heapBudget) throw new ResourceBudgetError('parser heap budget')
+  }
 }
 export function chargeRecord(): void {
   const budget = scans.getStore()
