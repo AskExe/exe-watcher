@@ -59,6 +59,7 @@ export type JournalEntry = {
 }
 
 export type ParsedTurn = {
+  userMessageSignals?: number
   userMessage: string
   assistantCalls: ParsedApiCall[]
   timestamp: string

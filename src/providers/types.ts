@@ -26,6 +26,7 @@ export type ParsedProviderCall = {
   timestamp: string
   speed: 'standard' | 'fast'
   deduplicationKey: string
+  userMessageSignals?: number
   userMessage: string
   sessionId: string
 }

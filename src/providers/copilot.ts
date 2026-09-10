@@ -2,7 +2,7 @@ import { readdir, stat } from 'fs/promises'
 import { basename, dirname, join } from 'path'
 import { homedir } from 'os'
 
-import { readSessionFile } from '../fs-utils.js'
+import { readSessionFile, readSessionFirstLine, readSessionLines } from '../fs-utils.js'
 import { calculateCost } from '../models.js'
 import type { Provider, SessionSource, SessionParser, ParsedProviderCall } from './types.js'
 
@@ -86,14 +86,14 @@ function parseCwd(yaml: string): string | null {
 function createParser(source: SessionSource, seenKeys: Set<string>): SessionParser {
   return {
     async *parse(): AsyncGenerator<ParsedProviderCall> {
-      const content = await readSessionFile(source.path)
-      if (content === null) return
       const sessionId = basename(dirname(source.path))
-      const lines = content.split('\n').filter(l => l.trim())
       let currentModel = ''
       let pendingUserMessage = ''
 
-      for (const line of lines) {
+      let lineCount = 0
+      for await (const line of readSessionLines(source.path)) {
+        if (!line.trim()) continue
+        lineCount++
         let event: CopilotEvent
         try {
           event = JSON.parse(line) as CopilotEvent

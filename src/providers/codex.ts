@@ -2,7 +2,7 @@ import { readdir, stat } from 'fs/promises'
 import { basename, join } from 'path'
 import { homedir } from 'os'
 
-import { readSessionFile, readSessionFirstLine } from '../fs-utils.js'
+import { readSessionFile, readSessionFirstLine, readSessionLines } from '../fs-utils.js'
 import { calculateCost } from '../models.js'
 import type { Provider, SessionSource, SessionParser, ParsedProviderCall } from './types.js'
 
@@ -145,10 +145,6 @@ function createParser(source: SessionSource, seenKeys: Set<string>): SessionPars
   return {
     warnings: parserWarnings,
     async *parse(): AsyncGenerator<ParsedProviderCall> {
-      const content = await readSessionFile(source.path)
-      if (content === null) return
-      const lines = content.split('\n').filter(l => l.trim())
-      if (lines.length === 0) return
 
       // Fix 1: Validate expected session format — detect schema changes
       let hasSessionMeta = false
@@ -163,7 +159,10 @@ function createParser(source: SessionSource, seenKeys: Set<string>): SessionPars
       let pendingTools: string[] = []
       let pendingUserMessage = ''
 
-      for (const line of lines) {
+      let lineCount = 0
+      for await (const line of readSessionLines(source.path)) {
+        if (!line.trim()) continue
+        lineCount++
         let entry: CodexEntry
         try {
           entry = JSON.parse(line) as CodexEntry
@@ -301,10 +300,10 @@ function createParser(source: SessionSource, seenKeys: Set<string>): SessionPars
       }
 
       // Fix 1: Format validation — warn if expected fields were absent
-      if (lines.length > 5 && !hasSessionMeta) {
+      if (lineCount > 5 && !hasSessionMeta) {
         parserWarnings.push(`Codex session file format may have changed — missing session_meta (${basename(source.path)})`)
       }
-      if (lines.length > 5 && hasSessionMeta && !hasTokenCounts) {
+      if (lineCount > 5 && hasSessionMeta && !hasTokenCounts) {
         parserWarnings.push(`Codex session file format may have changed — no token_count events found (${basename(source.path)})`)
       }
     },

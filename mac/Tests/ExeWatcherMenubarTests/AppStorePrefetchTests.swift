@@ -504,7 +504,7 @@ struct AppStoreProviderPrefetchTests {
         await gate.open()
     }
 
-    @Test("system resume clears stale in-flight guards and ignores pre-resume fetch results")
+    @Test("system resume holds admission until old work exits and then refreshes")
     @MainActor
     func systemResumeRecoversFromStuckLoading() async throws {
         let gate = Gate()
@@ -530,15 +530,14 @@ struct AppStoreProviderPrefetchTests {
         #expect(store.isCurrentSelectionLoading)
 
         store.recoverFromSystemResume()
-        #expect(!store.isCurrentSelectionLoading)
-        #expect(store.activeFetchCount == 0)
-
+        #expect(store.isCurrentSelectionLoading)
+        #expect(store.activeFetchCount == 1)
         await store.refreshVisibleSelection()
-        #expect(await weekFetchCount.value() == 2)
-        #expect(store.payload.current.cost == 42)
-
+        #expect(await weekFetchCount.value() == 1)
+        // The cancelled, deliberately non-cooperative fake must leave before re-admission.
         await gate.open()
         try await Task.sleep(nanoseconds: 50_000_000)
+        #expect(await weekFetchCount.value() == 2)
         #expect(store.payload.current.cost == 42)
     }
 

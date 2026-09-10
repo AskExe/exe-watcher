@@ -1,3 +1,5 @@
+import { cachedFileParse } from './parsed-file-cache.js'
+import { chargeRecord, withScanBudget } from './resource-budget.js'
 import { readdir, stat } from 'fs/promises'
 import { basename, join } from 'path'
 import { readSessionLines } from './fs-utils.js'
@@ -17,7 +19,7 @@ import type {
   TokenUsage,
   ToolUseBlock,
 } from './types.js'
-import { classifyTurn, BASH_TOOLS } from './classifier.js'
+import { classifyTurn, compactUserMessage, BASH_TOOLS } from './classifier.js'
 import { loadSessionIndex, saveSessionIndex, checkSessionFile, recordParseResult, pruneIndex, clearSessionIndex } from './session-index.js'
 import { extractBashCommands } from './bash-utils.js'
 
@@ -128,26 +130,35 @@ function parseApiCall(entry: JournalEntry): ParsedApiCall | null {
   }
 }
 
-function groupIntoTurns(entries: JournalEntry[], seenMsgIds: Set<string>): ParsedTurn[] {
+async function parseTurns(filePath: string): Promise<ParsedTurn[]> {
+  const seenMsgIds = new Set<string>()
   const turns: ParsedTurn[] = []
   let currentUserMessage = ''
+  let currentUserSignals = 0
   let currentCalls: ParsedApiCall[] = []
   let currentTimestamp = ''
   let currentSessionId = ''
 
-  for (const entry of entries) {
+  let lineNumber = 0
+  for await (const line of readSessionLines(filePath)) {
+    lineNumber++
+    const entry = parseJsonlLine(line)
+    if (!entry) continue
     if (entry.type === 'user') {
       const text = getUserMessageText(entry)
       if (text.trim()) {
         if (currentCalls.length > 0) {
           turns.push({
             userMessage: currentUserMessage,
+            userMessageSignals: currentUserSignals,
             assistantCalls: currentCalls,
             timestamp: currentTimestamp,
             sessionId: currentSessionId,
           })
         }
-        currentUserMessage = text
+        const compact = compactUserMessage(text)
+        currentUserMessage = compact.userMessage
+        currentUserSignals = compact.userMessageSignals
         currentCalls = []
         currentTimestamp = entry.timestamp ?? ''
         currentSessionId = entry.sessionId ?? ''
@@ -157,13 +168,17 @@ function groupIntoTurns(entries: JournalEntry[], seenMsgIds: Set<string>): Parse
       if (msgId && seenMsgIds.has(msgId)) continue
       if (msgId) seenMsgIds.add(msgId)
       const call = parseApiCall(entry)
-      if (call) currentCalls.push(call)
+      if (call) {
+        if (!msgId) call.deduplicationKey = `${filePath}:${lineNumber}`
+        chargeRecord(); currentCalls.push(call)
+      }
     }
   }
 
   if (currentCalls.length > 0) {
     turns.push({
       userMessage: currentUserMessage,
+            userMessageSignals: currentUserSignals,
       assistantCalls: currentCalls,
       timestamp: currentTimestamp,
       sessionId: currentSessionId,
@@ -284,21 +299,18 @@ async function parseSessionFile(
       if (s.mtimeMs < dateRange.start.getTime()) return null
     } catch { /* fall through to normal read; missing stat shouldn't break parsing */ }
   }
-  const entries: JournalEntry[] = []
-  let hasLines = false
-
-  for await (const line of readSessionLines(filePath)) {
-    hasLines = true
-    const entry = parseJsonlLine(line)
-    if (entry) entries.push(entry)
-  }
-
-  if (!hasLines) return null
-
-  if (entries.length === 0) return null
-
+  const rawTurns = await cachedFileParse(filePath, 'claude-turns', () => parseTurns(filePath))
   const sessionId = basename(filePath, '.jsonl')
-  let turns = groupIntoTurns(entries, seenMsgIds)
+  let turns: ParsedTurn[] = []
+  for (const turn of rawTurns) {
+    const calls = turn.assistantCalls.filter(call => {
+      chargeRecord()
+      if (seenMsgIds.has(call.deduplicationKey)) return false
+      seenMsgIds.add(call.deduplicationKey)
+      return true
+    })
+    if (calls.length) turns.push({ ...turn, ...compactUserMessage(turn.userMessage, turn.userMessageSignals), assistantCalls: calls })
+  }
   if (dateRange) {
     // Bucket a turn by the timestamp of its first assistant call (when the cost was
     // actually incurred). Filtering entries directly produced orphan assistant calls
@@ -380,8 +392,7 @@ async function scanProjectDirs(dirs: Array<{ path: string; name: string }>, seen
           const postStat = await stat(filePath)
           if (postStat.size === preStat.size && postStat.mtimeMs === preStat.mtimeMs) {
             // File was stable during the parse — safe to record
-            recordParseResult(filePath, sessionIndex, preStat.size, preStat.mtimeMs, hasApiCalls)
-            indexDirty = true
+            indexDirty = recordParseResult(filePath, sessionIndex, preStat.size, preStat.mtimeMs, hasApiCalls) || indexDirty
           }
           // else: file changed mid-scan; leave the old index entry (if any) intact.
           // The next run will see a fingerprint mismatch and re-parse.
@@ -445,7 +456,7 @@ function providerCallToTurn(call: ParsedProviderCall): ParsedTurn {
   }
 
   return {
-    userMessage: call.userMessage,
+    ...compactUserMessage(call.userMessage, call.userMessageSignals),
     assistantCalls: [apiCall],
     timestamp: call.timestamp,
     sessionId: call.sessionId,
@@ -467,15 +478,26 @@ async function parseProviderSources(
     if (dateRange) {
       try {
         const s = await stat(source.path)
-        if (s.mtimeMs < dateRange.start.getTime()) continue
+        const wal = await stat(`${source.path}-wal`).catch(() => null)
+        if (Math.max(s.mtimeMs, wal?.mtimeMs ?? 0) < dateRange.start.getTime()) continue
       } catch { /* fall through; treat unknown stat as "may contain data" */ }
     }
-    const parser = provider.createSessionParser(
-      { path: source.path, project: source.project, provider: providerName },
-      seenKeys,
-    )
-
-    for await (const call of parser.parse()) {
+    // Each file is cached independently of date range and global deduplication.
+    const warnings: string[] = []
+    const calls = await cachedFileParse(source.path, providerName, async () => {
+      const parser = provider.createSessionParser(
+        { path: source.path, project: source.project, provider: providerName }, new Set(),
+      )
+      const result: ParsedProviderCall[] = []
+      for await (const call of parser.parse()) { chargeRecord(); result.push({ ...call, ...compactUserMessage(call.userMessage, call.userMessageSignals) }) }
+      if (parser.warnings?.length) warnings.push(...parser.warnings)
+      return result
+    }, warnings)
+    _parseWarnings.push(...warnings)
+    for (const call of calls) {
+      chargeRecord()
+      if (seenKeys.has(call.deduplicationKey)) continue
+      seenKeys.add(call.deduplicationKey)
       if (dateRange) {
         if (!call.timestamp) continue
         const ts = new Date(call.timestamp)
@@ -494,10 +516,7 @@ async function parseProviderSources(
       }
     }
 
-    // Collect any schema/format warnings from the parser
-    if (parser.warnings && parser.warnings.length > 0) {
-      _parseWarnings.push(...parser.warnings)
-    }
+
   }
 
   const projectMap = new Map<string, SessionSummary[]>()
@@ -651,6 +670,10 @@ export function filterProjectsByName(
 }
 
 export async function parseAllSessions(dateRange?: DateRange, providerFilter?: string): Promise<ProjectSummary[]> {
+  return withScanBudget(() => parseAllSessionsWithinBudget(dateRange, providerFilter))
+}
+
+async function parseAllSessionsWithinBudget(dateRange?: DateRange, providerFilter?: string): Promise<ProjectSummary[]> {
   _parseWarnings = []
   const sourceContext = await getSourceContext(providerFilter)
   const allSources = sourceContext.sources

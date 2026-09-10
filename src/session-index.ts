@@ -124,11 +124,13 @@ export function recordParseResult(
   sizeBytes: number,
   mtimeMs: number,
   hasApiCalls: boolean,
-): void {
+): boolean {
   const prev = index.e[filePath]
   // Never downgrade h from 1 → 0: once we know a file has data, keep it.
   const h: 0 | 1 = hasApiCalls ? 1 : (prev?.h === 1 ? 1 : 0)
+  if (prev?.s === sizeBytes && prev?.m === mtimeMs && prev?.h === h) return false
   index.e[filePath] = { s: sizeBytes, m: mtimeMs, h }
+  return true
 }
 
 /** Remove entries for files no longer discovered. */

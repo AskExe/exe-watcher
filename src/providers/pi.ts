@@ -2,7 +2,7 @@ import { readdir, stat } from 'fs/promises'
 import { basename, join } from 'path'
 import { homedir } from 'os'
 
-import { readSessionFile } from '../fs-utils.js'
+import { readSessionFile, readSessionFirstLine, readSessionLines } from '../fs-utils.js'
 import { calculateCost } from '../models.js'
 import { extractBashCommands } from '../bash-utils.js'
 import type { Provider, SessionSource, SessionParser, ParsedProviderCall } from './types.js'
@@ -61,9 +61,7 @@ function getOmpSessionsDir(override?: string): string {
 }
 
 async function readFirstEntry(filePath: string): Promise<PiEntry | null> {
-  const content = await readSessionFile(filePath)
-  if (content === null) return null
-  const line = content.split('\n')[0]
+  const line = await readSessionFirstLine(filePath)
   if (!line?.trim()) return null
   try {
     return JSON.parse(line) as PiEntry
@@ -114,13 +112,13 @@ async function discoverSessionsInDir(sessionsDir: string, providerName: string):
 function createParser(source: SessionSource, seenKeys: Set<string>): SessionParser {
   return {
     async *parse(): AsyncGenerator<ParsedProviderCall> {
-      const content = await readSessionFile(source.path)
-      if (content === null) return
-      const lines = content.split('\n').filter(l => l.trim())
       let sessionId = basename(source.path, '.jsonl')
       let pendingUserMessage = ''
 
-      for (const [lineIdx, line] of lines.entries()) {
+      let lineIdx = -1
+      for await (const line of readSessionLines(source.path)) {
+        if (!line.trim()) continue
+        lineIdx++
         let entry: PiEntry
         try {
           entry = JSON.parse(line) as PiEntry

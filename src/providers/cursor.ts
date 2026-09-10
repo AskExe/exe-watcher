@@ -1,9 +1,10 @@
+import { ResourceBudgetError } from '../resource-budget.js'
 import { existsSync } from 'fs'
 import { join } from 'path'
 import { homedir } from 'os'
 
 import { calculateCost } from '../models.js'
-import { readCachedResults, writeCachedResults } from '../cursor-cache.js'
+import { readCachedResults, writeCachedResults, getDbFingerprint } from '../cursor-cache.js'
 import { isSqliteAvailable, getSqliteLoadError, openDatabase, type SqliteDatabase } from '../sqlite.js'
 import type { Provider, SessionSource, SessionParser, ParsedProviderCall } from './types.js'
 
@@ -58,7 +59,8 @@ function extractLanguages(codeBlocksJson: string | null): string[] {
       }
     }
     return [...langs]
-  } catch {
+  } catch (error) {
+    if (error instanceof ResourceBudgetError) throw error
     return []
   }
 }
@@ -110,7 +112,8 @@ function validateSchema(db: SqliteDatabase): boolean {
       "SELECT COUNT(*) as cnt FROM cursorDiskKV WHERE key LIKE 'bubbleId:%' LIMIT 1"
     )
     return rows.length > 0
-  } catch {
+  } catch (error) {
+    if (error instanceof ResourceBudgetError) throw error
     return false
   }
 }
@@ -127,7 +130,8 @@ function buildUserMessageMap(db: SqliteDatabase, timeFloor: string): Map<string,
       existing.push(row.text)
       map.set(row.conversation_id, existing)
     }
-  } catch {}
+  } catch (error) {
+    if (error instanceof ResourceBudgetError) throw error}
   return map
 }
 
@@ -143,7 +147,8 @@ function parseBubbles(db: SqliteDatabase, seenKeys: Set<string>): { calls: Parse
   let rows: BubbleRow[]
   try {
     rows = db.query<BubbleRow>(BUBBLE_QUERY_SINCE, [timeFloor])
-  } catch {
+  } catch (error) {
+    if (error instanceof ResourceBudgetError) throw error
     return { calls: results }
   }
 
@@ -195,7 +200,8 @@ function parseBubbles(db: SqliteDatabase, seenKeys: Set<string>): { calls: Parse
         userMessage: userText,
         sessionId: conversationId,
       })
-    } catch {
+    } catch (error) {
+      if (error instanceof ResourceBudgetError) throw error
       skipped++
     }
   }
@@ -215,6 +221,7 @@ function createParser(source: SessionSource, seenKeys: Set<string>): SessionPars
         return
       }
 
+      const before = await getDbFingerprint(source.path)
       const cached = await readCachedResults(source.path)
       if (cached) {
         for (const call of cached) {
@@ -229,6 +236,7 @@ function createParser(source: SessionSource, seenKeys: Set<string>): SessionPars
       try {
         db = openDatabase(source.path)
       } catch (err) {
+        if (err instanceof ResourceBudgetError) throw err
         process.stderr.write(`exe-watcher: cannot open Cursor database: ${err instanceof Error ? err.message : err}\n`)
         return
       }
@@ -241,7 +249,7 @@ function createParser(source: SessionSource, seenKeys: Set<string>): SessionPars
 
         const { calls } = parseBubbles(db, seenKeys)
 
-        await writeCachedResults(source.path, calls)
+        await writeCachedResults(source.path, calls, before)
 
         for (const call of calls) {
           yield call

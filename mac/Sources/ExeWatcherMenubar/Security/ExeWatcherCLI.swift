@@ -79,6 +79,9 @@ enum ExeWatcherCLI {
             process.arguments = ["--", defaultBinaryName] + subcommand
         }
 
+        // Keep background scans inside a small V8 heap and collect transient JSON promptly.
+        // Last option wins over an inherited larger heap setting.
+        environment["NODE_OPTIONS"] = (environment["NODE_OPTIONS"] ?? "") + " --max-old-space-size=256"
         process.environment = environment
         // Use .userInitiated so macOS keeps the CLI responsive; the menubar badge depends on
         // timely results. .utility causes visible staleness because macOS freely throttles

@@ -1,6 +1,6 @@
-import { open, readFile, stat } from 'fs/promises'
-import { readFileSync, statSync, createReadStream, openSync, fstatSync, readSync, closeSync, constants } from 'fs'
-import { createInterface } from 'readline'
+import { chargeRead, checkFileSize, ResourceBudgetError } from './resource-budget.js'
+import { open } from 'fs/promises'
+import { statSync, openSync, fstatSync, readSync, closeSync, constants } from 'fs'
 
 // Hard cap well below V8's 512 MB string limit even with split('\n') doubling.
 // Stream threshold chosen as empirical breakeven between readFile+split peak
@@ -16,14 +16,6 @@ function warn(msg: string): void {
   if (verbose()) process.stderr.write(`exe-watcher: ${msg}\n`)
 }
 
-async function readViaStream(filePath: string): Promise<string> {
-  const chunks: string[] = []
-  const stream = createReadStream(filePath, { encoding: 'utf-8' })
-  const rl = createInterface({ input: stream, crlfDelay: Infinity })
-  for await (const line of rl) chunks.push(line)
-  return chunks.join('\n')
-}
-
 /** Read only the metadata header during discovery, never the transcript body.
  * Bounded even for malformed files without a newline; close on every exit path.
  */
@@ -31,15 +23,15 @@ export async function readSessionFirstLine(filePath: string): Promise<string | n
   const handle = await open(filePath, 'r').catch(() => null)
   if (!handle) return null
   try {
-    // Keep the existing parser's file-size limit. Codex headers can themselves
-    // contain megabytes of instructions, so a smaller header cap drops valid sessions.
-    if ((await handle.stat()).size > MAX_SESSION_FILE_BYTES) return null
+    // Bound the header independently of transcript size: large files are streamed later.
     const chunks: Buffer[] = []
     const buffer = Buffer.allocUnsafe(64 * 1024)
     let offset = 0
-    while (offset < MAX_SESSION_FILE_BYTES) {
-      const length = Math.min(offset === 0 ? 4096 : buffer.length, MAX_SESSION_FILE_BYTES - offset)
+    const maxHeaderBytes = 8 * 1024 * 1024
+    while (offset < maxHeaderBytes) {
+      const length = Math.min(offset === 0 ? 4096 : buffer.length, maxHeaderBytes - offset)
       const { bytesRead } = await handle.read(buffer, 0, length, offset)
+      chargeRead(bytesRead)
       if (bytesRead === 0) return Buffer.concat(chunks).toString('utf-8').replace(/\r$/, '')
       const chunk = buffer.subarray(0, bytesRead)
       const newline = chunk.indexOf(10)
@@ -50,8 +42,10 @@ export async function readSessionFirstLine(filePath: string): Promise<string | n
       chunks.push(Buffer.from(chunk))
       offset += bytesRead
     }
-    return Buffer.concat(chunks).toString('utf-8').replace(/\r$/, '')
+    if (!checkFileSize(offset + 1, maxHeaderBytes)) return null
+    return null
   } catch (err) {
+    if (err instanceof ResourceBudgetError) throw err
     warn(`header read failed for ${filePath}: ${(err as NodeJS.ErrnoException).code ?? 'unknown'}`)
     return null
   } finally {
@@ -60,26 +54,29 @@ export async function readSessionFirstLine(filePath: string): Promise<string | n
 }
 
 export async function readSessionFile(filePath: string): Promise<string | null> {
-  let size: number
+  const handle = await open(filePath, 'r').catch(() => null)
+  if (!handle) return null
   try {
-    size = (await stat(filePath)).size
+    const size = (await handle.stat()).size
+    if (!checkFileSize(size, MAX_SESSION_FILE_BYTES)) {
+      warn(`skipped oversize file ${filePath}`)
+      return null
+    }
+    chargeRead(size)
+    // Read a fixed snapshot. Appends after fstat are left for the next refresh.
+    const buffer = Buffer.allocUnsafe(size)
+    let offset = 0
+    while (offset < size) {
+      const { bytesRead } = await handle.read(buffer, offset, Math.min(64 * 1024, size - offset), offset)
+      if (!bytesRead) break
+      offset += bytesRead
+    }
+    return buffer.toString('utf-8', 0, offset)
   } catch (err) {
-    warn(`stat failed for ${filePath}: ${(err as NodeJS.ErrnoException).code ?? 'unknown'}`)
+    if (err instanceof ResourceBudgetError) throw err
+    warn(`read failed for ${filePath}`)
     return null
-  }
-
-  if (size > MAX_SESSION_FILE_BYTES) {
-    warn(`skipped oversize file ${filePath} (${size} bytes > cap ${MAX_SESSION_FILE_BYTES})`)
-    return null
-  }
-
-  try {
-    if (size >= STREAM_THRESHOLD_BYTES) return await readViaStream(filePath)
-    return await readFile(filePath, 'utf-8')
-  } catch (err) {
-    warn(`read failed for ${filePath}: ${(err as NodeJS.ErrnoException).code ?? 'unknown'}`)
-    return null
-  }
+  } finally { await handle.close() }
 }
 
 export function readSessionFileSync(filePath: string): string | null {
@@ -99,10 +96,11 @@ export function readSessionFileSync(filePath: string): string | null {
 
   try {
     const size = fstatSync(fd).size
-    if (size > MAX_SESSION_FILE_BYTES) {
+    if (!checkFileSize(size, MAX_SESSION_FILE_BYTES)) {
       warn(`skipped oversize file ${filePath} (${size} bytes > cap ${MAX_SESSION_FILE_BYTES})`)
       return null
     }
+    chargeRead(size)
     const buf = Buffer.allocUnsafe(size)
     let offset = 0
     while (offset < size) {
@@ -112,6 +110,7 @@ export function readSessionFileSync(filePath: string): string | null {
     }
     return buf.toString('utf-8', 0, offset)
   } catch (err) {
+    if (err instanceof ResourceBudgetError) throw err
     warn(`read failed for ${filePath}: ${(err as NodeJS.ErrnoException).code ?? 'unknown'}`)
     return null
   } finally {
@@ -119,27 +118,41 @@ export function readSessionFileSync(filePath: string): string | null {
   }
 }
 
-export async function* readSessionLines(filePath: string, startByte?: number): AsyncGenerator<string> {
-  let size: number
+export async function* readSessionLines(filePath: string, startByte = 0): AsyncGenerator<string> {
+  const handle = await open(filePath, 'r').catch(() => null)
+  if (!handle) return
   try {
-    size = (await stat(filePath)).size
+    const size = (await handle.stat()).size
+    if (size <= startByte) return
+    // Streaming supports large transcripts without allocating the whole file.
+    chargeRead(size - startByte)
+    const stream = handle.createReadStream({ encoding: 'utf-8', start: startByte, end: size - 1, autoClose: false })
+    let pieces: string[] = []
+    let lineBytes = 0
+    const maxLineBytes = 32 * 1024 * 1024
+    const append = (piece: string) => {
+      lineBytes += Buffer.byteLength(piece)
+      if (lineBytes > maxLineBytes) throw new ResourceBudgetError('32 MiB JSONL record budget')
+      pieces.push(piece)
+    }
+    try {
+      for await (const chunk of stream) {
+        let start = 0
+        let newline: number
+        while ((newline = chunk.indexOf('\n', start)) >= 0) {
+          append(chunk.slice(start, newline))
+          chargeRead(0)
+          const line = pieces.join('').replace(/\r$/, '')
+          pieces = []; lineBytes = 0
+          yield line
+          start = newline + 1
+        }
+        if (start < chunk.length) append(chunk.slice(start))
+      }
+      if (pieces.length) yield pieces.join('').replace(/\r$/, '')
+    } finally { stream.destroy() }
   } catch (err) {
-    warn(`stat failed for ${filePath}: ${(err as NodeJS.ErrnoException).code ?? 'unknown'}`)
-    return
-  }
-
-  if (size > MAX_SESSION_FILE_BYTES) {
-    warn(`skipped oversize file ${filePath} (${size} bytes > cap ${MAX_SESSION_FILE_BYTES})`)
-    return
-  }
-
-  const stream = createReadStream(filePath, { encoding: 'utf-8', start: startByte ?? 0 })
-  const rl = createInterface({ input: stream, crlfDelay: Infinity })
-  try {
-    for await (const line of rl) yield line
-  } catch (err) {
-    warn(`stream read failed for ${filePath}: ${(err as NodeJS.ErrnoException).code ?? 'unknown'}`)
-  } finally {
-    stream.destroy()
-  }
+    if (err instanceof ResourceBudgetError) throw err
+    warn(`stream read failed for ${filePath}`)
+  } finally { await handle.close() }
 }
