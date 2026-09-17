@@ -14,6 +14,7 @@ import { renderStatusBar } from './format.js'
 import { type PeriodData, type ProviderCost, type AgentStatsPayload } from './menubar-json.js'
 import { buildMenubarPayload, computeAgentSpend, mergeAgentSpend, buildProjectSpendFromDays, estimateAgentCosts, type DiagnosticsBlock } from './menubar-json.js'
 import { addNewDays, buildDailyCacheScopeKey, getDaysInRange, loadDailyCache, saveDailyCache, withDailyCacheLock } from './daily-cache.js'
+import type { DailyCache } from './daily-cache.js'
 import { aggregateProjectsIntoDays, buildPeriodDataFromDays, filterDaysToProvider, dateKey, fillMissingDays } from './day-aggregator.js'
 import { CATEGORY_LABELS, type DateRange, type ProjectSummary, type TaskCategory } from './types.js'
 import { renderDashboard } from './dashboard.js'
@@ -24,7 +25,7 @@ import { getAllProviders, getDiscoveryWarnings } from './providers/index.js'
 import { clearPlan, readConfig, readPlan, saveConfig, savePlan, getConfigFilePath, type PlanId } from './config.js'
 import { clampResetDay, getPlanUsageOrNull, type PlanUsage } from './plan-usage.js'
 import { getPresetPlan, isPlanId, isPlanProvider, planDisplayName } from './plans.js'
-import { ALL_TIME_HISTORY_DAYS, computeProgressiveBackfillStart, resolveColdStartHistoryDays } from './progressive-backfill.js'
+import { ALL_TIME_HISTORY_DAYS, MAX_BLOCKED_CHUNK_ATTEMPTS, computeProgressiveBackfillStart, nextBackfillCursor, planBackfillChunks, resolveColdStartHistoryDays, shouldSkipBlockedChunk } from './progressive-backfill.js'
 import { createInterface } from 'node:readline'
 import { createRequire } from 'node:module'
 
@@ -388,6 +389,67 @@ program
       const isAllProviders = pf === 'all'
       const dailyCacheScope = buildDailyCacheScopeKey(opts.project, opts.exclude)
 
+      const backfillWarnings: string[] = []
+
+      /**
+       * Scan [start, end] one slice at a time, persisting the daily cache after each.
+       *
+       * The single-shot version of this scan ran parse + aggregate + save inside one
+       * resource budget: a ResourceBudgetError anywhere in it discarded every day the
+       * scan had already resolved, so the cache never advanced and the gap grew by a
+       * day every day. Persisting per slice makes an abort cost only the slice it hit.
+       *
+       * A slice that aborts is recorded in `cache.backfill`; the next run resumes there.
+       * A slice that aborts MAX_BLOCKED_CHUNK_ATTEMPTS times is recorded as an
+       * incomplete day and skipped, so a single unscannable day cannot pin the cursor.
+       */
+      const runChunkedBackfill = async (
+        cache: DailyCache,
+        start: Date,
+        end: Date,
+        order: 'oldest-first' | 'newest-first',
+      ): Promise<DailyCache> => {
+        let c = cache
+        const chunks = planBackfillChunks(start, end)
+        if (order === 'newest-first') chunks.reverse()
+        for (const chunk of chunks) {
+          const chunkDate = toDateString(chunk.start)
+          const coveredThrough = toDateString(chunk.end)
+          if (shouldSkipBlockedChunk(c.backfill, chunkDate)) {
+            const blanks = fillMissingDays(chunk.start, chunk.end, [])
+            c = addNewDays(c, blanks, yesterdayStr, { coveredThrough })
+            c.partialDates = [...new Set([...(c.partialDates ?? []), ...blanks.map(d => d.date)])]
+            c.backfill = null
+            c.revalidatedAt = Date.now()
+            await saveDailyCache(c)
+            const warn = `history for ${chunkDate} exceeded the scan budget ${MAX_BLOCKED_CHUNK_ATTEMPTS} times; recorded as incomplete so newer days can load`
+            backfillWarnings.push(warn)
+            process.stderr.write(`[exe-watcher] WARNING: ${warn}\n`)
+            continue
+          }
+          try {
+            const chunkRange: DateRange = { start: chunk.start, end: chunk.end }
+            const chunkProjects = filterProjectsByName(await parseAllSessions(chunkRange, 'all'), opts.project, opts.exclude)
+            const chunkDays = fillMissingDays(chunk.start, chunk.end, aggregateProjectsIntoDays(chunkProjects))
+            c = addNewDays(c, chunkDays, yesterdayStr, { coveredThrough })
+            c.backfill = null
+            c.revalidatedAt = Date.now()
+            await saveDailyCache(c)
+          } catch (err: unknown) {
+            if (!(err instanceof ResourceBudgetError)) throw err
+            // Keep every slice resolved before this one; mark where to resume.
+            c.backfill = nextBackfillCursor(c.backfill, chunkDate)
+            c.revalidatedAt = Date.now()
+            await saveDailyCache(c)
+            const warn = `history backfill paused at ${chunkDate} (attempt ${c.backfill.attempts}): ${err.message}`
+            backfillWarnings.push(warn)
+            process.stderr.write(`[exe-watcher] WARNING: ${warn}\n`)
+            break
+          }
+        }
+        return c
+      }
+
       const cache = await withDailyCacheLock(async () => {
         let c = await loadDailyCache(dailyCacheScope)
 
@@ -417,14 +479,7 @@ program
           : yesterdayEnd
 
         if (effectiveGapStart.getTime() <= gapEnd.getTime()) {
-          const gapRange: DateRange = { start: effectiveGapStart, end: gapEnd }
-          const gapProjects = filterProjectsByName(await parseAllSessions(gapRange, 'all'), opts.project, opts.exclude)
-          const gapDays = fillMissingDays(gapRange.start, gapRange.end, aggregateProjectsIntoDays(gapProjects))
-          // Don't advance lastComputedDate for backward fills
-          const coveredThrough = gapEnd.getTime() >= yesterdayEnd.getTime() ? yesterdayStr : undefined
-          c = addNewDays(c, gapDays, yesterdayStr, coveredThrough ? { coveredThrough } : undefined)
-          c.revalidatedAt = Date.now()
-          await saveDailyCache(c)
+          c = await runChunkedBackfill(c, effectiveGapStart, gapEnd, 'oldest-first')
         }
 
         // --- BACKWARD GAP: if the forward fill ran but the cache still doesn't reach
@@ -438,12 +493,7 @@ program
         if (updatedOldest && clampedNeeded.getTime() < new Date(updatedOldest).getTime()) {
           const backEnd = new Date(new Date(updatedOldest).getTime() - MS_PER_DAY)
           if (clampedNeeded.getTime() <= backEnd.getTime()) {
-            const backRange: DateRange = { start: clampedNeeded, end: backEnd }
-            const backProjects = filterProjectsByName(await parseAllSessions(backRange, 'all'), opts.project, opts.exclude)
-            const backDays = fillMissingDays(backRange.start, backRange.end, aggregateProjectsIntoDays(backProjects))
-            c = addNewDays(c, backDays, yesterdayStr)
-            c.revalidatedAt = Date.now()
-            await saveDailyCache(c)
+            c = await runChunkedBackfill(c, clampedNeeded, backEnd, 'newest-first')
           }
         }
 
@@ -458,7 +508,7 @@ program
 
       // Parse only today's sessions once — reused across period data, providers, and history.
       const todayRange: DateRange = { start: todayStart, end: periodInfo.range.end }
-      const warnings: string[] = []
+      const warnings: string[] = [...backfillWarnings]
       const parseStart = Date.now()
       let todayProjects: ProjectSummary[]
       let allTodayProjects: ProjectSummary[]
@@ -466,7 +516,8 @@ program
         allTodayProjects = await parseAllSessions(todayRange, 'all')
         todayProjects = fp(allTodayProjects)
       } catch (err: unknown) {
-        if (err instanceof ResourceBudgetError) throw err
+        // A budget abort must degrade this payload to cached numbers, never replace it
+        // with exit 1 and empty stdout — the menubar has no other source of data.
         const msg = err instanceof Error ? err.message : String(err)
         const warn = `parseAllSessions failed: ${msg}`
         warnings.push(warn)
@@ -606,7 +657,6 @@ program
             : fp(await parseAllSessions(scanRange, isAllProviders ? 'all' : pf))
           optimize = await scanAndDetect(optimizeProjects, scanRange)
         } catch (err: unknown) {
-          if (err instanceof ResourceBudgetError) throw err
           const msg = err instanceof Error ? err.message : String(err)
           const warn = `optimize parse failed: ${msg}`
           warnings.push(warn)

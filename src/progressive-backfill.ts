@@ -79,3 +79,50 @@ export function computeProgressiveBackfillStart({
 
   return gapStart
 }
+
+/** One backfill slice. Scanned, aggregated and persisted as a unit so that a
+ *  budget abort on a later slice can never discard an earlier one. */
+export type BackfillChunk = { start: Date; end: Date }
+
+/** A slice that aborted on the resource budget, with how many runs have tried it.
+ *  Persisted in the daily cache so the next run resumes instead of restarting. */
+export type BackfillCursor = { blockedDate: string; attempts: number }
+
+export const DEFAULT_BACKFILL_CHUNK_DAYS = 1
+/** After this many consecutive aborts a slice is recorded as incomplete and skipped.
+ *  Without it, one unscannable day blocks every newer day forever. */
+export const MAX_BLOCKED_CHUNK_ATTEMPTS = 2
+
+/** Split [start, end] into local-midnight-aligned slices, oldest first.
+ *  Each slice ends at the last millisecond of its final day, clamped to `end`. */
+export function planBackfillChunks(start: Date, end: Date, chunkDays = DEFAULT_BACKFILL_CHUNK_DAYS): BackfillChunk[] {
+  const size = Math.max(1, Math.floor(chunkDays))
+  const chunks: BackfillChunk[] = []
+  if (start.getTime() > end.getTime()) return chunks
+  let cursor = new Date(start.getFullYear(), start.getMonth(), start.getDate())
+  if (cursor.getTime() < start.getTime()) cursor = new Date(start.getTime())
+  while (cursor.getTime() <= end.getTime()) {
+    const dayStart = new Date(cursor.getFullYear(), cursor.getMonth(), cursor.getDate())
+    const lastDay = new Date(dayStart.getFullYear(), dayStart.getMonth(), dayStart.getDate() + size - 1)
+    const chunkEnd = new Date(lastDay.getFullYear(), lastDay.getMonth(), lastDay.getDate() + 1).getTime() - 1
+    chunks.push({ start: new Date(cursor.getTime()), end: new Date(Math.min(chunkEnd, end.getTime())) })
+    cursor = new Date(dayStart.getFullYear(), dayStart.getMonth(), dayStart.getDate() + size)
+  }
+  return chunks
+}
+
+/** Count an abort against `date`, resetting the counter when a different slice blocks. */
+export function nextBackfillCursor(prev: BackfillCursor | null | undefined, date: string): BackfillCursor {
+  return prev && prev.blockedDate === date
+    ? { blockedDate: date, attempts: prev.attempts + 1 }
+    : { blockedDate: date, attempts: 1 }
+}
+
+/** True once `date` has exhausted its retries and must be skipped to keep progress monotone. */
+export function shouldSkipBlockedChunk(
+  cursor: BackfillCursor | null | undefined,
+  date: string,
+  maxAttempts = MAX_BLOCKED_CHUNK_ATTEMPTS,
+): boolean {
+  return !!cursor && cursor.blockedDate === date && cursor.attempts >= maxAttempts
+}

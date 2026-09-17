@@ -5,7 +5,11 @@ import {
   computeProgressiveBackfillStart,
   DEFAULT_COLD_START_HISTORY_DAYS,
   DEFAULT_PROGRESSIVE_CHUNK_DAYS,
+  MAX_BLOCKED_CHUNK_ATTEMPTS,
+  nextBackfillCursor,
+  planBackfillChunks,
   resolveColdStartHistoryDays,
+  shouldSkipBlockedChunk,
   THIRTY_DAY_HISTORY_DAYS,
   WEEK_HISTORY_DAYS,
 } from '../src/progressive-backfill.js'
@@ -84,5 +88,49 @@ describe('resolveColdStartHistoryDays', () => {
     expect(resolveColdStartHistoryDays('30days', now)).toBe(THIRTY_DAY_HISTORY_DAYS)
     expect(resolveColdStartHistoryDays('month', now)).toBe(5)
     expect(resolveColdStartHistoryDays('all', now)).toBe(ALL_TIME_HISTORY_DAYS)
+  })
+})
+
+
+describe('planBackfillChunks', () => {
+  it('splits a multi-day gap into day-aligned slices, oldest first', () => {
+    const chunks = planBackfillChunks(localDate(2026, 9, 15), new Date(localDate(2026, 9, 18).getTime() - 1))
+
+    expect(chunks).toHaveLength(3)
+    expect(chunks[0]!.start).toEqual(localDate(2026, 9, 15))
+    expect(chunks[0]!.end).toEqual(new Date(localDate(2026, 9, 16).getTime() - 1))
+    expect(chunks[2]!.start).toEqual(localDate(2026, 9, 17))
+    expect(chunks[2]!.end).toEqual(new Date(localDate(2026, 9, 18).getTime() - 1))
+  })
+
+  it('never runs past the requested end', () => {
+    const end = localDate(2026, 9, 16, 10, 30)
+    const chunks = planBackfillChunks(localDate(2026, 9, 15), end, 5)
+
+    expect(chunks).toHaveLength(1)
+    expect(chunks[0]!.end).toEqual(end)
+  })
+
+  it('returns nothing when the range is empty', () => {
+    expect(planBackfillChunks(localDate(2026, 9, 16), localDate(2026, 9, 15))).toEqual([])
+  })
+})
+
+describe('backfill cursor', () => {
+  it('counts repeat aborts on the same slice and resets when a different one blocks', () => {
+    const first = nextBackfillCursor(null, '2026-09-15')
+    expect(first).toEqual({ blockedDate: '2026-09-15', attempts: 1 })
+
+    const second = nextBackfillCursor(first, '2026-09-15')
+    expect(second.attempts).toBe(2)
+
+    expect(nextBackfillCursor(second, '2026-09-16')).toEqual({ blockedDate: '2026-09-16', attempts: 1 })
+  })
+
+  it('only skips a slice once it has exhausted its retries', () => {
+    expect(shouldSkipBlockedChunk(null, '2026-09-15')).toBe(false)
+    expect(shouldSkipBlockedChunk({ blockedDate: '2026-09-15', attempts: 1 }, '2026-09-15')).toBe(false)
+    expect(shouldSkipBlockedChunk({ blockedDate: '2026-09-15', attempts: MAX_BLOCKED_CHUNK_ATTEMPTS }, '2026-09-15')).toBe(true)
+    expect(shouldSkipBlockedChunk({ blockedDate: '2026-09-15', attempts: MAX_BLOCKED_CHUNK_ATTEMPTS }, '2026-09-16')).toBe(false)
   })
 })
