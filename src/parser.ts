@@ -24,6 +24,7 @@ import type {
 } from './types.js'
 import { classifyTurn, compactUserMessage, BASH_TOOLS } from './classifier.js'
 import { loadSessionIndex, saveSessionIndex, checkSessionFile, recordParseResult, pruneIndex, clearSessionIndex } from './session-index.js'
+import { clearDiscoveryCache } from './discovery-cache.js'
 import { extractBashCommands } from './bash-utils.js'
 
 let _parseWarnings: string[] = []
@@ -662,6 +663,7 @@ export function clearParserCaches(): void {
   resolvedSourceContexts.clear()
   inFlightSourceContexts.clear()
   clearSessionIndex()
+  clearDiscoveryCache()
 }
 
 export function filterProjectsByName(
