@@ -4,6 +4,7 @@ import { mkdir, open, readFile, rename, unlink } from 'fs/promises'
 import { join } from 'path'
 
 import { getCacheDir } from './cache-dir.js'
+import type { BackfillCursor } from './progressive-backfill.js'
 
 // v6: Codex pricing fixes (no reasoning double-count; long-context tiers use full prompt
 // input including cached tokens). Bump to evict historical day rows computed with v5 math so
@@ -65,6 +66,10 @@ export type DailyCache = {
   lastComputedDate: string | null
   days: DailyEntry[]
   revalidatedAt?: number
+  /** Slice the last run aborted on, so the next run resumes there instead of restarting. */
+  backfill?: BackfillCursor | null
+  /** Days recorded without a complete scan because they exhausted their retries. */
+  partialDates?: string[]
 }
 
 type AddNewDaysOptions = {
@@ -163,6 +168,8 @@ export function addNewDays(
     lastComputedDate: nextLast,
     days: merged,
     revalidatedAt: cache.revalidatedAt,
+    backfill: cache.backfill,
+    partialDates: cache.partialDates,
   }
 }
 

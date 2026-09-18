@@ -6,9 +6,15 @@ export class ResourceBudgetError extends Error {
 }
 type Budget = { bytes: number; records: number; started: number; maxRecords: number; signal?: AbortSignal; maxBytes: number }
 const scans = new AsyncLocalStorage<Budget>()
+/** Optional lower cap, so a budget abort can be reproduced without a multi-GiB corpus.
+ *  Can only tighten the caller's limit, never raise it. */
+function effectiveMaxBytes(requested: number): number {
+  const override = Number(process.env['EXE_WATCHER_MAX_SCAN_BYTES'])
+  return Number.isFinite(override) && override > 0 ? Math.min(requested, override) : requested
+}
 export function withScanBudget<T>(fn: () => Promise<T>, maxRecords = 200_000, signal?: AbortSignal, maxBytes = 1024 * 1024 * 1024): Promise<T> {
   if (scans.getStore()) return fn()
-  return scans.run({ bytes: 0, records: 0, started: Date.now(), maxRecords, signal, maxBytes }, fn)
+  return scans.run({ bytes: 0, records: 0, started: Date.now(), maxRecords, signal, maxBytes: effectiveMaxBytes(maxBytes) }, fn)
 }
 export function chargeRead(bytes: number): void {
   const budget = scans.getStore()
