@@ -2,6 +2,7 @@ import { readdir, stat } from 'fs/promises'
 import { basename, join } from 'path'
 import { homedir } from 'os'
 
+import { cachedDiscoveryHeader, flushDiscoveryCache } from '../discovery-cache.js'
 import { readSessionFile, readSessionFirstLine, readSessionLines } from '../fs-utils.js'
 import { calculateCost } from '../models.js'
 import type { Provider, SessionSource, SessionParser, ParsedProviderCall } from './types.js'
@@ -79,13 +80,16 @@ async function readFirstLine(filePath: string): Promise<CodexEntry | null> {
   }
 }
 
-async function isValidCodexSession(filePath: string): Promise<{ valid: boolean; meta?: CodexEntry }> {
+/** The only facts discovery needs from the header. Everything else is reparsed on demand. */
+type CodexHeader = { project: string }
+
+async function readCodexHeader(filePath: string): Promise<CodexHeader | null> {
   const entry = await readFirstLine(filePath)
-  if (!entry) return { valid: false }
-  const valid = entry.type === 'session_meta' &&
+  const valid = entry?.type === 'session_meta' &&
     typeof entry.payload?.originator === 'string' &&
     entry.payload.originator.toLowerCase().startsWith('codex')
-  return { valid, meta: valid ? entry : undefined }
+  if (!valid) return null
+  return { project: sanitizeProject(entry.payload?.cwd ?? 'unknown') }
 }
 
 async function discoverSessionsInDir(codexDir: string): Promise<SessionSource[]> {
@@ -120,11 +124,14 @@ async function discoverSessionsInDir(codexDir: string): Promise<SessionSource[]>
           const s = await stat(filePath).catch(() => null)
           if (!s?.isFile()) continue
 
-          const { valid, meta } = await isValidCodexSession(filePath)
-          if (!valid || !meta) continue
+          // Codex embeds the full instruction blob in session_meta, so this header
+          // averages ~63 KiB. Cached against (dev, ino, size, mtime, ctime) it costs
+          // nothing on an unchanged file — and session files are append-only, so an
+          // unchanged fingerprint means an unchanged first line.
+          const header = await cachedDiscoveryHeader('codex', filePath, s, () => readCodexHeader(filePath))
+          if (!header) continue
 
-          const cwd = meta.payload?.cwd ?? 'unknown'
-          sources.push({ path: filePath, project: sanitizeProject(cwd), provider: 'codex' })
+          sources.push({ path: filePath, project: header.project, provider: 'codex' })
         }
       }
     }
@@ -329,7 +336,10 @@ export function createCodexProvider(codexDir?: string): Provider {
     },
 
     async discoverSessions(): Promise<SessionSource[]> {
-      return discoverSessionsInDir(dir)
+      // Flush even when the scan aborts on budget: headers already read this pass are
+      // banked, so a cold corpus converges across refreshes instead of restarting.
+      try { return await discoverSessionsInDir(dir) }
+      finally { await flushDiscoveryCache() }
     },
 
     createSessionParser(source: SessionSource, seenKeys: Set<string>): SessionParser {
