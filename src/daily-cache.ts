@@ -5,11 +5,11 @@ import { join } from 'path'
 
 import { getCacheDir } from './cache-dir.js'
 import type { BackfillCursor } from './progressive-backfill.js'
+import { getPricingFingerprint } from './models.js'
 
-// v6: Codex pricing fixes (no reasoning double-count; long-context tiers use full prompt
-// input including cached tokens). Bump to evict historical day rows computed with v5 math so
-// report/CLI/menubar-json do not disagree across cached vs freshly parsed periods.
-export const DAILY_CACHE_VERSION = 6
+// v8: historical rows are tied to the effective pricing catalog, so newly
+// refreshed rates cannot be mixed with previously cached prices.
+export const DAILY_CACHE_VERSION = 8
 export const DEFAULT_DAILY_CACHE_SCOPE = 'global'
 const DAILY_CACHE_FILENAME = 'daily-cache.json'
 
@@ -62,6 +62,9 @@ export type DailyEntry = {
 
 export type DailyCache = {
   version: number
+  pricingFingerprint?: string
+  needsRepricing?: boolean
+  previousHistoryStart?: string
   scopeKey: string
   lastComputedDate: string | null
   days: DailyEntry[]
@@ -118,6 +121,9 @@ export async function loadDailyCache(scopeKey = DEFAULT_DAILY_CACHE_SCOPE): Prom
     const parsed: unknown = JSON.parse(raw)
     if (!isValidCache(parsed)) return emptyCache(scopeKey)
     if (parsed.scopeKey !== scopeKey) return emptyCache(scopeKey)
+    if (parsed.days.length && parsed.pricingFingerprint !== getPricingFingerprint()) {
+      return { ...emptyCache(scopeKey), needsRepricing: true, previousHistoryStart: parsed.days[0]?.date }
+    }
     return parsed
   } catch {
     return emptyCache(scopeKey)
@@ -130,7 +136,7 @@ export async function saveDailyCache(cache: DailyCache): Promise<void> {
   const scopeKey = cache.scopeKey || DEFAULT_DAILY_CACHE_SCOPE
   const finalPath = getCachePath(scopeKey)
   const tempPath = `${finalPath}.${randomBytes(8).toString('hex')}.tmp`
-  const payload = JSON.stringify({ ...cache, scopeKey })
+  const payload = JSON.stringify({ ...cache, scopeKey, pricingFingerprint: getPricingFingerprint() })
   if (await readFile(finalPath, 'utf8').catch(() => '') === payload) return
   const handle = await open(tempPath, 'w', 0o600)
   try {
@@ -164,6 +170,7 @@ export function addNewDays(
     : candidateLast
   return {
     version: DAILY_CACHE_VERSION,
+    pricingFingerprint: getPricingFingerprint(),
     scopeKey: cache.scopeKey || DEFAULT_DAILY_CACHE_SCOPE,
     lastComputedDate: nextLast,
     days: merged,

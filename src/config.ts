@@ -16,6 +16,10 @@ export type Plan = {
 }
 
 export type ExeWatcherConfig = {
+  /** Optional beginning of the user's coding history, including gaps without logs. */
+  historyStartDate?: string
+  /** Additional Claude config roots (each contains projects/), e.g. old profiles. */
+  claudeConfigDirs?: string[]
   currency?: {
     code: string
     symbol?: string

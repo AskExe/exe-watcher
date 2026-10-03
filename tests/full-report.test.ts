@@ -2,6 +2,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { aggregateProjectsIntoDays } from '../src/day-aggregator.js'
 import { LatestLoad } from '../src/latest-load.js'
 import { parseAllSessions, clearParserCaches } from '../src/parser.js'
 import { aggregateModelStats, computeCategoryComparison, computeWorkingStyle } from '../src/compare-stats.js'
@@ -28,6 +29,7 @@ it('keeps exact totals, daily activity and comparisons without retaining all-tim
   const daily = Object.values(compact[0]!.sessions[0]!.reportSummary!.daily)
   expect(daily.reduce((n,r)=>n+r.calls,0)).toBe(60)
   expect(daily.reduce((n,r)=>n+r.cost,0)).toBeCloseTo(full[0]!.totalCostUSD)
+  expect(aggregateProjectsIntoDays(compact)).toEqual(aggregateProjectsIntoDays(full))
   expect(aggregateModelStats(compact)).toEqual(aggregateModelStats(full))
   const models=aggregateModelStats(full).map(x=>x.model)
   expect(computeCategoryComparison(compact,models[0]!,models[1]!)).toEqual(computeCategoryComparison(full,models[0]!,models[1]!))

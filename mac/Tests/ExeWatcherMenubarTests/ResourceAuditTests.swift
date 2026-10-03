@@ -21,6 +21,71 @@ private actor AuditGate {
 }
 @Suite("Resource audit safety assertions", .serialized)
 struct ResourceAuditTests {
+    private func payload(cost: Double, warnings: [String] = []) throws -> MenubarPayload {
+        var json = try JSONSerialization.jsonObject(with: JSONEncoder().encode(MenubarPayload.empty)) as! [String: Any]
+        var current = json["current"] as! [String: Any]
+        current["cost"] = cost
+        json["current"] = current
+        json["diagnostics"] = ["daysCount": 1, "parseTimeMs": 1, "warnings": warnings]
+        return try JSONDecoder().decode(MenubarPayload.self, from: JSONSerialization.data(withJSONObject: json))
+    }
+
+    @Test @MainActor
+    func failedScanDisguisedAsZeroKeepsLastGoodTotalAndBacksOff() async throws {
+        let good = try payload(cost: 300)
+        let bad = try payload(cost: 0, warnings: ["parseAllSessions failed: Resource limit reached (30 second scan budget)"])
+        actor Responses {
+            var count = 0
+            func next(_ good: MenubarPayload, _ bad: MenubarPayload) -> MenubarPayload {
+                count += 1
+                return count == 1 ? good : bad
+            }
+        }
+        let responses = Responses()
+        let clock = AuditClock()
+        let store = AppStore(fetchPayload: { _, _, _ in await responses.next(good, bad) }, now: { clock.now() })
+        await store.refreshTodayBadge()
+        await store.refreshTodayBadge()
+        #expect(store.todayPayload?.current.cost == 300)
+        #expect(store.lastBadgeRefreshError != nil)
+        #expect(store.dataMayBeStale)
+        await store.refreshTodayBadge()
+        #expect(await responses.count == 2)
+    }
+
+    @Test @MainActor
+    func lastGoodBadgeSurvivesRestartButDoesNotLeakAcrossMidnight() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let url = dir.appendingPathComponent("badge.json")
+        let clock = AuditClock()
+        let good = try payload(cost: 300)
+        let original = AppStore(fetchPayload: { _, _, _ in good }, now: { clock.now() }, badgeCacheURL: url)
+        await original.refreshTodayBadge()
+        let restart = AppStore(fetchPayload: { _, _, _ in throw DataClientError.timeout() }, now: { clock.now() }, badgeCacheURL: url)
+        #expect(restart.todayPayload?.current.cost == 300)
+        await restart.refreshTodayBadge()
+        #expect(restart.todayPayload?.current.cost == 300)
+        clock.advance(86400)
+        let tomorrow = AppStore(now: { clock.now() }, badgeCacheURL: url)
+        #expect(tomorrow.todayPayload == nil)
+        // A completed scan with no usage is still a legitimate zero.
+        let zero = try payload(cost: 0)
+        let emptyDay = AppStore(fetchPayload: { _, _, _ in zero }, now: { clock.now() }, badgeCacheURL: url)
+        await emptyDay.refreshTodayBadge()
+        #expect(emptyDay.todayPayload?.current.cost == 0)
+        #expect(emptyDay.lastBadgeRefreshError == nil)
+    }
+
+    @Test
+    func scannerRunsAtLowPriority() async throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
+        process.arguments = ["-c", "import os,time; time.sleep(0.05); print(os.getpriority(os.PRIO_PROCESS,0))"]
+        let result = try await CLIProcessRunner(process: process, timeout: 5).run()
+        #expect(Int(String(data: result.0, encoding: .utf8)!.trimmingCharacters(in: .whitespacesAndNewlines))! >= 10)
+    }
+
     @Test @MainActor
     func repeatedFailuresBackOffAcrossRefreshPaths() async {
         let clock = AuditClock()

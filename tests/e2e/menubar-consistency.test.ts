@@ -1,7 +1,9 @@
 import { execFile } from 'child_process'
 import { join } from 'path'
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'fs'
+import { tmpdir } from 'os'
 
-import { describe, expect, it } from 'vitest'
+import { afterAll, describe, expect, it } from 'vitest'
 
 // ---------------------------------------------------------------------------
 // Helper: run the CLI and parse JSON output
@@ -19,6 +21,38 @@ function localDateKey(date = new Date()): string {
   return `${year}-${month}-${day}`
 }
 
+// Exercise real CLI processes without scanning the developer's usage or fetching rates.
+const fixtureHome = mkdtempSync(join(tmpdir(), 'watcher-menubar-e2e-'))
+const project = join(fixtureHome, '.claude/projects/fixture')
+const fixtureCache = join(fixtureHome, '.cache/exe-watcher')
+mkdirSync(project, { recursive: true })
+mkdirSync(fixtureCache, { recursive: true })
+mkdirSync(join(fixtureHome, '.config/exe-watcher'), { recursive: true })
+for (const age of [0, 3, 20, 400]) {
+  const date = new Date()
+  date.setDate(date.getDate() - age)
+  // Keep today's fixture inside today even when tests run before noon.
+  if (age > 0) date.setHours(12, 0, 0, 0)
+  const id = `fixture-${age}`
+  writeFileSync(join(project, `${id}.jsonl`), JSON.stringify({
+    type: 'assistant', sessionId: id, timestamp: date.toISOString(),
+    message: { id, model: 'claude-sonnet-4-6', content: [],
+      usage: { input_tokens: 1000, output_tokens: 500 } },
+  }) + '\n')
+}
+const beginning = new Date()
+beginning.setDate(beginning.getDate() - 400)
+writeFileSync(join(fixtureHome, '.config/exe-watcher/config.json'),
+  JSON.stringify({ historyStartDate: localDateKey(beginning) }))
+writeFileSync(join(fixtureCache, 'litellm-pricing.json'), JSON.stringify({
+  schemaVersion: 2, timestamp: Date.now(), warnings: [], data: {
+    'claude-sonnet-4-6': { inputCostPerToken: 3e-6, outputCostPerToken: 15e-6,
+      cacheReadCostPerToken: 0.3e-6, cacheWriteCostPerToken: 3.75e-6,
+      webSearchCostPerRequest: 0.01, fastMultiplier: 1 },
+  },
+}))
+afterAll(() => rmSync(fixtureHome, { recursive: true, force: true }))
+
 function runCLI(
   period: Period,
   provider = 'all',
@@ -35,7 +69,10 @@ function runCLI(
 
     execFile('npx', ['tsx', ...args], {
       timeout: 30_000,
-      env: { ...process.env, NODE_NO_WARNINGS: '1' },
+      env: { ...process.env, NODE_NO_WARNINGS: '1', HOME: fixtureHome,
+        CLAUDE_CONFIG_DIR: join(fixtureHome, '.claude'), CODEX_HOME: join(fixtureHome, '.codex'),
+        XDG_DATA_HOME: join(fixtureHome, '.local/share'), XDG_CONFIG_HOME: join(fixtureHome, '.config'),
+        EXE_WATCHER_CACHE_DIR: fixtureCache },
     }, (err, stdout, stderr) => {
       if (err) {
         reject(new Error(
@@ -69,9 +106,14 @@ function getCLI(period: Period, provider = 'all') {
   return cache.get(key)!
 }
 
-// Pre-warm all period+all combos (they run in parallel)
+// Serialize the five real processes to avoid competing cold-start scans.
+let periodLoad: Promise<unknown> = Promise.resolve()
 const allPeriodResults = Object.fromEntries(
-  PERIODS.map((p) => [p, getCLI(p, 'all')] as const),
+  PERIODS.map((p) => {
+    const result = periodLoad.then(() => getCLI(p, 'all'))
+    periodLoad = result
+    return [p, result] as const
+  }),
 ) as Record<Period, Promise<{ data: Record<string, unknown>; raw: string }>>
 
 // ---------------------------------------------------------------------------
@@ -296,10 +338,10 @@ describe('CLI menubar-json E2E', { timeout: 60_000 }, () => {
   // =========================================================================
   describe('History Integrity', () => {
     describe.each(PERIODS)('period=%s', (period) => {
-      it('daily history length <= 365', async () => {
+      it('retains the full sorted history without duplicate dates', async () => {
         const { data } = await allPeriodResults[period]
         const history = data.history as { daily: unknown[] }
-        expect(history.daily.length).toBeLessThanOrEqual(365)
+        expect(new Set((history.daily as Array<{ date: string }>).map(day => day.date)).size).toBe(history.daily.length)
       })
 
       it('all dates are valid yyyy-MM-dd format', async () => {

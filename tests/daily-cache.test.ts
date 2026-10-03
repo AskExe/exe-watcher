@@ -3,6 +3,7 @@ import { readFile, rm } from 'fs/promises'
 import { existsSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
+import { getPricingFingerprint, setModelAliases } from '../src/models.js'
 
 import {
   addNewDays,
@@ -42,6 +43,7 @@ beforeEach(() => {
 })
 
 afterEach(async () => {
+  setModelAliases({})
   delete process.env['EXE_WATCHER_CACHE_DIR']
   if (existsSync(TMP_CACHE_ROOT)) {
     await rm(TMP_CACHE_ROOT, { recursive: true, force: true })
@@ -49,6 +51,13 @@ afterEach(async () => {
 })
 
 describe('loadDailyCache', () => {
+  it('invalidates stored history when effective model pricing changes', async () => {
+    await saveDailyCache({ version: DAILY_CACHE_VERSION, scopeKey: DEFAULT_DAILY_CACHE_SCOPE,
+      lastComputedDate: '2026-04-10', days: [emptyDay('2026-04-10', 10)] })
+    expect((await loadDailyCache()).days).toHaveLength(1)
+    setModelAliases({ 'custom-model': 'gpt-6-astra' })
+    expect((await loadDailyCache()).days).toEqual([])
+  })
   it('returns an empty cache when the file does not exist', async () => {
     const cache = await loadDailyCache()
     expect(cache.version).toBe(DAILY_CACHE_VERSION)
@@ -90,7 +99,7 @@ describe('loadDailyCache', () => {
     }
     await saveDailyCache(saved)
     const loaded = await loadDailyCache()
-    expect(loaded).toEqual(saved)
+    expect(loaded).toEqual({ ...saved, pricingFingerprint: getPricingFingerprint() })
   })
 
   it('round-trips a scoped cache through save and load without touching global cache', async () => {
@@ -103,7 +112,7 @@ describe('loadDailyCache', () => {
     }
     await saveDailyCache(saved)
     const loaded = await loadDailyCache(scopeKey)
-    expect(loaded).toEqual(saved)
+    expect(loaded).toEqual({ ...saved, pricingFingerprint: getPricingFingerprint() })
     const global = await loadDailyCache()
     expect(global.days).toEqual([])
   })
@@ -123,7 +132,7 @@ describe('saveDailyCache', () => {
     const tempLeftovers = files.filter(f => f.endsWith('.tmp'))
     expect(tempLeftovers).toEqual([])
     const finalFile = await readFile(join(TMP_CACHE_ROOT, 'daily-cache.json'), 'utf-8')
-    expect(JSON.parse(finalFile)).toEqual(saved)
+    expect(JSON.parse(finalFile)).toEqual({ ...saved, pricingFingerprint: getPricingFingerprint() })
   })
 })
 

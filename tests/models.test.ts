@@ -39,8 +39,8 @@ describe('getModelCosts', () => {
     expect(getModelCosts('gpt-5-mini')).toMatchObject({
       inputCostPerToken: 0.25e-6,
       outputCostPerToken: 2e-6,
-      cacheReadCostPerToken: 0.025e-6,
     })
+    expect(getModelCosts('gpt-5-mini')!.cacheReadCostPerToken).toBeCloseTo(0.025e-6, 14)
     expect(getModelCosts('gpt-5.1-codex')).toMatchObject({
       inputCostPerToken: 1.25e-6,
       outputCostPerToken: 10e-6,

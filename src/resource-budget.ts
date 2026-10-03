@@ -2,7 +2,7 @@ import { getHeapStatistics } from 'node:v8'
 import { AsyncLocalStorage } from 'node:async_hooks'
 
 export class ResourceBudgetError extends Error {
-  constructor(detail: string) { super(`Resource limit reached (${detail}). Showing the last successful refresh; retry after background ingestion progresses.`); this.name = 'ResourceBudgetError' }
+  constructor(detail: string) { super(`Resource limit reached (${detail}). Scan incomplete; Watcher will retain the last successful refresh.`); this.name = 'ResourceBudgetError' }
 }
 type Budget = { bytes: number; records: number; started: number; maxRecords: number; signal?: AbortSignal; maxBytes: number }
 const scans = new AsyncLocalStorage<Budget>()

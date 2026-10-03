@@ -371,7 +371,7 @@ skipUnlessSqlite('opencode provider - session parsing', () => {
     expect(seenKeys.has('opencode:sess-1:msg-1')).toBe(true)
   })
 
-  it('falls back to pre-calculated cost for unknown models', async () => {
+  it('does not mix an old reported bill with current API-equivalent pricing for unknown models', async () => {
     const dbPath = createTestDb(tmpDir)
     withTestDb(dbPath, (db) => {
       insertSession(db, 'sess-1')
@@ -383,7 +383,8 @@ skipUnlessSqlite('opencode provider - session parsing', () => {
 
     const calls = await collectCalls(createOpenCodeProvider(tmpDir), dbPath, 'sess-1')
     expect(calls).toHaveLength(1)
-    expect(calls[0]!.costUSD).toBe(0.42)
+    expect(calls[0]!.costUSD).toBe(0)
+    expect(calls[0]!.inputTokens).toBe(100)
   })
 
   it('uses calculated cost over pre-calculated for known models', async () => {
@@ -415,7 +416,7 @@ skipUnlessSqlite('opencode provider - session parsing', () => {
     expect(calls).toHaveLength(1)
     expect(calls[0]!.inputTokens).toBe(0)
     expect(calls[0]!.outputTokens).toBe(0)
-    expect(calls[0]!.costUSD).toBe(0.10)
+    expect(calls[0]!.costUSD).toBe(0)
   })
 
   it('uses "unknown" for missing modelID', async () => {

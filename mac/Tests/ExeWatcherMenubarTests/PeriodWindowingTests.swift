@@ -58,13 +58,13 @@ struct PeriodWindowingTests {
         #expect(window.entries.last?.date == "2026-05-06")
     }
 
-    @Test("all window expands to the full tracked 365-day cap")
-    func allWindowUsesTrackedCap() {
-        let window = makePeriodHistoryWindow(period: .all, history: [sampleDay("2026-05-06", cost: 4)], now: now)
+    @Test("all window includes history older than one year")
+    func allWindowUsesFullHistory() {
+        let window = makePeriodHistoryWindow(period: .all, history: [sampleDay("2025-01-01", cost: 2), sampleDay("2026-05-06", cost: 4)], now: now)
 
         #expect(window.label == "All time")
         #expect(window.comparisonLabel == nil)
-        #expect(window.entries.count == 365)
+        #expect(window.entries.count == 491)
         #expect(window.entries.last?.date == "2026-05-06")
         #expect(window.entries.last?.cost == 4)
     }

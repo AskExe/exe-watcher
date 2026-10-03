@@ -1,9 +1,11 @@
 import type { SessionSummary } from './types.js'
 import { aggregateModelStats, type ModelStats } from './compare-stats.js'
-import { dateKey } from './day-aggregator.js'
+import type { DailyEntry } from './daily-cache.js'
+import { aggregateProjectsIntoDays, dateKey } from './day-aggregator.js'
 
 export type ReportSummary = {
   daily: Record<string, { cost: number; calls: number }>
+  dailyEntries: Record<string, DailyEntry>
   models: Record<string, ModelStats>
   categories: Record<string, Record<string, { turns: number; editTurns: number; oneShotTurns: number }>>
   styles: Record<string, { totalTurns: number; agentSpawns: number; planModeUses: number; totalToolCalls: number; fastModeCalls: number }>
@@ -12,14 +14,15 @@ const planning = new Set(['TaskCreate', 'TaskUpdate', 'TodoWrite', 'EnterPlanMod
 
 /** Preserve report and comparison metrics before releasing per-call objects. */
 export function compactReportSession(session: SessionSummary): SessionSummary {
-  const report: ReportSummary = { daily: Object.create(null), models: Object.create(null), categories: Object.create(null), styles: Object.create(null) }
+  const report: ReportSummary = { daily: Object.create(null), dailyEntries: Object.fromEntries(aggregateProjectsIntoDays([{ project: session.project, projectPath: '', sessions: [session], totalCostUSD: session.totalCostUSD, totalApiCalls: session.apiCalls }]).map(day => [day.date, day])), models: Object.create(null), categories: Object.create(null), styles: Object.create(null) }
   for (const model of aggregateModelStats([{ project: session.project, projectPath: '', sessions: [session], totalCostUSD: session.totalCostUSD, totalApiCalls: session.apiCalls }])) report.models[model.model] = model
   for (const turn of session.turns) {
-    if (turn.timestamp) {
-      const day = dateKey(turn.timestamp)
+    for (const call of turn.assistantCalls) {
+      if (!call.timestamp) continue
+      const day = dateKey(call.timestamp)
       const d = report.daily[day] ??= { cost: 0, calls: 0 }
-      d.cost += turn.assistantCalls.reduce((n, c) => n + c.costUSD, 0)
-      d.calls += turn.assistantCalls.length
+      d.cost += call.costUSD
+      d.calls++
     }
     const model = turn.assistantCalls[0]?.model
     if (!model) continue

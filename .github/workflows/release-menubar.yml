@@ -58,10 +58,14 @@ jobs:
             Install with:
 
             ```
-            npx exe-watcher menubar
+            npm install -g exe-watcher@latest --registry=https://registry.npmjs.org
+            exe-watcher menubar --force
             ```
 
-            That command drops the app into `~/Applications`, clears the download
+            Update both components to receive CLI accounting and native scheduling fixes.
+            The app Update button updates the app only.
+
+            The menubar command drops the app into `~/Applications`, clears the download
             quarantine, and launches it. If you download the zip from this page directly
             and macOS shows "cannot verify developer", right-click the app in Finder and
             pick Open to whitelist it once.

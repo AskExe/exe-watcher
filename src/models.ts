@@ -4,14 +4,18 @@ import { join } from 'path'
 import { createHash, randomBytes } from 'crypto'
 
 import { getCacheDir } from './cache-dir.js'
+import { fetchOfficialPricing, OFFICIAL_PRICING_SOURCES } from './official-pricing.js'
+import verifiedPricing from './verified-pricing.json'
 
 export type ModelCosts = {
   inputCostPerToken: number
   outputCostPerToken: number
   cacheWriteCostPerToken: number
+  cacheWrite1hCostPerToken?: number
   cacheReadCostPerToken: number
   webSearchCostPerRequest: number
   fastMultiplier: number
+  source?: string
   contextTiers?: Array<{
     minPromptTokens: number
     inputCostPerToken?: number
@@ -26,6 +30,13 @@ type LiteLLMEntry = {
   output_cost_per_token?: number
   cache_creation_input_token_cost?: number
   cache_read_input_token_cost?: number
+  input_cost_per_token_above_272k_tokens?: number
+  output_cost_per_token_above_272k_tokens?: number
+  cache_creation_input_token_cost_above_272k_tokens?: number
+  cache_read_input_token_cost_above_272k_tokens?: number
+  cache_creation_input_token_cost_above_1hr?: number
+  litellm_provider?: string
+  source?: string
   provider_specific_entry?: { fast?: number }
 }
 
@@ -34,13 +45,19 @@ const CACHE_TTL_MS = 24 * 60 * 60 * 1000
 const WEB_SEARCH_COST = 0.01
 const LONG_CONTEXT_1M_THRESHOLD_TOKENS = 272_000
 const GEMINI_LONG_CONTEXT_THRESHOLD_TOKENS = 200_000
-const DIRECT_PROVIDER_PREFIXES = ['openai/', 'anthropic/', 'google/', 'vertex_ai/', 'minimax/']
+const DIRECT_PROVIDER_PREFIXES = ['openai/', 'anthropic/', 'gemini/', 'google/', 'minimax/', 'zai/', 'moonshot/', 'deepseek/', 'xai/']
+const PRICING_CACHE_SCHEMA = 2
 
 const FALLBACK_PRICING: Record<string, ModelCosts> = {
+  // Anthropic first-party list prices: https://platform.claude.com/docs/en/about-claude/pricing
+  'claude-fable-5-1': { inputCostPerToken: 10e-6, outputCostPerToken: 50e-6, cacheWriteCostPerToken: 12.5e-6, cacheReadCostPerToken: 0.25e-6, webSearchCostPerRequest: WEB_SEARCH_COST, fastMultiplier: 1 },
+  'claude-opus-5-5': { inputCostPerToken: 4e-6, outputCostPerToken: 20e-6, cacheWriteCostPerToken: 5e-6, cacheReadCostPerToken: 0.2e-6, webSearchCostPerRequest: WEB_SEARCH_COST, fastMultiplier: 2 },
+  'claude-opus-5': { inputCostPerToken: 5e-6, outputCostPerToken: 25e-6, cacheWriteCostPerToken: 6.25e-6, cacheReadCostPerToken: 0.5e-6, webSearchCostPerRequest: WEB_SEARCH_COST, fastMultiplier: 2 },
+  'claude-sonnet-5': { inputCostPerToken: 2e-6, outputCostPerToken: 10e-6, cacheWriteCostPerToken: 2.5e-6, cacheReadCostPerToken: 0.2e-6, webSearchCostPerRequest: WEB_SEARCH_COST, fastMultiplier: 1 },
   'claude-fable-5': { inputCostPerToken: 10e-6, outputCostPerToken: 50e-6, cacheWriteCostPerToken: 12.5e-6, cacheReadCostPerToken: 1e-6, webSearchCostPerRequest: WEB_SEARCH_COST, fastMultiplier: 1 },
-  'claude-opus-4-8': { inputCostPerToken: 5e-6, outputCostPerToken: 25e-6, cacheWriteCostPerToken: 6.25e-6, cacheReadCostPerToken: 0.5e-6, webSearchCostPerRequest: WEB_SEARCH_COST, fastMultiplier: 1 },
-  'claude-opus-4-7': { inputCostPerToken: 5e-6, outputCostPerToken: 25e-6, cacheWriteCostPerToken: 6.25e-6, cacheReadCostPerToken: 0.5e-6, webSearchCostPerRequest: WEB_SEARCH_COST, fastMultiplier: 6 },
-  'claude-opus-4-6': { inputCostPerToken: 5e-6, outputCostPerToken: 25e-6, cacheWriteCostPerToken: 6.25e-6, cacheReadCostPerToken: 0.5e-6, webSearchCostPerRequest: WEB_SEARCH_COST, fastMultiplier: 6 },
+  'claude-opus-4-8': { inputCostPerToken: 5e-6, outputCostPerToken: 25e-6, cacheWriteCostPerToken: 6.25e-6, cacheReadCostPerToken: 0.5e-6, webSearchCostPerRequest: WEB_SEARCH_COST, fastMultiplier: 2 },
+  'claude-opus-4-7': { inputCostPerToken: 5e-6, outputCostPerToken: 25e-6, cacheWriteCostPerToken: 6.25e-6, cacheReadCostPerToken: 0.5e-6, webSearchCostPerRequest: WEB_SEARCH_COST, fastMultiplier: 1 },
+  'claude-opus-4-6': { inputCostPerToken: 5e-6, outputCostPerToken: 25e-6, cacheWriteCostPerToken: 6.25e-6, cacheReadCostPerToken: 0.5e-6, webSearchCostPerRequest: WEB_SEARCH_COST, fastMultiplier: 1 },
   'claude-opus-4-5': { inputCostPerToken: 5e-6, outputCostPerToken: 25e-6, cacheWriteCostPerToken: 6.25e-6, cacheReadCostPerToken: 0.5e-6, webSearchCostPerRequest: WEB_SEARCH_COST, fastMultiplier: 1 },
   'claude-opus-4-1': { inputCostPerToken: 15e-6, outputCostPerToken: 75e-6, cacheWriteCostPerToken: 18.75e-6, cacheReadCostPerToken: 1.5e-6, webSearchCostPerRequest: WEB_SEARCH_COST, fastMultiplier: 1 },
   'claude-opus-4': { inputCostPerToken: 15e-6, outputCostPerToken: 75e-6, cacheWriteCostPerToken: 18.75e-6, cacheReadCostPerToken: 1.5e-6, webSearchCostPerRequest: WEB_SEARCH_COST, fastMultiplier: 1 },
@@ -100,7 +117,6 @@ const FALLBACK_PRICING: Record<string, ModelCosts> = {
   'gpt-5.4-mini': { inputCostPerToken: 0.75e-6, outputCostPerToken: 4.5e-6, cacheWriteCostPerToken: 0.75e-6, cacheReadCostPerToken: 0.075e-6, webSearchCostPerRequest: WEB_SEARCH_COST, fastMultiplier: 1 },
   'gpt-5.4-nano': { inputCostPerToken: 0.2e-6, outputCostPerToken: 1.25e-6, cacheWriteCostPerToken: 0.2e-6, cacheReadCostPerToken: 0.02e-6, webSearchCostPerRequest: WEB_SEARCH_COST, fastMultiplier: 1 },
   'gpt-5.3-codex': { inputCostPerToken: 1.75e-6, outputCostPerToken: 14e-6, cacheWriteCostPerToken: 1.75e-6, cacheReadCostPerToken: 0.175e-6, webSearchCostPerRequest: WEB_SEARCH_COST, fastMultiplier: 1 },
-  'gpt-5.3-codex-spark': { inputCostPerToken: 1.75e-6, outputCostPerToken: 14e-6, cacheWriteCostPerToken: 1.75e-6, cacheReadCostPerToken: 0.175e-6, webSearchCostPerRequest: WEB_SEARCH_COST, fastMultiplier: 1 },
   'gpt-5.2': { inputCostPerToken: 1.75e-6, outputCostPerToken: 14e-6, cacheWriteCostPerToken: 1.75e-6, cacheReadCostPerToken: 0.175e-6, webSearchCostPerRequest: WEB_SEARCH_COST, fastMultiplier: 1 },
   'gpt-5.1': { inputCostPerToken: 1.25e-6, outputCostPerToken: 10e-6, cacheWriteCostPerToken: 1.25e-6, cacheReadCostPerToken: 0.125e-6, webSearchCostPerRequest: WEB_SEARCH_COST, fastMultiplier: 1 },
   'gpt-5': { inputCostPerToken: 1.25e-6, outputCostPerToken: 10e-6, cacheWriteCostPerToken: 1.25e-6, cacheReadCostPerToken: 0.125e-6, webSearchCostPerRequest: WEB_SEARCH_COST, fastMultiplier: 1 },
@@ -120,6 +136,7 @@ const FALLBACK_PRICING: Record<string, ModelCosts> = {
   'MiniMax-M2.7-highspeed': { inputCostPerToken: 0.6e-6, outputCostPerToken: 2.4e-6, cacheWriteCostPerToken: 0.375e-6, cacheReadCostPerToken: 0.06e-6, webSearchCostPerRequest: WEB_SEARCH_COST, fastMultiplier: 1 },
   'MiniMax-M2.7': { inputCostPerToken: 0.3e-6, outputCostPerToken: 1.2e-6, cacheWriteCostPerToken: 0.375e-6, cacheReadCostPerToken: 0.06e-6, webSearchCostPerRequest: WEB_SEARCH_COST, fastMultiplier: 1 },
 }
+Object.assign(FALLBACK_PRICING, verifiedPricing.models)
 
 let pricingCache: Map<string, ModelCosts> | null = null
 let _pricingWarnings: string[] = []
@@ -137,6 +154,12 @@ export function getPricingLastUpdated(): number | null {
   return _pricingLastUpdated
 }
 
+export function getPricingMetadata() {
+  return { basis: 'latest-rates' as const, currency: 'USD', refreshedAt: _pricingLastUpdated ? new Date(_pricingLastUpdated).toISOString() : null,
+    fallbackVerifiedOn: verifiedPricing.verifiedOn, sources: OFFICIAL_PRICING_SOURCES,
+    note: 'Historical and current usage are valued at the latest available API list rates. This is an API-equivalent estimate, not a reconstruction of past invoices.' }
+}
+
 function getCachePath(): string {
   return join(getCacheDir(), 'litellm-pricing.json')
 }
@@ -145,25 +168,41 @@ function getLastKnownGoodPath(): string {
   return join(getCacheDir(), 'pricing-cache.json')
 }
 
-function parseLiteLLMEntry(entry: LiteLLMEntry): ModelCosts | null {
+export function parseLiteLLMEntry(entry: LiteLLMEntry): ModelCosts | null {
   if (entry.input_cost_per_token === undefined || entry.output_cost_per_token === undefined) return null
-  return {
+  if ([entry.input_cost_per_token, entry.output_cost_per_token].some(v => !Number.isFinite(v) || v < 0)) return null
+  const costs: ModelCosts = {
     inputCostPerToken: entry.input_cost_per_token,
     outputCostPerToken: entry.output_cost_per_token,
-    cacheWriteCostPerToken: entry.cache_creation_input_token_cost ?? entry.input_cost_per_token * 1.25,
-    cacheReadCostPerToken: entry.cache_read_input_token_cost ?? entry.input_cost_per_token * 0.1,
+    cacheWriteCostPerToken: entry.cache_creation_input_token_cost ?? (entry.litellm_provider === 'anthropic' ? entry.input_cost_per_token * 1.25 : entry.input_cost_per_token),
+    cacheWrite1hCostPerToken: entry.cache_creation_input_token_cost_above_1hr,
+    cacheReadCostPerToken: entry.cache_read_input_token_cost ?? entry.input_cost_per_token,
     webSearchCostPerRequest: WEB_SEARCH_COST,
     fastMultiplier: entry.provider_specific_entry?.fast ?? 1,
+    source: entry.source,
   }
+  if (entry.input_cost_per_token_above_272k_tokens !== undefined) costs.contextTiers = [{
+    minPromptTokens: LONG_CONTEXT_1M_THRESHOLD_TOKENS,
+    inputCostPerToken: entry.input_cost_per_token_above_272k_tokens,
+    outputCostPerToken: entry.output_cost_per_token_above_272k_tokens,
+    cacheWriteCostPerToken: entry.cache_creation_input_token_cost_above_272k_tokens,
+    cacheReadCostPerToken: entry.cache_read_input_token_cost_above_272k_tokens,
+  }]
+  return costs
 }
 
 async function fetchAndCachePricing(): Promise<Map<string, ModelCosts>> {
-  const response = await fetch(LITELLM_URL)
-  if (!response.ok) throw new Error(`HTTP ${response.status}`)
-  const data = await response.json() as Record<string, LiteLLMEntry>
+  const [feed, official] = await Promise.allSettled([
+    fetch(LITELLM_URL, { signal: AbortSignal.timeout(8_000) }).then(async response => {
+      if (!response.ok) throw new Error(`HTTP ${response.status}`)
+      return await response.json() as Record<string, LiteLLMEntry>
+    }),
+    fetchOfficialPricing(),
+  ])
+  const data = feed.status === 'fulfilled' ? feed.value : {}
+  if (feed.status === 'rejected') _pricingWarnings.push('Could not refresh the supplemental model pricing feed.')
   const pricing = new Map<string, ModelCosts>()
   const preferredStripped = new Map<string, ModelCosts>()
-  const fallbackStripped = new Map<string, ModelCosts>()
 
   for (const [name, entry] of Object.entries(data)) {
     const costs = parseLiteLLMEntry(entry)
@@ -172,16 +211,19 @@ async function fetchAndCachePricing(): Promise<Map<string, ModelCosts>> {
     const stripped = name.replace(/^[^/]+\//, '')
     if (stripped === name) continue
     const isDirectProvider = DIRECT_PROVIDER_PREFIXES.some(prefix => name.toLowerCase().startsWith(prefix))
-    const target = isDirectProvider ? preferredStripped : fallbackStripped
-    if (!target.has(stripped)) target.set(stripped, costs)
+    if (isDirectProvider && !preferredStripped.has(stripped)) preferredStripped.set(stripped, costs)
   }
 
   for (const [name, costs] of preferredStripped) {
     if (!pricing.has(name)) pricing.set(name, costs)
   }
-  for (const [name, costs] of fallbackStripped) {
-    if (!pricing.has(name)) pricing.set(name, costs)
+  // Unqualified model names use their vendor's rates. An arbitrary reseller
+  // must never win just because its row happens to appear first in the feed.
+  if (official.status === 'fulfilled') {
+    _pricingWarnings.push(...official.value.warnings)
+    for (const [name, costs] of official.value.models) pricing.set(name, costs)
   }
+  if (!pricing.size) throw new Error('No pricing sources available')
 
   await mkdir(getCacheDir(), { recursive: true })
   const finalPath = getCachePath()
@@ -189,8 +231,10 @@ async function fetchAndCachePricing(): Promise<Map<string, ModelCosts>> {
   const handle = await open(tmpPath, 'w', 0o600)
   try {
     await handle.writeFile(JSON.stringify({
+      schemaVersion: PRICING_CACHE_SCHEMA,
       timestamp: Date.now(),
       data: Object.fromEntries(pricing),
+      warnings: _pricingWarnings,
     }), { encoding: 'utf-8' })
     await handle.sync()
   } finally {
@@ -210,8 +254,10 @@ async function fetchAndCachePricing(): Promise<Map<string, ModelCosts>> {
     const lkgHandle = await open(lkgTmp, 'w', 0o600)
     try {
       await lkgHandle.writeFile(JSON.stringify({
+        schemaVersion: PRICING_CACHE_SCHEMA,
         timestamp: Date.now(),
         data: Object.fromEntries(pricing),
+        warnings: _pricingWarnings,
       }), { encoding: 'utf-8' })
       await lkgHandle.sync()
     } finally {
@@ -226,8 +272,10 @@ async function fetchAndCachePricing(): Promise<Map<string, ModelCosts>> {
 async function loadCachedPricing(): Promise<{ map: Map<string, ModelCosts>; timestamp: number } | null> {
   try {
     const raw = await readFile(getCachePath(), 'utf-8')
-    const cached = JSON.parse(raw) as { timestamp: number; data: Record<string, ModelCosts> }
+    const cached = JSON.parse(raw) as { schemaVersion?: number; timestamp: number; data: Record<string, ModelCosts>; warnings?: string[] }
+    if (cached.schemaVersion !== PRICING_CACHE_SCHEMA) return null
     if (Date.now() - cached.timestamp > CACHE_TTL_MS) return null
+    _pricingWarnings.push(...(cached.warnings ?? []))
     return { map: new Map(Object.entries(cached.data)), timestamp: cached.timestamp }
   } catch {
     return null
@@ -238,7 +286,9 @@ async function loadCachedPricing(): Promise<{ map: Map<string, ModelCosts>; time
 async function loadLastKnownGoodPricing(): Promise<{ map: Map<string, ModelCosts>; timestamp: number } | null> {
   try {
     const raw = await readFile(getLastKnownGoodPath(), 'utf-8')
-    const cached = JSON.parse(raw) as { timestamp: number; data: Record<string, ModelCosts> }
+    const cached = JSON.parse(raw) as { schemaVersion?: number; timestamp: number; data: Record<string, ModelCosts>; warnings?: string[] }
+    if (cached.schemaVersion !== PRICING_CACHE_SCHEMA) return null
+    _pricingWarnings.push(...(cached.warnings ?? []))
     return { map: new Map(Object.entries(cached.data)), timestamp: cached.timestamp }
   } catch {
     return null
@@ -312,6 +362,10 @@ function getCanonicalName(model: string): string {
 
 export function getModelCosts(model: string): ModelCosts | null {
   const canonical = resolveAlias(getCanonicalName(model))
+  // Spark has no published first-party token rate. Do not inherit Codex's rate.
+  if (canonical === 'gpt-5.3-codex-spark' && !userAliases[canonical]) return null
+  const qualified = pricingCache?.get(model)
+  if (model.includes('/') && qualified) return qualified
   const exactFetched = pricingCache?.get(canonical) ?? null
   const exactFallback = Object.hasOwn(FALLBACK_PRICING, canonical) ? FALLBACK_PRICING[canonical]! : null
   const exactMatch = mergeModelCosts(exactFetched, exactFallback)
@@ -331,25 +385,47 @@ export function calculateCost(
   webSearchRequests: number,
   speed: 'standard' | 'fast' = 'standard',
   tierInputTokens?: number,
+  cacheCreation1hTokens = 0,
 ): number {
   const baseCosts = getModelCosts(model)
   const costs = applyContextTier(baseCosts, tierInputTokens ?? inputTokens)
-  if (!costs) return 0
+  if (!costs) {
+    if (inputTokens + outputTokens + cacheCreationTokens + cacheReadTokens > 0) {
+      const warning = `No API pricing for model "${model}"; its tokens are counted but its cost is excluded. Configure a model alias only when the underlying API model is known.`
+      if (!_pricingWarnings.includes(warning)) _pricingWarnings.push(warning)
+    }
+    return 0
+  }
 
+  // The aggregate cache-creation count already includes both TTLs. Charge the
+  // 1h portion at 2x input, and the remainder at the model's 5m write rate.
+  const oneHourTokens = Math.min(cacheCreationTokens, Math.max(0, cacheCreation1hTokens))
   const multiplier = speed === 'fast' ? costs.fastMultiplier : 1
 
   return multiplier * (
     inputTokens * costs.inputCostPerToken +
     outputTokens * costs.outputCostPerToken +
-    cacheCreationTokens * costs.cacheWriteCostPerToken +
-    cacheReadTokens * costs.cacheReadCostPerToken +
-    webSearchRequests * costs.webSearchCostPerRequest
-  )
+    (cacheCreationTokens - oneHourTokens) * costs.cacheWriteCostPerToken +
+    oneHourTokens * (costs.cacheWrite1hCostPerToken ?? costs.inputCostPerToken * 2) +
+    cacheReadTokens * costs.cacheReadCostPerToken
+  ) + webSearchRequests * costs.webSearchCostPerRequest
 }
 
 export function getShortModelName(model: string): string {
   const canonical = resolveAlias(getCanonicalName(model))
   const shortNames: Record<string, string> = {
+    'gpt-6-astra': 'GPT-6 Astra',
+    'gpt-6.1-sol': 'GPT-6.1 Sol',
+    'gpt-6-sol': 'GPT-6 Sol',
+    'gpt-6-luna': 'GPT-6 Luna',
+    'gpt-5.6-sol': 'GPT-5.6 Sol',
+    'gpt-5.6-terra': 'GPT-5.6 Terra',
+    'gpt-5.6-luna': 'GPT-5.6 Luna',
+    'claude-sonnet-5-5': 'Sonnet 5.5',
+    'claude-fable-5-1': 'Fable 5.1',
+    'claude-opus-5-5': 'Opus 5.5',
+    'claude-opus-5': 'Opus 5',
+    'claude-sonnet-5': 'Sonnet 5',
     'claude-fable-5': 'Fable 5',
     'claude-opus-4-8': 'Opus 4.8',
     'claude-opus-4-7': 'Opus 4.7',
@@ -391,7 +467,7 @@ export function getShortModelName(model: string): string {
   }
   if (Object.hasOwn(shortNames, canonical)) return shortNames[canonical]!
   for (const [key, name] of Object.entries(shortNames).sort((a, b) => b[0].length - a[0].length)) {
-    if (canonical.startsWith(key)) return name
+    if (canonical.startsWith(key + '-') && /^\d{4}-?\d{2}-?\d{2}$/.test(canonical.slice(key.length + 1))) return name
   }
   return canonical
 }
@@ -400,6 +476,7 @@ function mergeModelCosts(primary: ModelCosts | null | undefined, fallback: Model
   if (!primary && !fallback) return null
   if (!primary) return fallback ?? null
   if (!fallback) return primary
+  if (Object.values(OFFICIAL_PRICING_SOURCES).includes(primary.source as never)) return primary
   return {
     ...fallback,
     ...primary,
@@ -408,9 +485,11 @@ function mergeModelCosts(primary: ModelCosts | null | undefined, fallback: Model
 }
 
 function findPrefixMatch(entries: Map<string, ModelCosts>, canonical: string): ModelCosts | null {
-  for (const [key, costs] of entries) {
-    if (canonical.startsWith(key)) return costs
-  }
+  // Only version/date pins may inherit a base model price. Variant models need
+  // their own entry (e.g. Spark, Mini, Pro, free, highspeed).
+  const matches = [...entries].filter(([key]) => canonical.startsWith(key + '-') && /^\d{4}-?\d{2}-?\d{2}$/.test(canonical.slice(key.length + 1)))
+    .sort(([a], [b]) => b.length - a.length)
+  if (matches.length) return matches[0]![1]
   return null
 }
 

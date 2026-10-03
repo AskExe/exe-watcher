@@ -42,7 +42,10 @@ type CodexEntry = {
     model_provider?: string
     originator?: string
     session_id?: string
+    id?: string
     model?: string
+    service_tier?: string
+    speed?: 'standard' | 'fast'
     name?: string
     content?: Array<{ type?: string; text?: string }>
     info?: {
@@ -57,6 +60,7 @@ type CodexEntry = {
 type CodexTokenUsage = {
   input_tokens?: number
   cached_input_tokens?: number
+  cache_write_input_tokens?: number
   output_tokens?: number
   reasoning_output_tokens?: number
   total_tokens?: number
@@ -95,6 +99,16 @@ async function readCodexHeader(filePath: string): Promise<CodexHeader | null> {
 async function discoverSessionsInDir(codexDir: string): Promise<SessionSource[]> {
   const sessionsDir = join(codexDir, 'sessions')
   const sources: SessionSource[] = []
+  // Archiving a chat moves its rollout out of sessions; its usage still counts.
+  const archivedDir = join(codexDir, 'archived_sessions')
+  for (const file of await readdir(archivedDir).catch(() => [] as string[])) {
+    if (!file.startsWith('rollout-') || !file.endsWith('.jsonl')) continue
+    const filePath = join(archivedDir, file)
+    const s = await stat(filePath).catch(() => null)
+    if (!s?.isFile()) continue
+    const header = await cachedDiscoveryHeader('codex', filePath, s, () => readCodexHeader(filePath))
+    if (header) sources.push({ path: filePath, project: header.project, provider: 'codex' })
+  }
 
   let years: string[]
   try {
@@ -157,17 +171,26 @@ function createParser(source: SessionSource, seenKeys: Set<string>): SessionPars
       let hasSessionMeta = false
       let hasTokenCounts = false
       let sessionModel: string | undefined
+      let sessionSpeed: 'standard' | 'fast' = 'standard'
       let sessionId = ''
       let prevCumulativeTotal = 0
       let prevInput = 0
       let prevCached = 0
+      let prevCacheWrite = 0
       let prevOutput = 0
       let prevReasoning = 0
       let pendingTools: string[] = []
       let pendingUserMessage = ''
 
       let lineCount = 0
-      for await (const line of readSessionLines(source.path)) {
+      for await (const line of readSessionLines(source.path, 0, prefix => {
+        // Tool output and compacted transcript copies are not billable events.
+        // Consume oversized bodies without retaining them; original token_count
+        // events remain bounded and are always parsed, including later records.
+        const envelope = prefix.match(/^\s*\{(?:"timestamp"\s*:\s*"[^"\n]*"\s*,\s*)?(?:"ordinal"\s*:\s*\d+\s*,\s*)?"type"\s*:\s*"([^"]+)"/)
+        if (envelope?.[1] === 'compacted') return true
+        return envelope?.[1] === 'response_item' && /"payload"\s*:\s*\{\s*"type"\s*:\s*"(?:custom_tool_call_output|function_call_output)"/.test(prefix)
+      })) {
         if (!line.trim()) continue
         lineCount++
         let entry: CodexEntry
@@ -179,7 +202,7 @@ function createParser(source: SessionSource, seenKeys: Set<string>): SessionPars
 
         if (entry.type === 'session_meta') {
           hasSessionMeta = true
-          sessionId = entry.payload?.session_id ?? basename(source.path, '.jsonl')
+          sessionId = entry.payload?.session_id ?? entry.payload?.id ?? basename(source.path, '.jsonl')
           sessionModel = entry.payload?.model
           continue
         }
@@ -188,6 +211,7 @@ function createParser(source: SessionSource, seenKeys: Set<string>): SessionPars
         // not in session_meta or token_count. Capture it so we don't fall back to "gpt-5".
         if (entry.type === 'turn_context' && entry.payload?.model) {
           sessionModel = entry.payload.model
+          sessionSpeed = entry.payload.speed === 'fast' || ['fast', 'priority'].includes(entry.payload.service_tier ?? '') ? 'fast' : 'standard'
           continue
         }
 
@@ -218,12 +242,14 @@ function createParser(source: SessionSource, seenKeys: Set<string>): SessionPars
           const last = info.last_token_usage
           let inputTokens = 0
           let cachedInputTokens = 0
+          let cacheWriteTokens = 0
           let outputTokens = 0
           let reasoningTokens = 0
 
           if (last) {
             inputTokens = last.input_tokens ?? 0
             cachedInputTokens = last.cached_input_tokens ?? 0
+            cacheWriteTokens = last.cache_write_input_tokens ?? 0
             outputTokens = last.output_tokens ?? 0
             reasoningTokens = last.reasoning_output_tokens ?? 0
           } else if (cumulativeTotal > 0) {
@@ -231,15 +257,17 @@ function createParser(source: SessionSource, seenKeys: Set<string>): SessionPars
             if (!total) continue
             inputTokens = (total.input_tokens ?? 0) - prevInput
             cachedInputTokens = (total.cached_input_tokens ?? 0) - prevCached
+            cacheWriteTokens = (total.cache_write_input_tokens ?? 0) - prevCacheWrite
             outputTokens = (total.output_tokens ?? 0) - prevOutput
             reasoningTokens = (total.reasoning_output_tokens ?? 0) - prevReasoning
           }
 
-          if (!last) {
+          {
             const total = info.total_token_usage
             if (total) {
               prevInput = total.input_tokens ?? 0
               prevCached = total.cached_input_tokens ?? 0
+              prevCacheWrite = total.cache_write_input_tokens ?? 0
               prevOutput = total.output_tokens ?? 0
               prevReasoning = total.reasoning_output_tokens ?? 0
             }
@@ -250,11 +278,11 @@ function createParser(source: SessionSource, seenKeys: Set<string>): SessionPars
 
           // OpenAI includes cached tokens inside input_tokens; Anthropic does not.
           // Normalize to Anthropic semantics: inputTokens = non-cached only.
-          const uncachedInputTokens = Math.max(0, inputTokens - cachedInputTokens)
+          const uncachedInputTokens = Math.max(0, inputTokens - cachedInputTokens - cacheWriteTokens)
 
           const model = resolveModel(entry.payload, sessionModel)
           const timestamp = entry.timestamp ?? ''
-          const dedupKey = `codex:${source.path}:${timestamp}:${cumulativeTotal}`
+          const dedupKey = `codex:${sessionId}:${timestamp}:${cumulativeTotal}`
 
           if (seenKeys.has(dedupKey)) continue
           seenKeys.add(dedupKey)
@@ -263,7 +291,7 @@ function createParser(source: SessionSource, seenKeys: Set<string>): SessionPars
           // Store/report fresh input and cache reads separately, but choose long-context
           // pricing tiers from the full prompt footprint. Otherwise a 300K-token prompt
           // with a high cache hit rate would incorrectly stay on the sub-270K tier.
-          const totalPromptInputTokens = uncachedInputTokens + cachedInputTokens
+          const totalPromptInputTokens = inputTokens
 
           // Codex token_count events expose reasoning_output_tokens for observability,
           // but sampled events satisfy total_tokens = input_tokens + output_tokens.
@@ -274,10 +302,10 @@ function createParser(source: SessionSource, seenKeys: Set<string>): SessionPars
             model,
             uncachedInputTokens,
             billableOutputTokens,
-            0,
+            cacheWriteTokens,
             cachedInputTokens,
             0,
-            'standard',
+            sessionSpeed,
             totalPromptInputTokens,
           )
 
@@ -286,7 +314,7 @@ function createParser(source: SessionSource, seenKeys: Set<string>): SessionPars
             model,
             inputTokens: uncachedInputTokens,
             outputTokens,
-            cacheCreationInputTokens: 0,
+            cacheCreationInputTokens: cacheWriteTokens,
             cacheReadInputTokens: cachedInputTokens,
             cachedInputTokens,
             reasoningTokens,
@@ -295,7 +323,7 @@ function createParser(source: SessionSource, seenKeys: Set<string>): SessionPars
             tools: pendingTools,
             bashCommands: [],
             timestamp,
-            speed: 'standard',
+            speed: sessionSpeed,
             deduplicationKey: dedupKey,
             userMessage: pendingUserMessage,
             sessionId,

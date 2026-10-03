@@ -135,6 +135,16 @@ describe('buildMenubarPayload', () => {
     expect(payload.current.topModels[0].name).toBe('Model0')
   })
 
+  it('includes recovered models appended after the retained model list in cost order', () => {
+    const period = emptyPeriod('All Time')
+    period.models = Array.from({ length: 20 }, (_, i) => ({ name: `Model${i}`, cost: 1, calls: 1 }))
+    period.models.push({ name: 'claude-opus-4-6', cost: 34000, calls: 0 })
+    const payload = buildMenubarPayload(period, [], null)
+    expect(payload.current.topModels[0]).toEqual({ name: 'Opus 4.6', cost: 34000, calls: 0 })
+    expect(payload.current.topModels).toHaveLength(20)
+    expect(period.models[0].name).toBe('Model0')
+  })
+
   it('caps topActivities at 20 so all task categories can surface', () => {
     const period: PeriodData = {
       label: 'Today',
@@ -214,7 +224,7 @@ describe('buildMenubarPayload', () => {
     expect(payload.current.providers).toEqual({ claude: 76.45, codex: 0, cursor: 2.18 })
   })
 
-  it('includes up to 365 daily history entries sorted ascending by date', () => {
+  it('includes all daily history entries sorted ascending by date', () => {
     const history = Array.from({ length: 400 }, (_, i) => {
       const d = new Date(2025, 0, 1)
       d.setDate(d.getDate() + i)
@@ -230,9 +240,9 @@ describe('buildMenubarPayload', () => {
       }
     })
     const payload = buildMenubarPayload(emptyPeriod('Today'), [], null, history)
-    expect(payload.history.daily).toHaveLength(365)
-    expect(payload.history.daily[0]!.date < payload.history.daily[364]!.date).toBe(true)
-    expect(payload.history.daily[364]!.date).toBe(history[399]!.date)
+    expect(payload.history.daily).toHaveLength(400)
+    expect(payload.history.daily[0]!.date < payload.history.daily[399]!.date).toBe(true)
+    expect(payload.history.daily[399]!.date).toBe(history[399]!.date)
   })
 
   it('preserves token fields in dailyHistory entries', () => {

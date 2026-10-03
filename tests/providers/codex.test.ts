@@ -92,6 +92,35 @@ async function writeSession(dir: string, date: string, filename: string, lines: 
 }
 
 describe('codex provider - session discovery', () => {
+  it('separates GPT cache writes from ordinary input and prices a cached large prompt correctly', async () => {
+    const usage = { input_tokens: 300000, cached_input_tokens: 200000, cache_write_input_tokens: 50000,
+      output_tokens: 1000, reasoning_output_tokens: 100, total_tokens: 301000 }
+    const path = await writeSession(tmpDir, '2026-04-14', 'rollout-cache-writes.jsonl', [
+      sessionMeta({ model: 'gpt-6-astra' }),
+      JSON.stringify({ type: 'turn_context', payload: { model: 'gpt-6-astra', service_tier: 'priority' } }),
+      JSON.stringify({ type: 'event_msg', timestamp: '2026-04-14T10:01:00Z', payload: { type: 'token_count', info: { last_token_usage: usage, total_token_usage: usage } } }),
+    ])
+    const parser = createCodexProvider(tmpDir).createSessionParser({ path, project: 'test', provider: 'codex' }, new Set())
+    const calls = []
+    for await (const call of parser.parse()) calls.push(call)
+    expect(calls).toHaveLength(1)
+    expect(calls[0]).toMatchObject({ inputTokens: 50000, cacheCreationInputTokens: 50000, cacheReadInputTokens: 200000, speed: 'fast' })
+    // ($1 fresh + $1.25 writes + $0.40 reads + $0.075 output) * 2.
+    expect(calls[0]!.costUSD).toBeCloseTo(5.45, 9)
+  })
+
+  it('updates cumulative baselines when switching from last-usage records to total-only records', async () => {
+    const path = await writeSession(tmpDir, '2026-04-14', 'rollout-mixed-counters.jsonl', [
+      sessionMeta(),
+      tokenCount({ last: { input: 100, output: 10 }, total: { input: 100, output: 10, total: 110 } }),
+      tokenCount({ timestamp: '2026-04-14T10:02:00Z', total: { input: 150, output: 20, total: 170 } }),
+    ])
+    const parser = createCodexProvider(tmpDir).createSessionParser({ path, project: 'test', provider: 'codex' }, new Set())
+    const calls = []
+    for await (const call of parser.parse()) calls.push(call)
+    expect(calls.map(c => c.inputTokens)).toEqual([100, 50])
+    expect(calls.map(c => c.outputTokens)).toEqual([10, 10])
+  })
   it('discovers sessions in YYYY/MM/DD structure', async () => {
     await writeSession(tmpDir, '2026-04-14', 'rollout-abc123.jsonl', [
       sessionMeta({ cwd: '/Users/test/myproject' }),
@@ -105,6 +134,15 @@ describe('codex provider - session discovery', () => {
     expect(sessions[0]!.provider).toBe('codex')
     expect(sessions[0]!.project).toBe('Users-test-myproject')
     expect(sessions[0]!.path).toContain('rollout-abc123.jsonl')
+  })
+
+  it('includes archived sessions even when the active sessions directory is absent', async () => {
+    const archived = join(tmpDir, 'archived_sessions')
+    await mkdir(archived, { recursive: true })
+    await writeFile(join(archived, 'rollout-old.jsonl'), [sessionMeta(), tokenCount({ last: { input: 100, output: 50 } })].join('\n') + '\n')
+    const sources = await createCodexProvider(tmpDir).discoverSessions()
+    expect(sources).toHaveLength(1)
+    expect(sources[0]!.path).toContain('archived_sessions')
   })
 
   it('returns empty for non-existent directory', async () => {
@@ -210,4 +248,32 @@ describe('codex provider - JSONL parsing', () => {
     expect(calls[0]!.inputTokens).toBe(500)
     expect(calls[1]!.inputTokens).toBe(300)
   })
+})
+
+
+it('counts token events after oversized tool-output and compaction records', async () => {
+  const padding = 'x'.repeat(33 * 1024 ** 2)
+  const output = JSON.stringify({ timestamp: '2026-04-14T10:01:00Z', ordinal: 5, type: 'response_item', payload: { type: 'custom_tool_call_output', output: padding } })
+  const compacted = JSON.stringify({ timestamp: '2026-04-14T10:01:00Z', ordinal: 6, type: 'compacted', payload: { replacement_history: padding } })
+  const path = await writeSession(tmpDir, '2026-04-14', 'rollout-large.jsonl', [sessionMeta(), output, compacted,
+    tokenCount({ last: { input: 100, output: 50 }, total: { input: 100, output: 50, total: 150 } }),
+  ])
+  const provider = createCodexProvider(tmpDir)
+  const parser = provider.createSessionParser({ path, project: 'fixture', provider: 'codex' }, new Set())
+  const calls = []
+  for await (const call of parser.parse()) calls.push(call)
+  expect(calls).toHaveLength(1)
+  expect(calls[0]!.inputTokens).toBe(100)
+  expect(calls[0]!.outputTokens).toBe(50)
+})
+
+
+it('deduplicates a copied archived rollout by session identity, independent of path', async () => {
+  const original = await writeSession(tmpDir, '2026-04-14', 'rollout-copy.jsonl', [sessionMeta(), tokenCount({ last: { input: 100, output: 50 }, total: { total: 150 } })])
+  const archived = join(tmpDir, 'archived_sessions'); await mkdir(archived, { recursive: true })
+  const copy = join(archived, 'rollout-copy.jsonl')
+  const { readFile } = await import('fs/promises'); await writeFile(copy, await readFile(original))
+  const provider = createCodexProvider(tmpDir), seen = new Set<string>(), calls = []
+  for (const path of [original, copy]) for await (const call of provider.createSessionParser({ path, project: 'fixture', provider: 'codex' }, seen).parse()) calls.push(call)
+  expect(calls).toHaveLength(1)
 })

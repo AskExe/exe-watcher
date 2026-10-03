@@ -83,12 +83,20 @@ private actor CallCounter {
 private actor Gate {
     private var opened = false
     private var waiters: [CheckedContinuation<Void, Never>] = []
+    private var startWaiters: [CheckedContinuation<Void, Never>] = []
 
     func wait() async {
         if opened { return }
         await withCheckedContinuation { cont in
             waiters.append(cont)
+            for waiter in startWaiters { waiter.resume() }
+            startWaiters.removeAll()
         }
+    }
+
+    func waitUntilBlocked() async {
+        if !waiters.isEmpty { return }
+        await withCheckedContinuation { startWaiters.append($0) }
     }
 
     func open() {
@@ -100,7 +108,7 @@ private actor Gate {
 
 @Suite("AppStore provider prefetch")
 struct AppStoreProviderPrefetchTests {
-    @Test("refreshQuietly renders aggregate first and warms visible providers")
+    @Test("refreshQuietly fetches only the aggregate without speculative provider scans")
     @MainActor
     func prefetchesVisibleProvidersOnInitialLoad() async throws {
         let allKey = PayloadCacheKey(period: .today, provider: .all)
@@ -119,19 +127,17 @@ struct AppStoreProviderPrefetchTests {
 
         await store.refreshQuietly(period: .today)
 
-        // The aggregate all-provider payload should be available immediately; provider-specific
-        // payloads are now warmed asynchronously so selected-period views do not block behind
-        // multiple serial CLI scans.
+        // The aggregate supplies provider tab totals without more CLI scans.
         #expect(store.allProviderPayloadForPeriod?.current.cost == 18)
 
         try await Task.sleep(nanoseconds: 50_000_000)
         let keys = await recorder.recordedKeys()
         #expect(keys.contains(allKey))
-        #expect(keys.contains(claudeKey))
-        #expect(keys.contains(codexKey))
+        #expect(!keys.contains(claudeKey))
+        #expect(!keys.contains(codexKey))
     }
 
-    @Test("period switch prefetches that period's providers so tab switch is instant from cache")
+    @Test("provider details load only when selected and reuse cached aggregate")
     @MainActor
     func periodSwitchWarmsProviderTabs() async throws {
         let todayAll = PayloadCacheKey(period: .today, provider: .all)
@@ -158,26 +164,21 @@ struct AppStoreProviderPrefetchTests {
 
         let keysAfterPeriodSwitch = await recorder.recordedKeys()
         #expect(keysAfterPeriodSwitch.contains(weekAll))
-        #expect(keysAfterPeriodSwitch.contains(weekClaude))
-        #expect(keysAfterPeriodSwitch.contains(weekCodex))
+        #expect(!keysAfterPeriodSwitch.contains(weekClaude))
+        #expect(!keysAfterPeriodSwitch.contains(weekCodex))
 
         let callCountBeforeTabSwitch = keysAfterPeriodSwitch.count
         await store.switchTo(provider: .claude)
-        #expect(store.payload.current.cost == 70)
 
         try await Task.sleep(nanoseconds: 50_000_000)
         let callCountAfterTabSwitch = await recorder.recordedKeys().count
-        #expect(callCountAfterTabSwitch == callCountBeforeTabSwitch)
+        #expect(store.payload.current.cost == 70)
+        #expect(callCountAfterTabSwitch == callCountBeforeTabSwitch + 1)
     }
 
-    @Test("rapid period switches cancel the prior prefetch so only the latest runs")
+    @Test("rapid aggregate requests never start speculative provider scans")
     @MainActor
     func prefetchCancellationOnRapidSwitch() async throws {
-        let todayAll = PayloadCacheKey(period: .today, provider: .all)
-        let weekAll = PayloadCacheKey(period: .sevenDays, provider: .all)
-        let weekClaude = PayloadCacheKey(period: .sevenDays, provider: .claude)
-        let weekCodex = PayloadCacheKey(period: .sevenDays, provider: .codex)
-
         let providerFetchCount = CallCounter()
 
         let store = AppStore(
@@ -186,7 +187,7 @@ struct AppStoreProviderPrefetchTests {
                     // Provider-specific prefetch — slow to simulate CLI scan time.
                     try await Task.sleep(nanoseconds: 50_000_000)
                     guard !Task.isCancelled else { throw CancellationError() }
-                    await providerFetchCount.next()
+                    _ = await providerFetchCount.next()
                 }
                 let cost: Double = period == .today ? 18 : 100
                 let providers: [String: Double] = period == .today
@@ -196,19 +197,14 @@ struct AppStoreProviderPrefetchTests {
             }
         )
 
-        // First refreshQuietly triggers today prefetch (1 provider: claude).
+        // Refresh two aggregates without ever requesting provider details.
         await store.refreshQuietly(period: .today)
-        // Immediately switch to 7 days — should cancel today's prefetch and start week's.
         await store.refreshQuietly(period: .sevenDays)
 
-        // Wait for the winning (week) prefetch to complete.
         try await Task.sleep(nanoseconds: 150_000_000)
 
         let completedCount = await providerFetchCount.value()
-        // At most the week's 2 providers should complete. Today's claude prefetch
-        // should have been cancelled. Total should be <= 2 (week's claude + codex).
-        #expect(completedCount <= 2)
-        #expect(completedCount >= 1) // at least one week provider completed
+        #expect(completedCount == 0) // no unrequested provider scans
     }
 
     @Test("optimize payload stays attached after a later base refresh for the same visible selection")
@@ -526,7 +522,7 @@ struct AppStoreProviderPrefetchTests {
         )
 
         await store.switchTo(period: .sevenDays)
-        try await Task.sleep(nanoseconds: 10_000_000)
+        await gate.waitUntilBlocked()
         #expect(store.isCurrentSelectionLoading)
 
         store.recoverFromSystemResume()
@@ -536,7 +532,10 @@ struct AppStoreProviderPrefetchTests {
         #expect(await weekFetchCount.value() == 1)
         // The cancelled, deliberately non-cooperative fake must leave before re-admission.
         await gate.open()
-        try await Task.sleep(nanoseconds: 50_000_000)
+        let deadline = Date().addingTimeInterval(5)
+        while store.payload.current.cost != 42 && Date() < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
         #expect(await weekFetchCount.value() == 2)
         #expect(store.payload.current.cost == 42)
     }

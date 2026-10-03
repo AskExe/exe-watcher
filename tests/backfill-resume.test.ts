@@ -80,13 +80,13 @@ function makeCorpus(): Env {
 
   // Seed the cache the way a healthy install looks four days ago, so the run has a gap.
   writeFileSync(join(cache, 'daily-cache.json'), JSON.stringify({
-    version: 6, scopeKey: 'global', lastComputedDate: dateKey(midday(4)), days: [],
+    version: 8, scopeKey: 'global', lastComputedDate: dateKey(midday(4)), days: [],
   }))
   return { home, cache }
 }
 
 function runStatus(env: Env): { status: number; stdout: string; stderr: string } {
-  const args = ['tsx', CLI, 'status', '--format', 'menubar-json', '--period', 'today', '--provider', 'all', '--no-optimize']
+  const args = ['tsx', CLI, 'status', '--format', 'menubar-json', '--period', 'week', '--provider', 'all', '--no-optimize']
   try {
     const stdout = execFileSync('npx', args, {
       encoding: 'utf-8',

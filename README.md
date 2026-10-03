@@ -61,7 +61,7 @@ A Swift/SwiftUI popover that lives in your menu bar. Today's spend is always vis
 - **Capacity estimation** — Derives likely token limits from usage patterns when hard caps aren't published.
 - **Multi-currency** — USD, GBP, EUR, JPY, AUD, CAD, CHF, CNY, SEK, NOK, DKK, NZD, SGD, HKD, KRW, INR, BRL.
 
-Silent background refresh runs every 30 seconds. Period/provider data is cached and prefetched so tab switching feels instant.
+macOS pushes usage-log change notifications to Watcher; there is no repeating background usage scan. Rapid writes are combined, with at least two minutes of rest after a scan and longer after slow scans (nine times the scan duration). A failed notification gets at most two spaced retries before waiting for new data or a user action. Watcher also catches up on launch/wake and explicit user actions. Only one CLI child runs at a time, at low scheduling priority, with a 256 MiB V8 heap limit and a 60-second timeout. Historical and provider detail views load on demand. Failed scans retain the last successful total, including across app restarts on the same date; missing data after midnight displays a dash until a scan succeeds.
 
 ### Interactive TUI dashboard
 
@@ -207,22 +207,17 @@ The section appears automatically when exe-os is present and hides when it's not
 
 Two components, loosely coupled via CLI output:
 
-```
-┌──────────────────────────────────┐      ┌─────────────────────────────────┐
-│  CLI (Node.js / TypeScript)      │      │  Menubar App (Swift / SwiftUI)  │
-│                                  │      │                                 │
-│  Reads provider session files    │ JSON │  Calls CLI with --format        │
-│  Computes cost via LiteLLM rates ├─────►│  menubar-json                   │
-│  Daily cache (v6, atomic writes) │      │  @Observable state management   │
-│  365-day historical backfill     │      │  30s cache TTL, prefetch on     │
-│  Lock serialization for safety   │      │  launch, concurrent fetch       │
-│                                  │      │  guards                         │
-└──────────────────────────────────┘      └─────────────────────────────────┘
+```text
+Provider usage files
+       ↓
+CLI: deduplicate → price tokens → cache daily totals → JSON
+       ↓
+macOS app: file notifications → one bounded CLI worker → menu bar
 ```
 
 **CLI pipeline:** Parse provider session files from disk → deduplicate by message ID → compute cost per token type (input, output, cache write, cache read, web search) → aggregate by period, project, model, activity → output as TUI, JSON, or CSV.
 
-**Menubar app:** Calls `exe-watcher status --format menubar-json --period <period> --provider <provider>` → decodes JSON → renders SwiftUI popover. All 5 periods are pre-fetched on launch for instant tab switching. Security: no shell injection — validated argv arrays are passed directly to child processes, not through a shell.
+**Menubar app:** Calls `exe-watcher status --format menubar-json --period <period> --provider <provider>` → decodes JSON → renders SwiftUI popover. Usage-file notifications trigger coalesced refreshes, with catch-up on launch and wake. Period and provider views load when selected. A single CLI worker has memory, runtime, and output limits; failed scans preserve the last successful total. There is no periodic background usage scan. Security: no shell injection — validated argv arrays are passed directly to child processes, not through a shell.
 
 **Deduplication** per provider: API message ID (Claude), cumulative token cross-check (Codex), conversation/timestamp (Cursor), session+message ID (OpenCode), responseId (Pi/OMP).
 
@@ -230,23 +225,17 @@ Two components, loosely coupled via CLI output:
 
 ## Test suite
 
-648 tests across 3 layers:
-
-| Layer | Framework | Count | What it covers |
-|-------|-----------|-------|----------------|
-| **CLI data integrity** | Vitest | 597 | Schema validation, provider sum consistency, period monotonicity, project spend accuracy, 365-day history, token sanity checks |
-| **Swift state** | Swift Testing | 45 | Period windowing, cache isolation, prefetch logic, capacity estimation, CLI resolution, provider sum validation, JSON decode |
-| **UI smoke** | Swift Testing + Accessibility | 6 | App launch, status item presence, popover display, period switching via macOS Accessibility APIs |
+Tests cover CLI data integrity, native scheduling and resource limits, and optional macOS Accessibility smoke checks. CLI end-to-end tests use isolated usage fixtures.
 
 ```bash
 # Run CLI tests
-npm test
+npx vitest run
 
-# Run Swift tests
-cd mac && swift test
+# Run native state and resource tests
+swift test --package-path mac --filter ExeWatcherMenubarTests
 
-# Run UI tests
-cd mac && xcodebuild test -scheme ExeWatcherUITests
+# UI smoke tests require macOS Accessibility access
+swift test --package-path mac --filter ExeWatcherUITests
 ```
 
 ---
@@ -283,7 +272,15 @@ Starting points, not verdicts. A single experimental session with 60% cache hit 
 
 ## How it works
 
-Reads session data directly from disk. No wrapper, no proxy, no API keys needed. Pricing from [LiteLLM](https://github.com/BerriAI/litellm) (auto-cached 24h). Handles input, output, cache write, cache read, and web search costs.
+Reads session data directly from disk. No wrapper, no proxy, no API keys needed. Pricing refreshes every 24 hours from official OpenAI, Anthropic, MiniMax, Z.AI, Kimi and xAI pricing pages, supplemented by [LiteLLM](https://github.com/BerriAI/litellm). Official rates take precedence over reseller prices for unqualified model names. Offline use retains the last available catalog or the bundled rates verified October 1, 2026, with warnings when a refresh fails. Handles input, output, 5-minute and 1-hour cache writes, cache reads, long-context tiers, and recorded web search costs. Claude streaming records are reconciled by API message ID using cumulative token counters; final usage is counted once.
+
+Both historical and current usage use the latest available per-model API list rates. This answers "what would these tokens cost via API at today's prices?" Historical totals are rebuilt when pricing changes; they do not reconstruct the price charged on each original date. JSON reports include `pricing` metadata with the basis, refresh timestamp and source URLs. Missing session details still make recovered history an estimate. Models without published token prices (including Codex Spark) retain their tokens and an explicit cost-exclusion warning, rather than inheriting another model's price or an old reported bill.
+
+Switching Claude accounts does not filter usage: Watcher counts all retained sessions in the configured data directory and Claude Desktop account folders. Codex archived sessions also count. Add other Claude profile roots with `claudeConfigDirs` in `~/.config/exe-watcher/config.json`.
+
+“All Time” includes the entire available history. To set the beginning of your coding journey, add `"historyStartDate": "2025-07-01"` to the same config. This defines the reporting window; it cannot recreate missing logs. Unknown model prices generate a warning while their tokens remain counted.
+
+For unfiltered All Time Claude totals, Watcher also reconciles `stats-cache.json` cumulative model counters with retained logs through the snapshot's cutoff date. Only missing per-model/token counters are added. Recovered usage is separately identified as `historicalRecovery`: it has no fabricated dates, sessions, or projects, and uses standard API rates with 5-minute cache writes because TTL/speed metadata is unavailable. Daily charts show dated logs only. Project/provider sums include recovery only where attribution is known. Usage lost from both logs and cumulative counters remains unknown. These are API-equivalent estimates, not subscription charges or invoices.
 
 **Environment variables:**
 
@@ -327,10 +324,10 @@ Watcher is forked from [codeburn](https://github.com/getagentseal/codeburn) by [
 - 8 provider support (added Cursor Agent, Copilot, OMP, Pi, OpenCode)
 - Native macOS menubar app with multi-period views, provider tabs, project spend, and subscription tracking
 - Exe OS integration — per-agent spend and memory tracking for AI employee teams
-- Daily cache system (v6) with atomic writes and cold-start/progressive 365-day backfill
+- Daily cache system (v8) with atomic writes and cold-start/progressive full-history backfill
 - Capacity estimation from usage patterns
 - Multi-currency support (17 currencies)
-- 648-test suite across CLI, Swift state, and UI smoke layers
+- Test coverage across CLI, Swift state, resource limits, and UI smoke layers
 - Consolidated activity categories from 13 to 6
 - Fixed double-counting bugs in the menubar JSON pipeline
 - Performance: 7-day and 30-day queries from 2-5s down to ~1s via daily cache

@@ -118,7 +118,7 @@ export function readSessionFileSync(filePath: string): string | null {
   }
 }
 
-export async function* readSessionLines(filePath: string, startByte = 0): AsyncGenerator<string> {
+export async function* readSessionLines(filePath: string, startByte = 0, skipOversizedRecord?: (prefix: string) => boolean): AsyncGenerator<string> {
   const handle = await open(filePath, 'r').catch(() => null)
   if (!handle) return
   try {
@@ -129,10 +129,17 @@ export async function* readSessionLines(filePath: string, startByte = 0): AsyncG
     const stream = handle.createReadStream({ encoding: 'utf-8', start: startByte, end: size - 1, autoClose: false })
     let pieces: string[] = []
     let lineBytes = 0
+    let discarding = false
     const maxLineBytes = 32 * 1024 * 1024
     const append = (piece: string) => {
+      if (discarding) return
       lineBytes += Buffer.byteLength(piece)
-      if (lineBytes > maxLineBytes) throw new ResourceBudgetError('32 MiB JSONL record budget')
+      if (lineBytes > maxLineBytes) {
+        const prefix = (pieces.slice(0, 4).join('') + piece.slice(0, 1024)).slice(0, 1024)
+        if (!skipOversizedRecord?.(prefix)) throw new ResourceBudgetError(`32 MiB JSONL record budget in ${filePath}`)
+        discarding = true; pieces = []
+        return
+      }
       pieces.push(piece)
     }
     try {
@@ -142,9 +149,9 @@ export async function* readSessionLines(filePath: string, startByte = 0): AsyncG
         while ((newline = chunk.indexOf('\n', start)) >= 0) {
           append(chunk.slice(start, newline))
           chargeRead(0)
-          const line = pieces.join('').replace(/\r$/, '')
-          pieces = []; lineBytes = 0
-          yield line
+          const line = discarding ? null : pieces.join('').replace(/\r$/, '')
+          pieces = []; lineBytes = 0; discarding = false
+          if (line !== null) yield line
           start = newline + 1
         }
         if (start < chunk.length) append(chunk.slice(start))

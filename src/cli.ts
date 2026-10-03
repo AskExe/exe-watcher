@@ -7,7 +7,7 @@ import { homedir } from 'os'
 import { Command } from 'commander'
 import { installMenubarApp } from './menubar-installer.js'
 import { exportCsv, exportJson, type PeriodExport } from './export.js'
-import { loadPricing, setModelAliases, getPricingWarnings } from './models.js'
+import { loadPricing, setModelAliases, getPricingWarnings, getPricingMetadata } from './models.js'
 import { parseAllSessions, filterProjectsByName, getParseWarnings } from './parser.js'
 import { convertCost } from './currency.js'
 import { renderStatusBar } from './format.js'
@@ -25,16 +25,19 @@ import { getAllProviders, getDiscoveryWarnings } from './providers/index.js'
 import { clearPlan, readConfig, readPlan, saveConfig, savePlan, getConfigFilePath, type PlanId } from './config.js'
 import { clampResetDay, getPlanUsageOrNull, type PlanUsage } from './plan-usage.js'
 import { getPresetPlan, isPlanId, isPlanProvider, planDisplayName } from './plans.js'
-import { ALL_TIME_HISTORY_DAYS, MAX_BLOCKED_CHUNK_ATTEMPTS, computeProgressiveBackfillStart, nextBackfillCursor, planBackfillChunks, resolveColdStartHistoryDays, shouldSkipBlockedChunk } from './progressive-backfill.js'
+import { MAX_BLOCKED_CHUNK_ATTEMPTS, computeProgressiveBackfillStart, nextBackfillCursor, planBackfillChunks, resolveColdStartHistoryDays, shouldSkipBlockedChunk } from './progressive-backfill.js'
+import { parseHistoryStartDate, resolveHistoryStart } from './history-start.js'
+import { readClaudeUsageSnapshot, recoverClaudeUsage, sumClaudeModelTokens, getClaudeRecoveryForRange } from './claude-recovery.js'
 import { createInterface } from 'node:readline'
 import { createRequire } from 'node:module'
+import { watchMenubarParent } from './menubar-lifecycle.js'
 
 const require = createRequire(import.meta.url)
 const { version } = require('../package.json')
 import { loadCurrency, getCurrency, isValidCurrencyCode } from './currency.js'
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000
-const BACKFILL_DAYS = ALL_TIME_HISTORY_DAYS
+let configuredHistoryStart: Date | null = null
 
 function toDateString(date: Date): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
@@ -67,7 +70,7 @@ function getDateRange(period: string): { range: DateRange; label: string } {
       return { range: { start, end }, label: 'Last 30 Days' }
     }
     case 'all': {
-      const start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - (ALL_TIME_HISTORY_DAYS - 1))
+      const start = configuredHistoryStart ?? new Date(0)
       return { range: { start, end }, label: 'All Time' }
     }
     default: {
@@ -129,13 +132,41 @@ function toJsonPlanSummary(planUsage: PlanUsage): JsonPlanSummary {
 async function runJsonReport(period: Period, provider: string, project: string[], exclude: string[]): Promise<void> {
   await loadPricing()
   const { range, label } = getDateRange(period)
-  const projects = filterProjectsByName(await parseAllSessions(range, provider), project, exclude)
+  const projects = filterProjectsByName(await parseAllSessions(range, provider, true), project, exclude)
   const report: ReturnType<typeof buildJsonReport> & { plan?: JsonPlanSummary } = buildJsonReport(projects, label, period)
+  if (period === 'all' && (provider === 'all' || provider === 'claude') && !project.length && !exclude.length) {
+    const recovery = await getClaudeRecoveryForRange(range)
+      if (recovery) {
+        const detail = report as typeof report & { historicalRecovery?: typeof recovery }
+        detail.historicalRecovery = recovery
+        report.overview.cost += convertCost(recovery.costUSD)
+        report.overview.tokens.input += recovery.inputTokens
+        report.overview.tokens.output += recovery.outputTokens
+        report.overview.tokens.cacheRead += recovery.cacheReadTokens
+        report.overview.tokens.cacheWrite += recovery.cacheWriteTokens
+        report.warnings.push(recovery.note)
+        for (const row of recovery.models) {
+          const existing = report.models.find(m => m.name === row.name)
+          if (existing) {
+            existing.cost += convertCost(row.costUSD)
+            existing.inputTokens += row.inputTokens; existing.outputTokens += row.outputTokens
+            existing.cacheReadTokens += row.cacheReadTokens; existing.cacheWriteTokens += row.cacheWriteTokens
+          } else report.models.push({ name: row.name, calls: 0, cost: convertCost(row.costUSD), inputTokens: row.inputTokens, outputTokens: row.outputTokens, cacheReadTokens: row.cacheReadTokens, cacheWriteTokens: row.cacheWriteTokens })
+        }
+        report.models.sort((a, b) => b.cost - a.cost)
+        report.warnings = [...new Set([...report.warnings, ...getPricingWarnings()])]
+        const tokens = report.overview.tokens
+        report.overview.cacheHitPercent = Math.round(tokens.cacheRead / (tokens.input + tokens.cacheRead) * 1000) / 10
+      }
+  }
+  if (period === 'all' && report.daily[0]?.date && report.daily[0].date > toDateString(range.start)) {
+    report.warnings.push(`History requested from ${toDateString(range.start)}, but the earliest dated local usage is ${report.daily[0].date}. Usage before then cannot be verified.`)
+  }
   const planUsage = await getPlanUsageOrNull()
   if (planUsage) {
     report.plan = toJsonPlanSummary(planUsage)
   }
-  console.log(JSON.stringify(report, null, 2))
+  console.log(JSON.stringify({ ...report, pricing: getPricingMetadata() }, null, 2))
 }
 
 const program = new Command()
@@ -147,6 +178,7 @@ const program = new Command()
 program.hook('preAction', async (thisCommand) => {
   const config = await readConfig()
   setModelAliases(config.modelAliases ?? {})
+  configuredHistoryStart = parseHistoryStartDate(config.historyStartDate)
   if (thisCommand.opts<{ verbose?: boolean }>().verbose) {
     process.env['EXE_WATCHER_VERBOSE'] = '1'
   }
@@ -169,22 +201,22 @@ function buildJsonReport(projects: ProjectSummary[], period: string, periodKey: 
   const cacheHitDenom = totalInput + totalCacheRead
   const cacheHitPercent = cacheHitDenom > 0 ? Math.round((totalCacheRead / cacheHitDenom) * 1000) / 10 : 0
 
-  const dailyMap: Record<string, { cost: number; calls: number }> = {}
-  for (const sess of sessions) {
-    for (const turn of sess.turns) {
-      if (!turn.timestamp) { continue }
-      const day = dateKey(turn.timestamp)
-      if (!dailyMap[day]) { dailyMap[day] = { cost: 0, calls: 0 } }
-      for (const call of turn.assistantCalls) {
-        dailyMap[day].cost += call.costUSD
-        dailyMap[day].calls += 1
+  const dailyMap = new Map<string, { cost: number; calls: number }>()
+  const addDaily = (date: string, cost: number, calls: number) => {
+    const previous = dailyMap.get(date) ?? { cost: 0, calls: 0 }
+    dailyMap.set(date, { cost: previous.cost + cost, calls: previous.calls + calls })
+  }
+  for (const session of sessions) {
+    if (session.reportSummary) {
+      for (const [date, day] of Object.entries(session.reportSummary.daily)) addDaily(date, day.cost, day.calls)
+    } else {
+      for (const turn of session.turns) for (const call of turn.assistantCalls) {
+        if (call.timestamp) addDaily(dateKey(call.timestamp), call.costUSD, 1)
       }
     }
   }
-  const daily = Object.entries(dailyMap).sort().map(([date, d]) => ({
-    date,
-    cost: convertCost(d.cost),
-    calls: d.calls,
+  const daily = [...dailyMap].sort(([a], [b]) => a.localeCompare(b)).map(([date, day]) => ({
+    date, cost: convertCost(day.cost), calls: day.calls,
   }))
 
   const projectList = projects.map(p => ({
@@ -261,6 +293,8 @@ function buildJsonReport(projects: ProjectSummary[], period: string, periodKey: 
   return {
     generated: new Date().toISOString(),
     currency: code,
+    costBasis: 'api-equivalent',
+    warnings: [...getDiscoveryWarnings(), ...getPricingWarnings(), ...getParseWarnings()],
     period,
     periodKey,
     overview: {
@@ -313,7 +347,7 @@ program
       if (customRange) {
         const label = `${opts.from ?? 'all'} to ${opts.to ?? 'today'}`
         const projects = filterProjectsByName(
-          await parseAllSessions(customRange, opts.provider),
+          await parseAllSessions(customRange, opts.provider, true),
           opts.project,
           opts.exclude,
         )
@@ -382,7 +416,12 @@ program
     if (opts.format === 'menubar-json') {
       const periodInfo = getDateRange(opts.period)
       const now = new Date()
-      const selectedPeriodHistoryDays = resolveColdStartHistoryDays(opts.period, now)
+      const config = await readConfig()
+      const initialCache = await loadDailyCache(buildDailyCacheScopeKey(opts.project, opts.exclude))
+      const historyStart = await resolveHistoryStart(config.historyStartDate, initialCache.days.map(day => day.date), now)
+      const backfillDays = resolveColdStartHistoryDays('all', now, historyStart)
+      const selectedPeriodHistoryDays = resolveColdStartHistoryDays(opts.period, now, historyStart)
+      if (opts.period === 'all') periodInfo.range.start = historyStart
       const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate())
       const yesterdayEnd = new Date(todayStart.getTime() - 1)
       const yesterdayStr = toDateString(new Date(todayStart.getTime() - MS_PER_DAY))
@@ -429,7 +468,7 @@ program
           }
           try {
             const chunkRange: DateRange = { start: chunk.start, end: chunk.end }
-            const chunkProjects = filterProjectsByName(await parseAllSessions(chunkRange, 'all'), opts.project, opts.exclude)
+            const chunkProjects = filterProjectsByName(await parseAllSessions(chunkRange, 'all', true), opts.project, opts.exclude)
             const chunkDays = fillMissingDays(chunk.start, chunk.end, aggregateProjectsIntoDays(chunkProjects))
             c = addNewDays(c, chunkDays, yesterdayStr, { coveredThrough })
             c.backfill = null
@@ -453,6 +492,32 @@ program
       const cache = await withDailyCacheLock(async () => {
         let c = await loadDailyCache(dailyCacheScope)
 
+        // The always-visible badge must not rebuild or revalidate history on every
+        // filesystem event. Historical views maintain the cache when requested.
+        if (opts.period === 'today' && opts.optimize === false) return c
+
+        // Reprice retained history in one compact scan per provider, preserving
+        // request-level context tiers and cache TTLs. Aggregated daily tokens
+        // alone cannot reproduce those prices. Fall back to resumable slices
+        // if a large corpus exceeds its scan budget.
+        if (c.needsRepricing || (opts.period === 'all' && c.days.length === 0)) {
+          const start = parseHistoryStartDate(c.previousHistoryStart) ?? historyStart
+          if (start <= yesterdayEnd) {
+            try {
+              const historicalProjects = filterProjectsByName(await parseAllSessions({ start, end: yesterdayEnd }, 'all', true), opts.project, opts.exclude)
+              c = addNewDays(c, fillMissingDays(start, yesterdayEnd, aggregateProjectsIntoDays(historicalProjects)), yesterdayStr)
+              delete c.needsRepricing; delete c.previousHistoryStart
+              c.backfill = null
+              c.partialDates = []
+              c.revalidatedAt = Date.now()
+              await saveDailyCache(c)
+            } catch (err) {
+              if (!(err instanceof ResourceBudgetError)) throw err
+              backfillWarnings.push(`History repricing will resume in smaller slices: ${err.message}`)
+            }
+          }
+        }
+
         // Revalidate late-arriving historical usage at most once every five minutes.
         const hadYesterday = c.days.some(d => d.date >= yesterdayStr)
         if (hadYesterday && (!c.revalidatedAt || Date.now() - c.revalidatedAt >= 5 * 60_000)) {
@@ -468,7 +533,7 @@ program
           oldestCachedDate,
           todayStart,
           yesterdayEnd,
-          backfillDays: BACKFILL_DAYS,
+          backfillDays: backfillDays,
           coldStartHistoryDays: selectedPeriodHistoryDays,
         })
 
@@ -487,7 +552,7 @@ program
         // the forward gap (yesterday re-eviction) blocks backward fills indefinitely. ---
         const updatedOldest = c.days.length > 0 ? (c.days[0]?.date ?? null) : null
         const neededStart = new Date(todayStart.getTime() - (selectedPeriodHistoryDays - 1) * MS_PER_DAY)
-        const fullBackfillStart = new Date(todayStart.getTime() - BACKFILL_DAYS * MS_PER_DAY)
+        const fullBackfillStart = new Date(todayStart.getTime() - backfillDays * MS_PER_DAY)
         const clampedNeeded = neededStart < fullBackfillStart ? fullBackfillStart : neededStart
 
         if (updatedOldest && clampedNeeded.getTime() < new Date(updatedOldest).getTime()) {
@@ -513,17 +578,16 @@ program
       let todayProjects: ProjectSummary[]
       let allTodayProjects: ProjectSummary[]
       try {
-        allTodayProjects = await parseAllSessions(todayRange, 'all')
+        allTodayProjects = await parseAllSessions(todayRange, 'all', opts.optimize === false)
         todayProjects = fp(allTodayProjects)
       } catch (err: unknown) {
-        // A budget abort must degrade this payload to cached numbers, never replace it
-        // with exit 1 and empty stdout — the menubar has no other source of data.
+        // The native app retains its last successful payload on a nonzero exit.
+        // Empty projects after a failed scan are NOT evidence of zero usage.
         const msg = err instanceof Error ? err.message : String(err)
         const warn = `parseAllSessions failed: ${msg}`
         warnings.push(warn)
         process.stderr.write(`[exe-watcher] WARNING: ${warn}\n`)
-        allTodayProjects = []
-        todayProjects = []
+        throw err
       }
       if (todayProjects.length === 0) {
         const warn = `parseAllSessions returned 0 projects for range ${toDateString(todayRange.start)}..${toDateString(todayRange.end)}`
@@ -593,11 +657,37 @@ program
         providers.push({ name: display, cost: currentData.cost })
       }
 
-      // DAILY HISTORY (last 365 days)
+      let historicalRecovery = null as ReturnType<typeof recoverClaudeUsage>
+      if (opts.period === 'all' && (isAllProviders || pf === 'claude') && !opts.project.length && !opts.exclude.length && !cache.partialDates?.length && !cache.backfill) {
+        const snapshot = await readClaudeUsageSnapshot()
+        historicalRecovery = recoverClaudeUsage(snapshot, sumClaudeModelTokens([...cache.days, ...todayDays], snapshot?.lastComputedDate ?? ''), historyStart)
+        if (historicalRecovery) {
+          currentData.cost += historicalRecovery.costUSD
+          currentData.inputTokens += historicalRecovery.inputTokens
+          currentData.outputTokens += historicalRecovery.outputTokens
+          currentData.cacheReadTokens += historicalRecovery.cacheReadTokens
+          currentData.cacheWriteTokens += historicalRecovery.cacheWriteTokens
+          const claudeProvider = providers.find(p => p.name.toLowerCase() === 'claude')
+          if (claudeProvider) claudeProvider.cost += historicalRecovery.costUSD
+          else providers.push({ name: 'Claude', cost: historicalRecovery.costUSD })
+          for (const row of historicalRecovery.models) {
+            const existing = currentData.models.find(m => m.name === row.model)
+            if (existing) existing.cost += row.costUSD
+            else currentData.models.push({ name: row.model, calls: 0, cost: row.costUSD })
+          }
+          warnings.push(historicalRecovery.note)
+        }
+      }
+      if (opts.period === 'all') {
+        const firstRecorded = [...cache.days, ...todayDays].filter(day => day.calls > 0).map(day => day.date).sort()[0]
+        if (firstRecorded && firstRecorded > toDateString(historyStart)) warnings.push(`History requested from ${toDateString(historyStart)}, but the earliest dated local usage is ${firstRecorded}. Usage before then cannot be verified.`)
+      }
+
+      // DAILY HISTORY (the full tracked date range)
       // Cache stores per-provider cost+calls per day in DailyEntry.providers, so we can derive
       // a provider-filtered history without re-parsing. Tokens aren't broken down per provider
       // in the cache, so the filtered view shows zero tokens (heatmap/trend still works on cost).
-      const historyStartStr = toDateString(new Date(todayStart.getTime() - BACKFILL_DAYS * MS_PER_DAY))
+      const historyStartStr = toDateString(new Date(todayStart.getTime() - backfillDays * MS_PER_DAY))
       const allCacheDays = getDaysInRange(cache, historyStartStr, yesterdayStr)
       // Reuse todayDays from above — no need to re-parse
       const fullHistory = [...allCacheDays, ...todayDays.filter(d => d.date > yesterdayStr)]
@@ -719,7 +809,7 @@ program
       warnings.push(...getDiscoveryWarnings(), ...getPricingWarnings(), ...getParseWarnings())
       const diagnostics: DiagnosticsBlock = { daysCount, parseTimeMs, warnings }
       const payload = buildMenubarPayload(currentData, providers, optimize, dailyHistory, agentStats, projectSpend, exeOsDetected, statsFileAge, diagnostics)
-      const json = JSON.stringify(payload)
+      const json = JSON.stringify({ ...payload, costBasis: 'api-equivalent', pricing: getPricingMetadata(), historicalRecovery })
       console.log(json)
       return
     }
@@ -1133,10 +1223,11 @@ program
 // One menubar ingestion owner across processes. Queueing and dead-owner recovery
 // are bounded; cancellation leaves a PID lease that the next launch can reclaim.
 let releaseScan: (() => Promise<void>) | undefined
+const stopParentWatch = watchMenubarParent(Number(process.env['EXE_WATCHER_PARENT_PID']))
 program.hook('preAction', async (_root, command) => {
   if (command.name() === 'status') releaseScan = await acquireFileLock(join(getCacheDir(), 'scan.lock'))
 })
-program.hook('postAction', async () => { await releaseScan?.(); releaseScan = undefined })
+program.hook('postAction', async () => { await releaseScan?.(); releaseScan = undefined; stopParentWatch() })
 
 // Default action: install menubar app on macOS when no subcommand given
 if (process.argv.length <= 2 && process.platform === 'darwin') {
@@ -1163,6 +1254,7 @@ if (process.argv.length <= 2 && process.platform === 'darwin') {
 } else {
   program.parseAsync().catch(async error => {
     await releaseScan?.()
+    stopParentWatch()
     console.error(error instanceof Error ? error.message : String(error))
     process.exitCode = 1
   })

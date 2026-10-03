@@ -16,7 +16,7 @@ import type { DateRange, SessionSummary } from './types.js'
  * The win comes from eliminating I/O on the ~97% of files that have no API calls.
  */
 
-export const SESSION_INDEX_VERSION = 1
+export const SESSION_INDEX_VERSION = 2
 const INDEX_FILENAME = 'session-index.json'
 
 type IndexEntry = {

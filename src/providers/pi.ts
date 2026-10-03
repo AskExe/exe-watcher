@@ -166,7 +166,7 @@ function createParser(source: SessionSource, seenKeys: Set<string>): SessionPars
             return typeof cmd === 'string' ? extractBashCommands(cmd) : []
           })
 
-        const costUSD = calculateCost(model, input, output, cacheWrite, cacheRead, 0)
+        const costUSD = calculateCost(model, input, output, cacheWrite, cacheRead, 0, 'standard', input + cacheWrite + cacheRead)
         const timestamp = entry.timestamp ?? ''
 
         yield {

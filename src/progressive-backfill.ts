@@ -2,13 +2,12 @@ const MS_PER_DAY = 24 * 60 * 60 * 1000
 
 export const DEFAULT_COLD_START_HISTORY_DAYS = 7
 export const DEFAULT_PROGRESSIVE_CHUNK_DAYS = 30
-export const ALL_TIME_HISTORY_DAYS = 365
 export const THIRTY_DAY_HISTORY_DAYS = 30
 export const WEEK_HISTORY_DAYS = 7
 
 export type ProgressiveBackfillPeriod = 'today' | 'week' | '30days' | 'month' | 'all'
 
-export function resolveColdStartHistoryDays(period: ProgressiveBackfillPeriod, now = new Date()): number {
+export function resolveColdStartHistoryDays(period: ProgressiveBackfillPeriod, now = new Date(), allTimeStart = now): number {
   switch (period) {
     case 'today':
       return 1
@@ -19,7 +18,7 @@ export function resolveColdStartHistoryDays(period: ProgressiveBackfillPeriod, n
     case 'month':
       return Math.max(now.getDate(), 1)
     case 'all':
-      return ALL_TIME_HISTORY_DAYS
+      return Math.max(1, Math.round((Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()) - Date.UTC(allTimeStart.getFullYear(), allTimeStart.getMonth(), allTimeStart.getDate())) / MS_PER_DAY) + 1)
   }
 }
 
@@ -72,7 +71,7 @@ export function computeProgressiveBackfillStart({
   // Backward gap: cache covers through yesterday but doesn't go far enough back
   // for the requested period. E.g., cache has 7 days but user wants 30 days.
   // Fill the ENTIRE missing range at once — no chunking. Each period should get
-  // its full data on the first request (today=1d, week=7d, 30d=30d, all=365d).
+  // its full data on the first request (today=1d, week=7d, 30d=30d, all=the full available history).
   if (oldestCachedDate && neededStart.getTime() < new Date(oldestCachedDate).getTime()) {
     return neededStart < fullBackfillStart ? fullBackfillStart : neededStart
   }

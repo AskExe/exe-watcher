@@ -1,10 +1,16 @@
 import { readdir, stat } from 'fs/promises'
-import { basename, join } from 'path'
+import { basename, join, resolve } from 'path'
 import { homedir } from 'os'
 
+import { readConfig } from '../config.js'
 import type { Provider, SessionSource, SessionParser } from './types.js'
 
 const shortNames: Record<string, string> = {
+  'claude-fable-5-1': 'Fable 5.1',
+  'claude-fable-5': 'Fable 5',
+  'claude-opus-5-5': 'Opus 5.5',
+  'claude-opus-5': 'Opus 5',
+  'claude-sonnet-5': 'Sonnet 5',
   'claude-opus-4-7': 'Opus 4.7',
   'claude-opus-4-6': 'Opus 4.6',
   'claude-opus-4-5': 'Opus 4.5',
@@ -21,10 +27,6 @@ const shortNames: Record<string, string> = {
 
 function getClaudeDir(): string {
   return process.env['CLAUDE_CONFIG_DIR'] || join(homedir(), '.claude')
-}
-
-function getProjectsDir(): string {
-  return join(getClaudeDir(), 'projects')
 }
 
 function getDesktopSessionsDir(): string {
@@ -78,24 +80,28 @@ export const claude: Provider = {
   async discoverSessions(): Promise<SessionSource[]> {
     const sources: SessionSource[] = []
 
-    const projectsDir = getProjectsDir()
-    try {
-      const entries = await readdir(projectsDir)
-      for (const dirName of entries) {
-        const dirPath = join(projectsDir, dirName)
-        const dirStat = await stat(dirPath).catch(() => null)
-        if (dirStat?.isDirectory()) {
-          sources.push({ path: dirPath, project: dirName, provider: 'claude' })
+    const config = await readConfig()
+    const roots = new Set([getClaudeDir(), ...(config.claudeConfigDirs ?? [])])
+    for (const root of roots) {
+      const projectsDir = join(root.startsWith('~/') ? join(homedir(), root.slice(2)) : resolve(root), 'projects')
+      try {
+        const entries = await readdir(projectsDir)
+        for (const dirName of entries) {
+          const dirPath = join(projectsDir, dirName)
+          const dirStat = await stat(dirPath).catch(() => null)
+          if (dirStat?.isDirectory()) {
+            sources.push({ path: dirPath, project: dirName, provider: 'claude' })
+          }
         }
-      }
-    } catch {}
+      } catch {}
+    }
 
     const desktopDirs = await findDesktopProjectDirs(getDesktopSessionsDir())
     for (const dirPath of desktopDirs) {
       sources.push({ path: dirPath, project: basename(dirPath), provider: 'claude' })
     }
 
-    return sources
+    return [...new Map(sources.map(source => [source.path, source])).values()]
   },
 
   createSessionParser(): SessionParser {

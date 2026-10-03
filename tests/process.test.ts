@@ -1,6 +1,20 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { spawn } from 'node:child_process'
 import { join } from 'node:path'
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+
+let testHome: string
+beforeAll(() => {
+  testHome = mkdtempSync(join(tmpdir(), 'watcher-process-'))
+  const project = join(testHome, '.claude/projects/fixture')
+  mkdirSync(project, { recursive: true })
+  writeFileSync(join(project, 's.jsonl'), JSON.stringify({ type: 'assistant', timestamp: new Date().toISOString(), message: { id: 'fixture', model: 'claude-sonnet-4-6', content: [], usage: { input_tokens: 100, output_tokens: 50 } } }) + '\n')
+})
+afterAll(() => rmSync(testHome, { recursive: true, force: true }))
+function testEnvironment() {
+  return { ...process.env, HOME: testHome, CLAUDE_CONFIG_DIR: join(testHome, '.claude'), CODEX_HOME: join(testHome, '.codex'), EXE_WATCHER_CACHE_DIR: join(testHome, '.cache/exe-watcher'), XDG_CONFIG_HOME: join(testHome, '.config') }
+}
 
 const CLI_PATH = join(process.cwd(), 'dist', 'cli.js')
 const NODE = process.execPath
@@ -20,7 +34,7 @@ function runCli(
   return new Promise((resolve, reject) => {
     const proc = spawn(NODE, [CLI_PATH, ...args], {
       stdio: [options.stdin ?? 'pipe', 'pipe', 'pipe'],
-      env: { ...process.env },
+      env: testEnvironment(),
     })
 
     let stdout = ''
@@ -54,7 +68,7 @@ describe('process lifecycle', () => {
     // Pipe CLI output to a reader that closes after one line.
     const proc = spawn(NODE, [CLI_PATH, 'status'], {
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env },
+      env: testEnvironment(),
     })
 
     const result = await new Promise<{ code: number | null; stderr: string }>((resolve, reject) => {

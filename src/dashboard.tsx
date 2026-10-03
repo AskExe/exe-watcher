@@ -1,3 +1,4 @@
+import { getClaudeRecoveryForRange, type HistoricalRecovery } from './claude-recovery.js'
 import { LatestLoad } from './latest-load.js'
 import { withScanBudget } from './resource-budget.js'
 import { homedir } from 'os'
@@ -193,15 +194,15 @@ function renderPlanBar(percentUsed: number, width: number): string {
   return `${'▓'.repeat(width)}${'▶'.repeat(chevrons)}`
 }
 
-function Overview({ projects, label, width, planUsage }: { projects: ProjectSummary[]; label: string; width: number; planUsage?: PlanUsage }) {
-  const totalCost = projects.reduce((s, p) => s + p.totalCostUSD, 0)
+function Overview({ projects, label, width, planUsage, recovery }: { projects: ProjectSummary[]; label: string; width: number; planUsage?: PlanUsage; recovery?: HistoricalRecovery | null }) {
+  const totalCost = projects.reduce((s, p) => s + p.totalCostUSD, 0) + (recovery?.costUSD ?? 0)
   const totalCalls = projects.reduce((s, p) => s + p.totalApiCalls, 0)
   const totalSessions = projects.reduce((s, p) => s + p.sessions.length, 0)
   const allSessions = projects.flatMap(p => p.sessions)
-  const totalInput = allSessions.reduce((s, sess) => s + sess.totalInputTokens, 0)
-  const totalOutput = allSessions.reduce((s, sess) => s + sess.totalOutputTokens, 0)
-  const totalCacheRead = allSessions.reduce((s, sess) => s + sess.totalCacheReadTokens, 0)
-  const totalCacheWrite = allSessions.reduce((s, sess) => s + sess.totalCacheWriteTokens, 0)
+  const totalInput = allSessions.reduce((s, sess) => s + sess.totalInputTokens, 0) + (recovery?.inputTokens ?? 0)
+  const totalOutput = allSessions.reduce((s, sess) => s + sess.totalOutputTokens, 0) + (recovery?.outputTokens ?? 0)
+  const totalCacheRead = allSessions.reduce((s, sess) => s + sess.totalCacheReadTokens, 0) + (recovery?.cacheReadTokens ?? 0)
+  const totalCacheWrite = allSessions.reduce((s, sess) => s + sess.totalCacheWriteTokens, 0) + (recovery?.cacheWriteTokens ?? 0)
   const allInputTokens = totalInput + totalCacheRead + totalCacheWrite
   const cacheHit = allInputTokens > 0
     ? (totalCacheRead / allInputTokens) * 100 : 0
@@ -234,6 +235,7 @@ function Overview({ projects, label, width, planUsage }: { projects: ProjectSumm
       <Text dimColor wrap="truncate-end">
         {formatTokens(totalInput)} in   {formatTokens(totalOutput)} out   {formatTokens(totalCacheRead)} cached   {formatTokens(totalCacheWrite)} written
       </Text>
+      {recovery && <Text color={ORANGE} wrap="truncate-end">Includes {formatCost(recovery.costUSD)} recovered history estimate; earlier coverage is incomplete.</Text>}
       {planUsage && (
         <>
           <Text wrap="truncate-end">
@@ -631,7 +633,7 @@ function Row({ wide, width, children }: { wide: boolean; width: number; children
   return <>{children}</>
 }
 
-function DashboardContent({ projects, period, columns, activeProvider, budgets, planUsage }: { projects: ProjectSummary[]; period: Period; columns?: number; activeProvider?: string; budgets?: Map<string, ContextBudget>; planUsage?: PlanUsage }) {
+function DashboardContent({ projects, period, columns, activeProvider, budgets, planUsage, recovery }: { projects: ProjectSummary[]; period: Period; columns?: number; activeProvider?: string; budgets?: Map<string, ContextBudget>; planUsage?: PlanUsage; recovery?: HistoricalRecovery | null }) {
   const { dashWidth, wide, halfWidth, barWidth } = getLayout(columns)
   const isCursor = activeProvider === 'cursor'
   if (projects.length === 0) return <Panel title="Exe Watcher" color={ORANGE} width={dashWidth}><Text dimColor>No usage data found for {PERIOD_LABELS[period]}.</Text></Panel>
@@ -639,7 +641,7 @@ function DashboardContent({ projects, period, columns, activeProvider, budgets, 
   const days = period === 'all' ? undefined : (period === 'month' || period === '30days' ? 31 : 14)
   return (
     <Box flexDirection="column" width={dashWidth}>
-      <Overview projects={projects} label={PERIOD_LABELS[period]} width={dashWidth} planUsage={planUsage} />
+      <Overview projects={projects} label={PERIOD_LABELS[period]} width={dashWidth} planUsage={planUsage} recovery={recovery} />
       <Row wide={wide} width={dashWidth}><DailyActivity projects={projects} days={days} pw={pw} bw={barWidth} /><ProjectBreakdown projects={projects} pw={pw} bw={barWidth} budgets={budgets} /></Row>
       <TopSessions projects={projects} pw={dashWidth} bw={barWidth} />
       <Row wide={wide} width={dashWidth}><ActivityBreakdown projects={projects} pw={pw} bw={barWidth} /><ModelBreakdown projects={projects} pw={pw} bw={barWidth} /></Row>
@@ -662,6 +664,7 @@ function InteractiveDashboard({ initialPeriod, initialProvider, refreshSeconds, 
   const { exit } = useApp()
   const [period, setPeriod] = useState<Period>(initialPeriod)
   const [projects, setProjects] = useState<ProjectSummary[]>([])
+  const [recovery, setRecovery] = useState<HistoricalRecovery | null>(null)
   const [initialLoading, setInitialLoading] = useState(true)
   const [loading, setLoading] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -740,10 +743,13 @@ function InteractiveDashboard({ initialPeriod, initialProvider, refreshSeconds, 
         await loadPricing()
         const data = await parseAllSessions(getDateRange(p), prov, true, signal)
         if (signal.aborted) return undefined
-        return { projects: filterProjectsByName(data, projectFilter, excludeFilter), usage: await getPlanUsageOrNull(), providers: getDiscoveredProviderNames() }
+        const recovery = p === 'all' && (prov === 'all' || prov === 'claude') && !projectFilter?.length && !excludeFilter?.length
+          ? await getClaudeRecoveryForRange(getDateRange(p), signal) : null
+        return { recovery, projects: filterProjectsByName(data, projectFilter, excludeFilter), usage: await getPlanUsageOrNull(), providers: getDiscoveredProviderNames() }
       })
       if (!result || reloadGenerationRef.current !== generation) return
       setProjects(result.projects)
+      setRecovery(result.recovery)
       setDetectedProviders(result.providers)
       setPlanUsage(result.usage ?? undefined)
       failures.current = 0
@@ -844,19 +850,19 @@ function InteractiveDashboard({ initialPeriod, initialProvider, refreshSeconds, 
           ? <OptimizeView findings={optimizeResult.findings} costRate={optimizeResult.costRate} projects={projects} label={PERIOD_LABELS[period]} width={dashWidth} healthScore={optimizeResult.healthScore} healthGrade={optimizeResult.healthGrade} />
           : view === 'optimize'
             ? <Panel title="Optimization" color={ORANGE} width={dashWidth}><Text>Scanning…</Text></Panel>
-            : <DashboardContent projects={projects} period={period} columns={columns} activeProvider={activeProvider} budgets={projectBudgets} planUsage={planUsage} />}
+            : <DashboardContent projects={projects} period={period} columns={columns} activeProvider={activeProvider} budgets={projectBudgets} planUsage={planUsage} recovery={recovery} />}
       {view !== 'compare' && <StatusBar width={dashWidth} showProvider={multipleProviders} view={view} findingCount={findingCount} optimizeAvailable={optimizeAvailable} compareAvailable={compareAvailable} />}
     </Box>
   )
 }
 
-function StaticDashboard({ projects, period, activeProvider, planUsage }: { projects: ProjectSummary[]; period: Period; activeProvider?: string; planUsage?: PlanUsage }) {
+function StaticDashboard({ projects, period, activeProvider, planUsage, recovery }: { projects: ProjectSummary[]; period: Period; activeProvider?: string; planUsage?: PlanUsage; recovery?: HistoricalRecovery | null }) {
   const { columns } = useWindowSize()
   const { dashWidth } = getLayout(columns)
   return (
     <Box flexDirection="column" width={dashWidth}>
       <PeriodTabs active={period} />
-      <DashboardContent projects={projects} period={period} columns={columns} activeProvider={activeProvider} planUsage={planUsage} />
+      <DashboardContent projects={projects} period={period} columns={columns} activeProvider={activeProvider} planUsage={planUsage} recovery={recovery} />
     </Box>
   )
 }
@@ -875,8 +881,10 @@ export async function renderDashboard(period: Period = 'week', provider: string 
     await loadPricing()
     const range = customRange ?? getDateRange(period)
     const filteredProjects = filterProjectsByName(await parseAllSessions(range, provider, true), projectFilter, excludeFilter)
+    const recovery = period === 'all' && (provider === 'all' || provider === 'claude') && !projectFilter?.length && !excludeFilter?.length && !customRange
+      ? await getClaudeRecoveryForRange(range) : null
     const planUsage = await getPlanUsageOrNull()
-    const { unmount } = render(<StaticDashboard projects={filteredProjects} period={period} activeProvider={provider} planUsage={planUsage ?? undefined} />, { patchConsole: false })
+    const { unmount } = render(<StaticDashboard projects={filteredProjects} period={period} activeProvider={provider} planUsage={planUsage ?? undefined} recovery={recovery} />, { patchConsole: false })
     unmount()
   }
 }

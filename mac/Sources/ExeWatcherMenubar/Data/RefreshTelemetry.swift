@@ -336,7 +336,9 @@ final class HealthMonitor {
             lastHealthState = state
         }
 
-        if state == .stuck || state == .stale {
+        // File notifications drive freshness. An idle/old payload must never
+        // turn this diagnostics timer into a periodic usage scanner.
+        if state == .stuck {
             let cooldownElapsed = now.timeIntervalSince(lastRecoveryAt) > Self.recoveryCooldownSeconds
             if cooldownElapsed {
                 selfHeal(state: state, store: store)
@@ -357,8 +359,9 @@ final class HealthMonitor {
             stuckDetectionStart = nil
         }
 
-        if let lastSuccess = store.lastBadgeRefreshSuccessAt {
-            if now.timeIntervalSince(lastSuccess) > Self.staleThresholdSeconds {
+        if let lastSuccess = store.lastBadgeRefreshSuccessAt,
+           let changed = store.lastUsageChangeAt, changed > lastSuccess {
+            if now.timeIntervalSince(changed) > Self.staleThresholdSeconds {
                 return .stale
             }
         } else if store.lastBadgeRefreshAttemptAt != nil {
@@ -381,8 +384,7 @@ final class HealthMonitor {
             action = .resetInFlight
             store.recoverFromSystemResume()
         case .stale:
-            action = .forceRefresh
-            Task { await store.refreshTodayBadge() }
+            return
         default:
             action = .resetInFlight
             store.recoverFromSystemResume()
