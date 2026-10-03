@@ -1,0 +1,1104 @@
+{
+  "verifiedOn": "2026-10-01",
+  "models": {
+    "gpt-6-astra": {
+      "inputCostPerToken": 0.00001,
+      "outputCostPerToken": 0.00005,
+      "cacheReadCostPerToken": 0.000001,
+      "cacheWriteCostPerToken": 0.0000125,
+      "webSearchCostPerRequest": 0.01,
+      "fastMultiplier": 2,
+      "source": "https://developers.openai.com/api/docs/pricing",
+      "contextTiers": [
+        {
+          "minPromptTokens": 272000,
+          "inputCostPerToken": 0.00002,
+          "cacheReadCostPerToken": 0.000002,
+          "cacheWriteCostPerToken": 0.000025,
+          "outputCostPerToken": 0.000075
+        }
+      ]
+    },
+    "gpt-6.1-sol": {
+      "inputCostPerToken": 0.000002,
+      "outputCostPerToken": 0.00001,
+      "cacheReadCostPerToken": 1e-7,
+      "cacheWriteCostPerToken": 0.0000025,
+      "webSearchCostPerRequest": 0.01,
+      "fastMultiplier": 2,
+      "source": "https://developers.openai.com/api/docs/pricing",
+      "contextTiers": [
+        {
+          "minPromptTokens": 272000,
+          "inputCostPerToken": 0.000004,
+          "cacheReadCostPerToken": 2e-7,
+          "cacheWriteCostPerToken": 0.000005,
+          "outputCostPerToken": 0.000015
+        }
+      ]
+    },
+    "gpt-6-luna": {
+      "inputCostPerToken": 1e-7,
+      "outputCostPerToken": 5e-7,
+      "cacheReadCostPerToken": 1e-8,
+      "cacheWriteCostPerToken": 1.25e-7,
+      "webSearchCostPerRequest": 0.01,
+      "fastMultiplier": 2,
+      "source": "https://developers.openai.com/api/docs/pricing",
+      "contextTiers": [
+        {
+          "minPromptTokens": 272000,
+          "inputCostPerToken": 2e-7,
+          "cacheReadCostPerToken": 2e-8,
+          "cacheWriteCostPerToken": 2.5e-7,
+          "outputCostPerToken": 7.5e-7
+        }
+      ]
+    },
+    "gpt-6-sol": {
+      "inputCostPerToken": 0.000002,
+      "outputCostPerToken": 0.00001,
+      "cacheReadCostPerToken": 2e-7,
+      "cacheWriteCostPerToken": 0.0000025,
+      "webSearchCostPerRequest": 0.01,
+      "fastMultiplier": 2,
+      "source": "https://developers.openai.com/api/docs/pricing",
+      "contextTiers": [
+        {
+          "minPromptTokens": 272000,
+          "inputCostPerToken": 0.000004,
+          "cacheReadCostPerToken": 4e-7,
+          "cacheWriteCostPerToken": 0.000005,
+          "outputCostPerToken": 0.000015
+        }
+      ]
+    },
+    "gpt-5.6-sol": {
+      "inputCostPerToken": 0.000004,
+      "outputCostPerToken": 0.00002,
+      "cacheReadCostPerToken": 4e-7,
+      "cacheWriteCostPerToken": 0.000005,
+      "webSearchCostPerRequest": 0.01,
+      "fastMultiplier": 2,
+      "source": "https://developers.openai.com/api/docs/pricing",
+      "contextTiers": [
+        {
+          "minPromptTokens": 272000,
+          "inputCostPerToken": 0.000008,
+          "cacheReadCostPerToken": 8e-7,
+          "cacheWriteCostPerToken": 0.00001,
+          "outputCostPerToken": 0.00003
+        }
+      ]
+    },
+    "gpt-5.6-terra": {
+      "inputCostPerToken": 0.000002,
+      "outputCostPerToken": 0.000012,
+      "cacheReadCostPerToken": 2e-7,
+      "cacheWriteCostPerToken": 0.0000025,
+      "webSearchCostPerRequest": 0.01,
+      "fastMultiplier": 2,
+      "source": "https://developers.openai.com/api/docs/pricing",
+      "contextTiers": [
+        {
+          "minPromptTokens": 272000,
+          "inputCostPerToken": 0.000004,
+          "cacheReadCostPerToken": 4e-7,
+          "cacheWriteCostPerToken": 0.000005,
+          "outputCostPerToken": 0.000018
+        }
+      ]
+    },
+    "gpt-5.6-luna": {
+      "inputCostPerToken": 2e-7,
+      "outputCostPerToken": 0.0000012,
+      "cacheReadCostPerToken": 2e-8,
+      "cacheWriteCostPerToken": 2.5e-7,
+      "webSearchCostPerRequest": 0.01,
+      "fastMultiplier": 2,
+      "source": "https://developers.openai.com/api/docs/pricing",
+      "contextTiers": [
+        {
+          "minPromptTokens": 272000,
+          "inputCostPerToken": 4e-7,
+          "cacheReadCostPerToken": 4e-8,
+          "cacheWriteCostPerToken": 5e-7,
+          "outputCostPerToken": 0.0000018
+        }
+      ]
+    },
+    "gpt-5.5": {
+      "inputCostPerToken": 0.000005,
+      "outputCostPerToken": 0.00003,
+      "cacheReadCostPerToken": 5e-7,
+      "cacheWriteCostPerToken": 0,
+      "webSearchCostPerRequest": 0.01,
+      "fastMultiplier": 2.5,
+      "source": "https://developers.openai.com/api/docs/pricing",
+      "contextTiers": [
+        {
+          "minPromptTokens": 272000,
+          "inputCostPerToken": 0.00001,
+          "cacheReadCostPerToken": 0.000001,
+          "cacheWriteCostPerToken": 0,
+          "outputCostPerToken": 0.000045
+        }
+      ]
+    },
+    "gpt-5.5-pro": {
+      "inputCostPerToken": 0.00003,
+      "outputCostPerToken": 0.00018,
+      "cacheReadCostPerToken": 0,
+      "cacheWriteCostPerToken": 0,
+      "webSearchCostPerRequest": 0.01,
+      "fastMultiplier": 1,
+      "source": "https://developers.openai.com/api/docs/pricing",
+      "contextTiers": [
+        {
+          "minPromptTokens": 272000,
+          "inputCostPerToken": 0.00006,
+          "cacheReadCostPerToken": 0,
+          "cacheWriteCostPerToken": 0,
+          "outputCostPerToken": 0.00027
+        }
+      ]
+    },
+    "gpt-5.4": {
+      "inputCostPerToken": 0.0000025,
+      "outputCostPerToken": 0.000015,
+      "cacheReadCostPerToken": 2.5e-7,
+      "cacheWriteCostPerToken": 0,
+      "webSearchCostPerRequest": 0.01,
+      "fastMultiplier": 2,
+      "source": "https://developers.openai.com/api/docs/pricing",
+      "contextTiers": [
+        {
+          "minPromptTokens": 272000,
+          "inputCostPerToken": 0.000005,
+          "cacheReadCostPerToken": 5e-7,
+          "cacheWriteCostPerToken": 0,
+          "outputCostPerToken": 0.0000225
+        }
+      ]
+    },
+    "gpt-5.4-mini": {
+      "inputCostPerToken": 7.5e-7,
+      "outputCostPerToken": 0.0000045,
+      "cacheReadCostPerToken": 7.5e-8,
+      "cacheWriteCostPerToken": 0,
+      "webSearchCostPerRequest": 0.01,
+      "fastMultiplier": 2,
+      "source": "https://developers.openai.com/api/docs/pricing"
+    },
+    "gpt-5.4-nano": {
+      "inputCostPerToken": 2e-7,
+      "outputCostPerToken": 0.00000125,
+      "cacheReadCostPerToken": 2e-8,
+      "cacheWriteCostPerToken": 0,
+      "webSearchCostPerRequest": 0.01,
+      "fastMultiplier": 1,
+      "source": "https://developers.openai.com/api/docs/pricing"
+    },
+    "gpt-5.4-pro": {
+      "inputCostPerToken": 0.00003,
+      "outputCostPerToken": 0.00018,
+      "cacheReadCostPerToken": 0,
+      "cacheWriteCostPerToken": 0,
+      "webSearchCostPerRequest": 0.01,
+      "fastMultiplier": 1,
+      "source": "https://developers.openai.com/api/docs/pricing",
+      "contextTiers": [
+        {
+          "minPromptTokens": 272000,
+          "inputCostPerToken": 0.00006,
+          "cacheReadCostPerToken": 0,
+          "cacheWriteCostPerToken": 0,
+          "outputCostPerToken": 0.00027
+        }
+      ]
+    },
+    "gpt-5.2": {
+      "inputCostPerToken": 0.00000175,
+      "outputCostPerToken": 0.000014,
+      "cacheReadCostPerToken": 1.75e-7,
+      "cacheWriteCostPerToken": 0,
+      "webSearchCostPerRequest": 0.01,
+      "fastMultiplier": 2,
+      "source": "https://developers.openai.com/api/docs/pricing"
+    },
+    "gpt-5.2-pro": {
+      "inputCostPerToken": 0.000021,
+      "outputCostPerToken": 0.000168,
+      "cacheReadCostPerToken": 0,
+      "cacheWriteCostPerToken": 0,
+      "webSearchCostPerRequest": 0.01,
+      "fastMultiplier": 1,
+      "source": "https://developers.openai.com/api/docs/pricing"
+    },
+    "gpt-5.1": {
+      "inputCostPerToken": 0.00000125,
+      "outputCostPerToken": 0.00001,
+      "cacheReadCostPerToken": 1.25e-7,
+      "cacheWriteCostPerToken": 0,
+      "webSearchCostPerRequest": 0.01,
+      "fastMultiplier": 2,
+      "source": "https://developers.openai.com/api/docs/pricing"
+    },
+    "gpt-5": {
+      "inputCostPerToken": 0.00000125,
+      "outputCostPerToken": 0.00001,
+      "cacheReadCostPerToken": 1.25e-7,
+      "cacheWriteCostPerToken": 0,
+      "webSearchCostPerRequest": 0.01,
+      "fastMultiplier": 2,
+      "source": "https://developers.openai.com/api/docs/pricing"
+    },
+    "gpt-5-mini": {
+      "inputCostPerToken": 2.5e-7,
+      "outputCostPerToken": 0.000002,
+      "cacheReadCostPerToken": 2.5e-8,
+      "cacheWriteCostPerToken": 0,
+      "webSearchCostPerRequest": 0.01,
+      "fastMultiplier": 1.8,
+      "source": "https://developers.openai.com/api/docs/pricing"
+    },
+    "gpt-5-nano": {
+      "inputCostPerToken": 5e-8,
+      "outputCostPerToken": 4e-7,
+      "cacheReadCostPerToken": 5e-9,
+      "cacheWriteCostPerToken": 0,
+      "webSearchCostPerRequest": 0.01,
+      "fastMultiplier": 1,
+      "source": "https://developers.openai.com/api/docs/pricing"
+    },
+    "gpt-5-pro": {
+      "inputCostPerToken": 0.000015,
+      "outputCostPerToken": 0.00012,
+      "cacheReadCostPerToken": 0,
+      "cacheWriteCostPerToken": 0,
+      "webSearchCostPerRequest": 0.01,
+      "fastMultiplier": 1,
+      "source": "https://developers.openai.com/api/docs/pricing"
+    },
+    "gpt-4.1": {
+      "inputCostPerToken": 0.000002,
+      "outputCostPerToken": 0.000008,
+      "cacheReadCostPerToken": 5e-7,
+      "cacheWriteCostPerToken": 0,
+      "webSearchCostPerRequest": 0.01,
+      "fastMultiplier": 1.75,
+      "source": "https://developers.openai.com/api/docs/pricing"
+    },
+    "gpt-4.1-mini": {
+      "inputCostPerToken": 4e-7,
+      "outputCostPerToken": 0.0000016,
+      "cacheReadCostPerToken": 1e-7,
+      "cacheWriteCostPerToken": 0,
+      "webSearchCostPerRequest": 0.01,
+      "fastMultiplier": 1.75,
+      "source": "https://developers.openai.com/api/docs/pricing"
+    },
+    "gpt-4.1-nano": {
+      "inputCostPerToken": 1e-7,
+      "outputCostPerToken": 4e-7,
+      "cacheReadCostPerToken": 2.5e-8,
+      "cacheWriteCostPerToken": 0,
+      "webSearchCostPerRequest": 0.01,
+      "fastMultiplier": 2,
+      "source": "https://developers.openai.com/api/docs/pricing"
+    },
+    "gpt-4o": {
+      "inputCostPerToken": 0.0000025,
+      "outputCostPerToken": 0.00001,
+      "cacheReadCostPerToken": 0.00000125,
+      "cacheWriteCostPerToken": 0,
+      "webSearchCostPerRequest": 0.01,
+      "fastMultiplier": 1.7,
+      "source": "https://developers.openai.com/api/docs/pricing"
+    },
+    "gpt-4o-2024-05-13": {
+      "inputCostPerToken": 0.000005,
+      "outputCostPerToken": 0.000015,
+      "cacheReadCostPerToken": 0,
+      "cacheWriteCostPerToken": 0,
+      "webSearchCostPerRequest": 0.01,
+      "fastMultiplier": 1.7499999999999998,
+      "source": "https://developers.openai.com/api/docs/pricing"
+    },
+    "gpt-4o-mini": {
+      "inputCostPerToken": 1.5e-7,
+      "outputCostPerToken": 6e-7,
+      "cacheReadCostPerToken": 7.5e-8,
+      "cacheWriteCostPerToken": 0,
+      "webSearchCostPerRequest": 0.01,
+      "fastMultiplier": 1.6666666666666667,
+      "source": "https://developers.openai.com/api/docs/pricing"
+    },
+    "o1": {
+      "inputCostPerToken": 0.000015,
+      "outputCostPerToken": 0.00006,
+      "cacheReadCostPerToken": 0.0000075,
+      "cacheWriteCostPerToken": 0,
+      "webSearchCostPerRequest": 0.01,
+      "fastMultiplier": 1,
+      "source": "https://developers.openai.com/api/docs/pricing"
+    },
+    "o1-pro": {
+      "inputCostPerToken": 0.00015,
+      "outputCostPerToken": 0.0006,
+      "cacheReadCostPerToken": 0,
+      "cacheWriteCostPerToken": 0,
+      "webSearchCostPerRequest": 0.01,
+      "fastMultiplier": 1,
+      "source": "https://developers.openai.com/api/docs/pricing"
+    },
+    "o3-pro": {
+      "inputCostPerToken": 0.00002,
+      "outputCostPerToken": 0.00008,
+      "cacheReadCostPerToken": 0,
+      "cacheWriteCostPerToken": 0,
+      "webSearchCostPerRequest": 0.01,
+      "fastMultiplier": 1,
+      "source": "https://developers.openai.com/api/docs/pricing"
+    },
+    "o3": {
+      "inputCostPerToken": 0.000002,
+      "outputCostPerToken": 0.000008,
+      "cacheReadCostPerToken": 5e-7,
+      "cacheWriteCostPerToken": 0,
+      "webSearchCostPerRequest": 0.01,
+      "fastMultiplier": 1.75,
+      "source": "https://developers.openai.com/api/docs/pricing"
+    },
+    "o4-mini": {
+      "inputCostPerToken": 0.0000011,
+      "outputCostPerToken": 0.0000044,
+      "cacheReadCostPerToken": 2.75e-7,
+      "cacheWriteCostPerToken": 0,
+      "webSearchCostPerRequest": 0.01,
+      "fastMultiplier": 1.818181818181818,
+      "source": "https://developers.openai.com/api/docs/pricing"
+    },
+    "o3-mini": {
+      "inputCostPerToken": 0.0000011,
+      "outputCostPerToken": 0.0000044,
+      "cacheReadCostPerToken": 5.5e-7,
+      "cacheWriteCostPerToken": 0,
+      "webSearchCostPerRequest": 0.01,
+      "fastMultiplier": 1,
+      "source": "https://developers.openai.com/api/docs/pricing"
+    },
+    "gpt-4-turbo-2024-04-09": {
+      "inputCostPerToken": 0.00001,
+      "outputCostPerToken": 0.00003,
+      "cacheReadCostPerToken": 0,
+      "cacheWriteCostPerToken": 0,
+      "webSearchCostPerRequest": 0.01,
+      "fastMultiplier": 1,
+      "source": "https://developers.openai.com/api/docs/pricing"
+    },
+    "gpt-4-0613": {
+      "inputCostPerToken": 0.00003,
+      "outputCostPerToken": 0.00006,
+      "cacheReadCostPerToken": 0,
+      "cacheWriteCostPerToken": 0,
+      "webSearchCostPerRequest": 0.01,
+      "fastMultiplier": 1,
+      "source": "https://developers.openai.com/api/docs/pricing"
+    },
+    "gpt-3.5-turbo": {
+      "inputCostPerToken": 5e-7,
+      "outputCostPerToken": 0.0000015,
+      "cacheReadCostPerToken": 0,
+      "cacheWriteCostPerToken": 0,
+      "webSearchCostPerRequest": 0.01,
+      "fastMultiplier": 1,
+      "source": "https://developers.openai.com/api/docs/pricing"
+    },
+    "gpt-3.5-turbo-0125": {
+      "inputCostPerToken": 5e-7,
+      "outputCostPerToken": 0.0000015,
+      "cacheReadCostPerToken": 0,
+      "cacheWriteCostPerToken": 0,
+      "webSearchCostPerRequest": 0.01,
+      "fastMultiplier": 1,
+      "source": "https://developers.openai.com/api/docs/pricing"
+    },
+    "gpt-3.5-turbo-1106": {
+      "inputCostPerToken": 0.000001,
+      "outputCostPerToken": 0.000002,
+      "cacheReadCostPerToken": 0,
+      "cacheWriteCostPerToken": 0,
+      "webSearchCostPerRequest": 0.01,
+      "fastMultiplier": 1,
+      "source": "https://developers.openai.com/api/docs/pricing"
+    },
+    "gpt-3.5-turbo-instruct": {
+      "inputCostPerToken": 0.0000015,
+      "outputCostPerToken": 0.000002,
+      "cacheReadCostPerToken": 0,
+      "cacheWriteCostPerToken": 0,
+      "webSearchCostPerRequest": 0.01,
+      "fastMultiplier": 1,
+      "source": "https://developers.openai.com/api/docs/pricing"
+    },
+    "davinci-002": {
+      "inputCostPerToken": 0.000002,
+      "outputCostPerToken": 0.000002,
+      "cacheReadCostPerToken": 0,
+      "cacheWriteCostPerToken": 0,
+      "webSearchCostPerRequest": 0.01,
+      "fastMultiplier": 1,
+      "source": "https://developers.openai.com/api/docs/pricing"
+    },
+    "babbage-002": {
+      "inputCostPerToken": 4e-7,
+      "outputCostPerToken": 4e-7,
+      "cacheReadCostPerToken": 0,
+      "cacheWriteCostPerToken": 0,
+      "webSearchCostPerRequest": 0.01,
+      "fastMultiplier": 1,
+      "source": "https://developers.openai.com/api/docs/pricing"
+    },
+    "claude-fable-5-1": {
+      "inputCostPerToken": 0.00001,
+      "outputCostPerToken": 0.00005,
+      "cacheReadCostPerToken": 2.5e-7,
+      "cacheWriteCostPerToken": 0.0000125,
+      "webSearchCostPerRequest": 0.01,
+      "fastMultiplier": 1,
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+      "cacheWrite1hCostPerToken": 0.00002
+    },
+    "claude-mythos-5-1": {
+      "inputCostPerToken": 0.00001,
+      "outputCostPerToken": 0.00005,
+      "cacheReadCostPerToken": 2.5e-7,
+      "cacheWriteCostPerToken": 0.0000125,
+      "webSearchCostPerRequest": 0.01,
+      "fastMultiplier": 1,
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+      "cacheWrite1hCostPerToken": 0.00002
+    },
+    "claude-fable-5": {
+      "inputCostPerToken": 0.00001,
+      "outputCostPerToken": 0.00005,
+      "cacheReadCostPerToken": 0.000001,
+      "cacheWriteCostPerToken": 0.0000125,
+      "webSearchCostPerRequest": 0.01,
+      "fastMultiplier": 1,
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+      "cacheWrite1hCostPerToken": 0.00002
+    },
+    "claude-mythos-5": {
+      "inputCostPerToken": 0.00001,
+      "outputCostPerToken": 0.00005,
+      "cacheReadCostPerToken": 0.000001,
+      "cacheWriteCostPerToken": 0.0000125,
+      "webSearchCostPerRequest": 0.01,
+      "fastMultiplier": 1,
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+      "cacheWrite1hCostPerToken": 0.00002
+    },
+    "claude-opus-5-5": {
+      "inputCostPerToken": 0.000004,
+      "outputCostPerToken": 0.00002,
+      "cacheReadCostPerToken": 2e-7,
+      "cacheWriteCostPerToken": 0.000005,
+      "webSearchCostPerRequest": 0.01,
+      "fastMultiplier": 2,
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+      "cacheWrite1hCostPerToken": 0.000008
+    },
+    "claude-opus-5": {
+      "inputCostPerToken": 0.000005,
+      "outputCostPerToken": 0.000025,
+      "cacheReadCostPerToken": 5e-7,
+      "cacheWriteCostPerToken": 0.00000625,
+      "webSearchCostPerRequest": 0.01,
+      "fastMultiplier": 2,
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+      "cacheWrite1hCostPerToken": 0.00001
+    },
+    "claude-opus-4-8": {
+      "inputCostPerToken": 0.000005,
+      "outputCostPerToken": 0.000025,
+      "cacheReadCostPerToken": 5e-7,
+      "cacheWriteCostPerToken": 0.00000625,
+      "webSearchCostPerRequest": 0.01,
+      "fastMultiplier": 2,
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+      "cacheWrite1hCostPerToken": 0.00001
+    },
+    "claude-opus-4-7": {
+      "inputCostPerToken": 0.000005,
+      "outputCostPerToken": 0.000025,
+      "cacheReadCostPerToken": 5e-7,
+      "cacheWriteCostPerToken": 0.00000625,
+      "webSearchCostPerRequest": 0.01,
+      "fastMultiplier": 1,
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+      "cacheWrite1hCostPerToken": 0.00001
+    },
+    "claude-opus-4-6": {
+      "inputCostPerToken": 0.000005,
+      "outputCostPerToken": 0.000025,
+      "cacheReadCostPerToken": 5e-7,
+      "cacheWriteCostPerToken": 0.00000625,
+      "webSearchCostPerRequest": 0.01,
+      "fastMultiplier": 1,
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+      "cacheWrite1hCostPerToken": 0.00001
+    },
+    "claude-opus-4-5": {
+      "inputCostPerToken": 0.000005,
+      "outputCostPerToken": 0.000025,
+      "cacheReadCostPerToken": 5e-7,
+      "cacheWriteCostPerToken": 0.00000625,
+      "webSearchCostPerRequest": 0.01,
+      "fastMultiplier": 1,
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+      "cacheWrite1hCostPerToken": 0.00001
+    },
+    "claude-opus-4-1": {
+      "inputCostPerToken": 0.000015,
+      "outputCostPerToken": 0.000075,
+      "cacheReadCostPerToken": 0.0000015,
+      "cacheWriteCostPerToken": 0.00001875,
+      "webSearchCostPerRequest": 0.01,
+      "fastMultiplier": 1,
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+      "cacheWrite1hCostPerToken": 0.00003
+    },
+    "claude-opus-4": {
+      "inputCostPerToken": 0.000015,
+      "outputCostPerToken": 0.000075,
+      "cacheReadCostPerToken": 0.0000015,
+      "cacheWriteCostPerToken": 0.00001875,
+      "webSearchCostPerRequest": 0.01,
+      "fastMultiplier": 1,
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+      "cacheWrite1hCostPerToken": 0.00003
+    },
+    "claude-sonnet-5-5": {
+      "inputCostPerToken": 0.000002,
+      "outputCostPerToken": 0.00001,
+      "cacheReadCostPerToken": 2e-7,
+      "cacheWriteCostPerToken": 0.0000025,
+      "webSearchCostPerRequest": 0.01,
+      "fastMultiplier": 1,
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+      "cacheWrite1hCostPerToken": 0.000004
+    },
+    "claude-sonnet-5": {
+      "inputCostPerToken": 0.000002,
+      "outputCostPerToken": 0.00001,
+      "cacheReadCostPerToken": 2e-7,
+      "cacheWriteCostPerToken": 0.0000025,
+      "webSearchCostPerRequest": 0.01,
+      "fastMultiplier": 1,
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+      "cacheWrite1hCostPerToken": 0.000004
+    },
+    "claude-sonnet-4-6": {
+      "inputCostPerToken": 0.000003,
+      "outputCostPerToken": 0.000015,
+      "cacheReadCostPerToken": 3e-7,
+      "cacheWriteCostPerToken": 0.00000375,
+      "webSearchCostPerRequest": 0.01,
+      "fastMultiplier": 1,
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+      "cacheWrite1hCostPerToken": 0.000006
+    },
+    "claude-sonnet-4-5": {
+      "inputCostPerToken": 0.000003,
+      "outputCostPerToken": 0.000015,
+      "cacheReadCostPerToken": 3e-7,
+      "cacheWriteCostPerToken": 0.00000375,
+      "webSearchCostPerRequest": 0.01,
+      "fastMultiplier": 1,
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+      "cacheWrite1hCostPerToken": 0.000006
+    },
+    "claude-sonnet-4": {
+      "inputCostPerToken": 0.000003,
+      "outputCostPerToken": 0.000015,
+      "cacheReadCostPerToken": 3e-7,
+      "cacheWriteCostPerToken": 0.00000375,
+      "webSearchCostPerRequest": 0.01,
+      "fastMultiplier": 1,
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+      "cacheWrite1hCostPerToken": 0.000006
+    },
+    "claude-haiku-4-5": {
+      "inputCostPerToken": 0.000001,
+      "outputCostPerToken": 0.000005,
+      "cacheReadCostPerToken": 1e-7,
+      "cacheWriteCostPerToken": 0.00000125,
+      "webSearchCostPerRequest": 0.01,
+      "fastMultiplier": 1,
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+      "cacheWrite1hCostPerToken": 0.000002
+    },
+    "claude-3-5-haiku": {
+      "inputCostPerToken": 8e-7,
+      "outputCostPerToken": 0.000004,
+      "cacheReadCostPerToken": 8e-8,
+      "cacheWriteCostPerToken": 0.000001,
+      "webSearchCostPerRequest": 0.01,
+      "fastMultiplier": 1,
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+      "cacheWrite1hCostPerToken": 0.0000016
+    },
+    "MiniMax-M3": {
+      "inputCostPerToken": 3e-7,
+      "outputCostPerToken": 0.0000012,
+      "cacheReadCostPerToken": 6e-8,
+      "cacheWriteCostPerToken": 0,
+      "webSearchCostPerRequest": 0.01,
+      "fastMultiplier": 1,
+      "source": "https://platform.minimax.io/docs/guides/pricing-paygo",
+      "contextTiers": [
+        {
+          "minPromptTokens": 512000,
+          "inputCostPerToken": 6e-7,
+          "outputCostPerToken": 0.0000024,
+          "cacheReadCostPerToken": 1.2e-7
+        }
+      ]
+    },
+    "MiniMax-M2.7": {
+      "inputCostPerToken": 3e-7,
+      "outputCostPerToken": 0.0000012,
+      "cacheReadCostPerToken": 6e-8,
+      "cacheWriteCostPerToken": 3.75e-7,
+      "webSearchCostPerRequest": 0.01,
+      "fastMultiplier": 1,
+      "source": "https://platform.minimax.io/docs/guides/pricing-paygo"
+    },
+    "MiniMax-M2.7-highspeed": {
+      "inputCostPerToken": 6e-7,
+      "outputCostPerToken": 0.0000024,
+      "cacheReadCostPerToken": 6e-8,
+      "cacheWriteCostPerToken": 3.75e-7,
+      "webSearchCostPerRequest": 0.01,
+      "fastMultiplier": 1,
+      "source": "https://platform.minimax.io/docs/guides/pricing-paygo"
+    },
+    "MiniMax-M2.5": {
+      "inputCostPerToken": 3e-7,
+      "outputCostPerToken": 0.0000012,
+      "cacheReadCostPerToken": 3e-8,
+      "cacheWriteCostPerToken": 3.75e-7,
+      "webSearchCostPerRequest": 0.01,
+      "fastMultiplier": 1,
+      "source": "https://platform.minimax.io/docs/guides/pricing-paygo"
+    },
+    "MiniMax-M2.5-highspeed": {
+      "inputCostPerToken": 6e-7,
+      "outputCostPerToken": 0.0000024,
+      "cacheReadCostPerToken": 3e-8,
+      "cacheWriteCostPerToken": 3.75e-7,
+      "webSearchCostPerRequest": 0.01,
+      "fastMultiplier": 1,
+      "source": "https://platform.minimax.io/docs/guides/pricing-paygo"
+    },
+    "MiniMax-M2.1": {
+      "inputCostPerToken": 3e-7,
+      "outputCostPerToken": 0.0000012,
+      "cacheReadCostPerToken": 3e-8,
+      "cacheWriteCostPerToken": 3.75e-7,
+      "webSearchCostPerRequest": 0.01,
+      "fastMultiplier": 1,
+      "source": "https://platform.minimax.io/docs/guides/pricing-paygo"
+    },
+    "MiniMax-M2.1-highspeed": {
+      "inputCostPerToken": 6e-7,
+      "outputCostPerToken": 0.0000024,
+      "cacheReadCostPerToken": 3e-8,
+      "cacheWriteCostPerToken": 3.75e-7,
+      "webSearchCostPerRequest": 0.01,
+      "fastMultiplier": 1,
+      "source": "https://platform.minimax.io/docs/guides/pricing-paygo"
+    },
+    "MiniMax-M2": {
+      "inputCostPerToken": 3e-7,
+      "outputCostPerToken": 0.0000012,
+      "cacheReadCostPerToken": 3e-8,
+      "cacheWriteCostPerToken": 3.75e-7,
+      "webSearchCostPerRequest": 0.01,
+      "fastMultiplier": 1,
+      "source": "https://platform.minimax.io/docs/guides/pricing-paygo"
+    },
+    "glm-5.3-flash": {
+      "inputCostPerToken": 1.5e-7,
+      "outputCostPerToken": 5e-7,
+      "cacheReadCostPerToken": 3e-8,
+      "cacheWriteCostPerToken": 0,
+      "webSearchCostPerRequest": 0.01,
+      "fastMultiplier": 1,
+      "source": "https://docs.z.ai/guides/overview/pricing"
+    },
+    "glm-5.3-flashx": {
+      "inputCostPerToken": 3.7e-7,
+      "outputCostPerToken": 0.00000125,
+      "cacheReadCostPerToken": 7.5e-8,
+      "cacheWriteCostPerToken": 0,
+      "webSearchCostPerRequest": 0.01,
+      "fastMultiplier": 1,
+      "source": "https://docs.z.ai/guides/overview/pricing"
+    },
+    "glm-5.3": {
+      "inputCostPerToken": 0.0000014,
+      "outputCostPerToken": 0.0000044,
+      "cacheReadCostPerToken": 2.6e-7,
+      "cacheWriteCostPerToken": 0,
+      "webSearchCostPerRequest": 0.01,
+      "fastMultiplier": 1,
+      "source": "https://docs.z.ai/guides/overview/pricing"
+    },
+    "glm-5.2": {
+      "inputCostPerToken": 0.0000014,
+      "outputCostPerToken": 0.0000044,
+      "cacheReadCostPerToken": 2.6e-7,
+      "cacheWriteCostPerToken": 0,
+      "webSearchCostPerRequest": 0.01,
+      "fastMultiplier": 1,
+      "source": "https://docs.z.ai/guides/overview/pricing"
+    },
+    "glm-5.1": {
+      "inputCostPerToken": 0.0000014,
+      "outputCostPerToken": 0.0000044,
+      "cacheReadCostPerToken": 2.6e-7,
+      "cacheWriteCostPerToken": 0,
+      "webSearchCostPerRequest": 0.01,
+      "fastMultiplier": 1,
+      "source": "https://docs.z.ai/guides/overview/pricing"
+    },
+    "glm-5": {
+      "inputCostPerToken": 0.000001,
+      "outputCostPerToken": 0.0000032,
+      "cacheReadCostPerToken": 2e-7,
+      "cacheWriteCostPerToken": 0,
+      "webSearchCostPerRequest": 0.01,
+      "fastMultiplier": 1,
+      "source": "https://docs.z.ai/guides/overview/pricing"
+    },
+    "glm-4.7": {
+      "inputCostPerToken": 6e-7,
+      "outputCostPerToken": 0.0000022,
+      "cacheReadCostPerToken": 1.1e-7,
+      "cacheWriteCostPerToken": 0,
+      "webSearchCostPerRequest": 0.01,
+      "fastMultiplier": 1,
+      "source": "https://docs.z.ai/guides/overview/pricing"
+    },
+    "glm-4.7-flashx": {
+      "inputCostPerToken": 7e-8,
+      "outputCostPerToken": 4e-7,
+      "cacheReadCostPerToken": 1e-8,
+      "cacheWriteCostPerToken": 0,
+      "webSearchCostPerRequest": 0.01,
+      "fastMultiplier": 1,
+      "source": "https://docs.z.ai/guides/overview/pricing"
+    },
+    "glm-4.6": {
+      "inputCostPerToken": 6e-7,
+      "outputCostPerToken": 0.0000022,
+      "cacheReadCostPerToken": 1.1e-7,
+      "cacheWriteCostPerToken": 0,
+      "webSearchCostPerRequest": 0.01,
+      "fastMultiplier": 1,
+      "source": "https://docs.z.ai/guides/overview/pricing"
+    },
+    "glm-4.5": {
+      "inputCostPerToken": 6e-7,
+      "outputCostPerToken": 0.0000022,
+      "cacheReadCostPerToken": 1.1e-7,
+      "cacheWriteCostPerToken": 0,
+      "webSearchCostPerRequest": 0.01,
+      "fastMultiplier": 1,
+      "source": "https://docs.z.ai/guides/overview/pricing"
+    },
+    "glm-4.5-x": {
+      "inputCostPerToken": 0.0000022,
+      "outputCostPerToken": 0.0000089,
+      "cacheReadCostPerToken": 4.5e-7,
+      "cacheWriteCostPerToken": 0,
+      "webSearchCostPerRequest": 0.01,
+      "fastMultiplier": 1,
+      "source": "https://docs.z.ai/guides/overview/pricing"
+    },
+    "glm-4.5-air": {
+      "inputCostPerToken": 2e-7,
+      "outputCostPerToken": 0.0000011,
+      "cacheReadCostPerToken": 3e-8,
+      "cacheWriteCostPerToken": 0,
+      "webSearchCostPerRequest": 0.01,
+      "fastMultiplier": 1,
+      "source": "https://docs.z.ai/guides/overview/pricing"
+    },
+    "glm-4.5-airx": {
+      "inputCostPerToken": 0.0000011,
+      "outputCostPerToken": 0.0000045,
+      "cacheReadCostPerToken": 2.2e-7,
+      "cacheWriteCostPerToken": 0,
+      "webSearchCostPerRequest": 0.01,
+      "fastMultiplier": 1,
+      "source": "https://docs.z.ai/guides/overview/pricing"
+    },
+    "glm-4-32b-0414-128k": {
+      "inputCostPerToken": 1e-7,
+      "outputCostPerToken": 1e-7,
+      "cacheReadCostPerToken": 0,
+      "cacheWriteCostPerToken": 0,
+      "webSearchCostPerRequest": 0.01,
+      "fastMultiplier": 1,
+      "source": "https://docs.z.ai/guides/overview/pricing"
+    },
+    "glm-4.7-flash": {
+      "inputCostPerToken": 0,
+      "outputCostPerToken": 0,
+      "cacheReadCostPerToken": 0,
+      "cacheWriteCostPerToken": 0,
+      "webSearchCostPerRequest": 0.01,
+      "fastMultiplier": 1,
+      "source": "https://docs.z.ai/guides/overview/pricing"
+    },
+    "glm-4.5-flash": {
+      "inputCostPerToken": 0,
+      "outputCostPerToken": 0,
+      "cacheReadCostPerToken": 0,
+      "cacheWriteCostPerToken": 0,
+      "webSearchCostPerRequest": 0.01,
+      "fastMultiplier": 1,
+      "source": "https://docs.z.ai/guides/overview/pricing"
+    },
+    "glm-4.6v": {
+      "inputCostPerToken": 3e-7,
+      "outputCostPerToken": 9e-7,
+      "cacheReadCostPerToken": 5e-8,
+      "cacheWriteCostPerToken": 0,
+      "webSearchCostPerRequest": 0.01,
+      "fastMultiplier": 1,
+      "source": "https://docs.z.ai/guides/overview/pricing"
+    },
+    "glm-ocr": {
+      "inputCostPerToken": 3e-8,
+      "outputCostPerToken": 3e-8,
+      "cacheReadCostPerToken": 0,
+      "cacheWriteCostPerToken": 0,
+      "webSearchCostPerRequest": 0.01,
+      "fastMultiplier": 1,
+      "source": "https://docs.z.ai/guides/overview/pricing"
+    },
+    "glm-4.6v-flashx": {
+      "inputCostPerToken": 4e-8,
+      "outputCostPerToken": 4e-7,
+      "cacheReadCostPerToken": 4e-9,
+      "cacheWriteCostPerToken": 0,
+      "webSearchCostPerRequest": 0.01,
+      "fastMultiplier": 1,
+      "source": "https://docs.z.ai/guides/overview/pricing"
+    },
+    "glm-4.5v": {
+      "inputCostPerToken": 6e-7,
+      "outputCostPerToken": 0.0000018,
+      "cacheReadCostPerToken": 1.1e-7,
+      "cacheWriteCostPerToken": 0,
+      "webSearchCostPerRequest": 0.01,
+      "fastMultiplier": 1,
+      "source": "https://docs.z.ai/guides/overview/pricing"
+    },
+    "glm-4.6v-flash": {
+      "inputCostPerToken": 0,
+      "outputCostPerToken": 0,
+      "cacheReadCostPerToken": 0,
+      "cacheWriteCostPerToken": 0,
+      "webSearchCostPerRequest": 0.01,
+      "fastMultiplier": 1,
+      "source": "https://docs.z.ai/guides/overview/pricing"
+    },
+    "kimi-k3": {
+      "inputCostPerToken": 0.000003,
+      "outputCostPerToken": 0.000015,
+      "cacheReadCostPerToken": 3e-7,
+      "cacheWriteCostPerToken": 0.000003,
+      "webSearchCostPerRequest": 0.01,
+      "fastMultiplier": 1,
+      "source": "https://platform.kimi.ai/docs/pricing/chat",
+      "cacheWrite1hCostPerToken": 0.000006
+    },
+    "kimi-k2.7-code": {
+      "inputCostPerToken": 9.5e-7,
+      "outputCostPerToken": 0.000004,
+      "cacheReadCostPerToken": 1.9e-7,
+      "cacheWriteCostPerToken": 9.5e-7,
+      "webSearchCostPerRequest": 0.01,
+      "fastMultiplier": 1,
+      "source": "https://platform.kimi.ai/docs/pricing/chat"
+    },
+    "kimi-k2.7-code-highspeed": {
+      "inputCostPerToken": 0.0000019,
+      "outputCostPerToken": 0.000008,
+      "cacheReadCostPerToken": 3.8e-7,
+      "cacheWriteCostPerToken": 0.0000019,
+      "webSearchCostPerRequest": 0.01,
+      "fastMultiplier": 1,
+      "source": "https://platform.kimi.ai/docs/pricing/chat"
+    },
+    "kimi-k2.6": {
+      "inputCostPerToken": 9.5e-7,
+      "outputCostPerToken": 0.000004,
+      "cacheReadCostPerToken": 1.6e-7,
+      "cacheWriteCostPerToken": 9.5e-7,
+      "webSearchCostPerRequest": 0.01,
+      "fastMultiplier": 1,
+      "source": "https://platform.kimi.ai/docs/pricing/chat"
+    },
+    "grok-4.7": {
+      "inputCostPerToken": 0.000002,
+      "outputCostPerToken": 0.000006,
+      "cacheReadCostPerToken": 5e-7,
+      "cacheWriteCostPerToken": 0.000002,
+      "webSearchCostPerRequest": 0.005,
+      "fastMultiplier": 1,
+      "source": "https://docs.x.ai/developers/pricing",
+      "contextTiers": [
+        {
+          "minPromptTokens": 199999,
+          "inputCostPerToken": 0.000004,
+          "cacheReadCostPerToken": 0.000001,
+          "cacheWriteCostPerToken": 0.000004,
+          "outputCostPerToken": 0.000012
+        }
+      ]
+    },
+    "grok-4.6": {
+      "inputCostPerToken": 0.000002,
+      "outputCostPerToken": 0.000006,
+      "cacheReadCostPerToken": 5e-7,
+      "cacheWriteCostPerToken": 0.000002,
+      "webSearchCostPerRequest": 0.005,
+      "fastMultiplier": 1,
+      "source": "https://docs.x.ai/developers/pricing",
+      "contextTiers": [
+        {
+          "minPromptTokens": 199999,
+          "inputCostPerToken": 0.000004,
+          "cacheReadCostPerToken": 0.000001,
+          "cacheWriteCostPerToken": 0.000004,
+          "outputCostPerToken": 0.000012
+        }
+      ]
+    },
+    "grok-4.5": {
+      "inputCostPerToken": 0.000002,
+      "outputCostPerToken": 0.000006,
+      "cacheReadCostPerToken": 3e-7,
+      "cacheWriteCostPerToken": 0.000002,
+      "webSearchCostPerRequest": 0.005,
+      "fastMultiplier": 1,
+      "source": "https://docs.x.ai/developers/pricing",
+      "contextTiers": [
+        {
+          "minPromptTokens": 199999,
+          "inputCostPerToken": 0.000004,
+          "cacheReadCostPerToken": 6e-7,
+          "cacheWriteCostPerToken": 0.000004,
+          "outputCostPerToken": 0.000012
+        }
+      ]
+    },
+    "grok-4.3": {
+      "inputCostPerToken": 0.00000125,
+      "outputCostPerToken": 0.0000025,
+      "cacheReadCostPerToken": 2e-7,
+      "cacheWriteCostPerToken": 0.00000125,
+      "webSearchCostPerRequest": 0.005,
+      "fastMultiplier": 1,
+      "source": "https://docs.x.ai/developers/pricing",
+      "contextTiers": [
+        {
+          "minPromptTokens": 199999,
+          "inputCostPerToken": 0.0000025,
+          "cacheReadCostPerToken": 4e-7,
+          "cacheWriteCostPerToken": 0.0000025,
+          "outputCostPerToken": 0.000005
+        }
+      ]
+    },
+    "grok-4.20-0309-reasoning": {
+      "inputCostPerToken": 0.00000125,
+      "outputCostPerToken": 0.0000025,
+      "cacheReadCostPerToken": 2e-7,
+      "cacheWriteCostPerToken": 0.00000125,
+      "webSearchCostPerRequest": 0.005,
+      "fastMultiplier": 1,
+      "source": "https://docs.x.ai/developers/pricing",
+      "contextTiers": [
+        {
+          "minPromptTokens": 199999,
+          "inputCostPerToken": 0.0000025,
+          "cacheReadCostPerToken": 4e-7,
+          "cacheWriteCostPerToken": 0.0000025,
+          "outputCostPerToken": 0.000005
+        }
+      ]
+    },
+    "grok-4.20-0309-non-reasoning": {
+      "inputCostPerToken": 0.00000125,
+      "outputCostPerToken": 0.0000025,
+      "cacheReadCostPerToken": 2e-7,
+      "cacheWriteCostPerToken": 0.00000125,
+      "webSearchCostPerRequest": 0.005,
+      "fastMultiplier": 1,
+      "source": "https://docs.x.ai/developers/pricing",
+      "contextTiers": [
+        {
+          "minPromptTokens": 199999,
+          "inputCostPerToken": 0.0000025,
+          "cacheReadCostPerToken": 4e-7,
+          "cacheWriteCostPerToken": 0.0000025,
+          "outputCostPerToken": 0.000005
+        }
+      ]
+    },
+    "grok-build-0.1": {
+      "inputCostPerToken": 0.000001,
+      "outputCostPerToken": 0.000002,
+      "cacheReadCostPerToken": 2e-7,
+      "cacheWriteCostPerToken": 0.000001,
+      "webSearchCostPerRequest": 0.005,
+      "fastMultiplier": 1,
+      "source": "https://docs.x.ai/developers/pricing",
+      "contextTiers": [
+        {
+          "minPromptTokens": 199999,
+          "inputCostPerToken": 0.000002,
+          "cacheReadCostPerToken": 4e-7,
+          "cacheWriteCostPerToken": 0.000002,
+          "outputCostPerToken": 0.000004
+        }
+      ]
+    },
+    "grok-4.20-multi-agent-0309": {
+      "inputCostPerToken": 0.00000125,
+      "outputCostPerToken": 0.0000025,
+      "cacheReadCostPerToken": 2e-7,
+      "cacheWriteCostPerToken": 0.00000125,
+      "webSearchCostPerRequest": 0.005,
+      "fastMultiplier": 1,
+      "source": "https://docs.x.ai/developers/pricing",
+      "contextTiers": [
+        {
+          "minPromptTokens": 199999,
+          "inputCostPerToken": 0.0000025,
+          "cacheReadCostPerToken": 4e-7,
+          "cacheWriteCostPerToken": 0.0000025,
+          "outputCostPerToken": 0.000005
+        }
+      ]
+    }
+  }
+}

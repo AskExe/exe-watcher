@@ -46,7 +46,7 @@ The app registers itself as a menubar accessory (`LSUIElement = true` at runtime
 
 ## Data source
 
-On launch and every 60 seconds thereafter, the app spawns `exe-watcher status --format menubar-json --no-optimize` directly (argv, no shell) via `ExeWatcherCLI.makeProcess` and decodes the JSON into `MenubarPayload`. The manual refresh button in the footer invokes the same command without `--no-optimize`, which includes optimize findings but takes longer.
+On launch, wake, and relevant usage-file changes, the app spawns `exe-watcher status --format menubar-json --no-optimize` directly (argv, no shell) via `ExeWatcherCLI.makeProcess` and decodes the JSON into `MenubarPayload`. The manual refresh button in the footer invokes the same command without `--no-optimize`, which includes optimize findings but takes longer. There is no periodic usage scan. File notifications are coalesced with a minimum two-minute spacing and a rest period proportional to scan duration. Only one CLI worker can run at a time, with a 256 MiB V8 heap, a 60-second timeout, bounded output, and lower scheduling priority. A failed scan preserves the last successful payload; the same-day badge survives app restarts.
 
 Override the binary via the `EXE_WATCHER_BIN` environment variable (default: `exe-watcher` on PATH). The value is validated against a strict allowlist (alphanumerics plus `._/-` space) before use, so a malicious env var can't inject shell commands.
 
@@ -64,15 +64,16 @@ mac/
 └── README.md                         This file
 ```
 
-## Status
+## Updating
 
-Live data wired. Next iterations:
+Update both the CLI and app to receive accounting and scheduling fixes:
 
-1. FSEvents watch for `~/.claude/projects/` changes (debounced refresh on real edits)
-2. Persistent disk cache for optimize findings so the default refresh can include them without the 30-second penalty
-3. Currency metadata in the JSON payload + Swift-side formatting
-4. Sparkle auto-update
-5. DMG packaging + Homebrew Cask tap
+```bash
+npm install -g exe-watcher@latest --registry=https://registry.npmjs.org
+exe-watcher menubar --force
+```
+
+The app's Update button downloads the latest macOS app. It does not update the globally installed npm CLI. Releases include a universal Apple Silicon and Intel app for macOS 14+.
 
 ## Design tokens
 

@@ -2,6 +2,7 @@ export type TokenUsage = {
   inputTokens: number
   outputTokens: number
   cacheCreationInputTokens: number
+  cacheCreation1hInputTokens?: number
   cacheReadInputTokens: number
   cachedInputTokens: number
   reasoningTokens: number
@@ -26,6 +27,10 @@ export type ApiUsage = {
   output_tokens: number
   cache_creation_input_tokens?: number
   cache_read_input_tokens?: number
+  cache_creation?: {
+    ephemeral_5m_input_tokens?: number
+    ephemeral_1h_input_tokens?: number
+  }
   server_tool_use?: {
     web_search_requests?: number
     web_fetch_requests?: number

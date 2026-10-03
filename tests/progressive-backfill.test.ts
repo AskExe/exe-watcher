@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
 import {
-  ALL_TIME_HISTORY_DAYS,
   computeProgressiveBackfillStart,
   DEFAULT_COLD_START_HISTORY_DAYS,
   DEFAULT_PROGRESSIVE_CHUNK_DAYS,
@@ -87,7 +86,7 @@ describe('resolveColdStartHistoryDays', () => {
     expect(resolveColdStartHistoryDays('week', now)).toBe(WEEK_HISTORY_DAYS)
     expect(resolveColdStartHistoryDays('30days', now)).toBe(THIRTY_DAY_HISTORY_DAYS)
     expect(resolveColdStartHistoryDays('month', now)).toBe(5)
-    expect(resolveColdStartHistoryDays('all', now)).toBe(ALL_TIME_HISTORY_DAYS)
+    expect(resolveColdStartHistoryDays('all', now, localDate(2025, 7, 1))).toBe(309)
   })
 })
 

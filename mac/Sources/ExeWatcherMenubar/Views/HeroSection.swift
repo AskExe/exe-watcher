@@ -4,6 +4,7 @@ struct HeroSection: View {
     @Environment(AppStore.self) private var store
 
     var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
         HStack {
             SectionCaption(text: caption)
             Spacer()
@@ -19,6 +20,21 @@ struct HeroSection: View {
                 .monospacedDigit()
                 .foregroundStyle(.secondary)
         }
+        if store.selectedPeriod == .all {
+            if let warning = store.payload.diagnostics?.warnings.first(where: { $0.contains("historical Claude token counters") }) {
+                Text("Includes recovered history estimates")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                    .help(warning)
+            }
+            if let warning = store.payload.diagnostics?.warnings.first(where: { $0.contains("earliest dated local usage") }) {
+                Text("Earlier history is incomplete")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                    .help(warning)
+            }
+        }
+        }
         .padding(.horizontal, 14)
         .padding(.top, 8)
         .padding(.bottom, 6)
@@ -29,7 +45,7 @@ struct HeroSection: View {
         if store.selectedPeriod == .today {
             return "\(label) · \(todayDate)"
         }
-        return label
+        return "\(label) · API equivalent"
     }
 
     private var todayDate: String {

@@ -6,6 +6,12 @@ private let historicalCacheTTLSeconds: TimeInterval = 5 * 60
 typealias MenubarPayloadFetcher = @Sendable (Period, ProviderFilter, Bool) async throws -> MenubarPayload
 typealias AppStoreDateProvider = @Sendable () -> Date
 
+private struct BadgeSnapshot: Codable {
+    let dateAnchor: String
+    let fetchedAt: Date
+    let payload: MenubarPayload
+}
+
 struct CachedPayload {
     let payload: MenubarPayload
     let fetchedAt: Date
@@ -54,23 +60,23 @@ final class AppStore {
     private(set) var lastBadgeRefreshAttemptAt: Date?
     private(set) var lastBadgeRefreshSuccessAt: Date?
     private(set) var lastBadgeRefreshError: String?
+    private(set) var lastUsageChangeAt: Date?
 
     /// Health monitor for self-healing feedback loop. Initialized by AppDelegate after launch.
     var healthMonitor: HealthMonitor?
 
     private let fetchPayload: MenubarPayloadFetcher
     private let now: AppStoreDateProvider
+    private let badgeCacheURL: URL?
     private var cache: [PayloadCacheKey: CachedPayload] = [:]
     private var errorsByKey: [PayloadCacheKey: String] = [:]
     private var retryAfter: [PayloadCacheKey: Date] = [:]
     private var failureCounts: [PayloadCacheKey: Int] = [:]
 
-    /// Badge has its own dedicated fetch slot so detail/prefetch fetches can never starve it.
+    /// Same-key requests share ownership; the process runner admits one child globally.
     private let badgeAdmission = FetchAdmission(limit: 1)
     private let detailAdmission = FetchAdmission(limit: 1)
     private var fetchTasks: [PayloadCacheKey: Task<MenubarPayload, Error>] = [:]
-    /// Handle to the most recent prefetch Task so we can cancel it before spawning a new one.
-    private var activePrefetchTask: Task<Void, Never>?
     /// Incremented when macOS resumes/unlocks and we intentionally discard stale in-flight
     /// bookkeeping. Fetches that started before the generation changed are ignored on return so
     /// a pre-lock CLI scan cannot overwrite the fresh post-unlock payload.
@@ -78,10 +84,24 @@ final class AppStore {
 
     init(
         fetchPayload: @escaping MenubarPayloadFetcher = DataClient.fetch,
-        now: @escaping AppStoreDateProvider = Date.init
+        now: @escaping AppStoreDateProvider = Date.init,
+        badgeCacheURL: URL? = nil
     ) {
         self.fetchPayload = fetchPayload
         self.now = now
+        self.badgeCacheURL = badgeCacheURL
+        let todayKey = PayloadCacheKey(period: .today, provider: .all, now: now())
+        if let url = badgeCacheURL,
+           let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize,
+           size <= 2 * 1024 * 1024,
+           let data = try? Data(contentsOf: url),
+           let saved = try? JSONDecoder().decode(BadgeSnapshot.self, from: data),
+           saved.dateAnchor == todayKey.dateAnchor,
+           saved.fetchedAt <= now(),
+           (try? DataClient.validate(saved.payload)) != nil {
+            cache[todayKey] = CachedPayload(payload: saved.payload, fetchedAt: saved.fetchedAt)
+            lastBadgeRefreshSuccessAt = saved.fetchedAt
+        }
     }
 
     private func key(period: Period, provider: ProviderFilter, includeOptimize: Bool) -> PayloadCacheKey {
@@ -186,18 +206,17 @@ final class AppStore {
         payload.optimize.findingCount
     }
 
-    /// True when the visible data may be unreliable — either because the last refresh failed
-    /// (error-based) or because no successful refresh has landed recently (age-based). The
-    /// age-based check catches silent hangs that produce no error: the old Task.sleep bug would
-    /// leave fetchPayload suspended forever with no error logged, so stale data looked healthy.
-    /// Threshold: 2x the idle timer interval (10 min) gives enough margin for slow CLI scans
-    /// while still surfacing genuine staleness within a reasonable window.
+    /// An idle day does not need a fresh scan. Age only matters when the OS has
+    /// notified us of usage that has not yet been refreshed.
     private static let staleAgeLimitSeconds: TimeInterval = 600
     var dataMayBeStale: Bool {
-        if baseLastError != nil { return true }
+        if baseLastError != nil || lastBadgeRefreshError != nil { return true }
         guard let lastSuccess = lastBadgeRefreshSuccessAt else { return false }
-        return now().timeIntervalSince(lastSuccess) > Self.staleAgeLimitSeconds
+        guard let changed = lastUsageChangeAt, changed > lastSuccess else { return false }
+        return now().timeIntervalSince(changed) > Self.staleAgeLimitSeconds
     }
+
+    func noteUsageChange() { lastUsageChangeAt = now() }
 
     /// Switch to a period. Shows cached data instantly, then refreshes in background.
     func switchTo(period: Period) async {
@@ -210,13 +229,6 @@ final class AppStore {
     func switchTo(provider: ProviderFilter) async {
         selectedProvider = provider
         Task { await self.refreshForSelectionInBackground(period: selectedPeriod, provider: provider) }
-    }
-
-    /// Pre-fetch all periods so tab switching is instant from cache.
-    func prefetchAllPeriods() async {
-        for period in Period.allCases where period != .today {
-            await refreshQuietly(period: period)
-        }
     }
 
     /// Refresh the visible popover selection. Wake/unlock and popover-open paths must hydrate
@@ -232,7 +244,7 @@ final class AppStore {
     /// unacceptable one: menubar numbers disappear and the popover says "Loading …" indefinitely.
     ///
     /// Treat unlock/wake as a new refresh generation: clear stale in-flight guards, cancel
-    /// speculative prefetch, and ignore any old fetch that eventually returns.
+    /// outstanding work, and ignore any old fetch that eventually returns.
     func recoverFromSystemResume() {
         RefreshTracer.shared.instant(
             name: "system_resume_recovery", category: "lifecycle", tid: .lifecycle,
@@ -246,8 +258,6 @@ final class AppStore {
         // Keep ownership until cancelled work actually exits; old completions cannot
         // clear a new generation's guards or admit another child prematurely.
         for task in fetchTasks.values { task.cancel() }
-        activePrefetchTask?.cancel()
-        activePrefetchTask = nil
     }
 
     private var inFlightKeys: Set<PayloadCacheKey> = []
@@ -260,12 +270,12 @@ final class AppStore {
         await refreshKey(target, includeOptimize: includeOptimize)
     }
 
-    /// Badge and detail requests share same-key ownership. The reserved badge lane
-    /// remains within the total two-fetch budget instead of bypassing accounting.
-    func refreshTodayBadge() async {
+    /// Badge and detail requests share same-key ownership and one global child slot.
+    @discardableResult
+    func refreshTodayBadge() async -> Bool {
         let target = key(period: .today, provider: .all, includeOptimize: false)
         lastBadgeRefreshAttemptAt = now()
-        guard !inFlightKeys.contains(target) else { return }
+        guard !inFlightKeys.contains(target) else { return false }
         let success = await refreshKey(target, includeOptimize: false)
         if success {
             lastBadgeRefreshSuccessAt = now()
@@ -273,10 +283,16 @@ final class AppStore {
         } else if let error = errorsByKey[target] {
             lastBadgeRefreshError = error
         }
+        return success
     }
 
     @discardableResult
     private func refreshKey(_ key: PayloadCacheKey, includeOptimize: Bool) async -> Bool {
+        // Date-scoped data never accumulates indefinitely as the app stays open.
+        cache = cache.filter { $0.key.dateAnchor == key.dateAnchor }
+        errorsByKey = errorsByKey.filter { $0.key.dateAnchor == key.dateAnchor }
+        retryAfter = retryAfter.filter { $0.key.dateAnchor == key.dateAnchor }
+        failureCounts = failureCounts.filter { $0.key.dateAnchor == key.dateAnchor }
         guard !inFlightKeys.contains(key) else {
             // The running request already serves this key; never queue an identical scan.
             return false
@@ -334,9 +350,17 @@ final class AppStore {
                 RefreshTracer.shared.endSpan(spanId, args: ["result": .string("generation_mismatch")])
                 return false
             }
+            try DataClient.validate(fresh)
             failureCounts.removeValue(forKey: key)
             retryAfter.removeValue(forKey: key)
             cache[key] = CachedPayload(payload: fresh, fetchedAt: now())
+            if isBadge, let url = badgeCacheURL,
+               let data = try? JSONEncoder().encode(BadgeSnapshot(dateAnchor: key.dateAnchor, fetchedAt: now(), payload: fresh)),
+               data.count <= 2 * 1024 * 1024 {
+                try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try? data.write(to: url, options: .atomic)
+                try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+            }
             errorsByKey[key] = nil
             RefreshTracer.shared.endSpan(spanId, args: ["result": .string("success")])
             healthMonitor?.recordFetchResult(success: true)
@@ -375,47 +399,10 @@ final class AppStore {
         await refreshKey(key, includeOptimize: includeOptimize)
     }
 
-    /// Silent background refresh — does NOT toggle isLoading, so the popover loading overlay
-    /// never flashes. Used by the timer loop and launch prefetch.
-    /// Refreshes the .all-provider payload first and returns as soon as that visible aggregate
-    /// is ready. Provider-specific payloads warm in the background so period switches don't sit
-    /// behind N serial CLI scans (the 30-day view was doing all + Claude + Codex + ... before
-    /// rendering).
+    /// Fetch only the requested aggregate. Provider detail loads when its tab is selected.
     func refreshQuietly(period: Period) async {
         let allKey = key(period: period, provider: .all, includeOptimize: false)
         await refreshIfNeeded(allKey, includeOptimize: false)
-        scheduleVisibleProviderPrefetch(for: period)
-    }
-
-    private func visibleProviderKeys(for period: Period) -> [PayloadCacheKey] {
-        guard let payload = mergedPayload(period: period, provider: .all) else { return [] }
-
-        return ProviderFilter.allCases
-            .filter { $0 != .all }
-            .compactMap { filter in
-                let hasSpend = payload.current.providers.contains { key, cost in
-                    cost > 0 && key.lowercased() == filter.rawValue.lowercased()
-                }
-                return hasSpend ? key(period: period, provider: filter, includeOptimize: false) : nil
-            }
-    }
-
-    /// Fire-and-forget provider prefetch. This is deliberately not awaited by selected-period
-    /// loads; it is an optimization for future tab switches, not a prerequisite for showing the
-    /// selected period's aggregate dashboard.
-    private func scheduleVisibleProviderPrefetch(for period: Period) {
-        let keys = visibleProviderKeys(for: period)
-        guard !keys.isEmpty else { return }
-        // Cancel any previously spawned prefetch to prevent accumulation.
-        activePrefetchTask?.cancel()
-        activePrefetchTask = Task { @MainActor in
-            await withTaskGroup(of: Void.self) { group in
-                for key in keys {
-                    guard !Task.isCancelled else { break }
-                    group.addTask { await self.refreshIfNeeded(key, includeOptimize: false) }
-                }
-            }
-        }
     }
 
     /// Silent background refresh for the user-selected state that never blocks tab switching.
@@ -430,7 +417,6 @@ final class AppStore {
             await refreshIfNeeded(target, includeOptimize: false)
         }
 
-        scheduleVisibleProviderPrefetch(for: period)
     }
 
     /// Fetch Claude subscription usage. Sets subscription = nil on missing creds (API users / unauthenticated).

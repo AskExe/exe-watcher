@@ -3,7 +3,7 @@ import Foundation
 /// A permit is held until the underlying work has exited, including cancellation/reaping.
 /// Queues are bounded; cancelled waiters never launch work later.
 actor FetchAdmission {
-    static let processes = FetchAdmission(limit: 2)
+    static let processes = FetchAdmission(limit: 1)
     private let limit: Int
     private var active = 0
     private var waiters: [(UUID, CheckedContinuation<Void, Error>)] = []

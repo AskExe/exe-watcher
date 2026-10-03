@@ -82,11 +82,10 @@ enum ExeWatcherCLI {
         // Keep background scans inside a small V8 heap and collect transient JSON promptly.
         // Last option wins over an inherited larger heap setting.
         environment["NODE_OPTIONS"] = (environment["NODE_OPTIONS"] ?? "") + " --max-old-space-size=256"
+        environment["EXE_WATCHER_PARENT_PID"] = String(ProcessInfo.processInfo.processIdentifier)
         process.environment = environment
-        // Use .userInitiated so macOS keeps the CLI responsive; the menubar badge depends on
-        // timely results. .utility causes visible staleness because macOS freely throttles
-        // accessory-app subprocesses at that QOS tier.
-        process.qualityOfService = .userInitiated
+        // Accounting yields to the user's coding work when the Mac is busy.
+        process.qualityOfService = .utility
         return process
     }
 

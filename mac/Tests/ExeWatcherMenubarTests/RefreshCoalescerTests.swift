@@ -9,6 +9,35 @@ import Testing
 /// refresh while one is in flight.
 private let base = Date(timeIntervalSince1970: 1_700_000_000)
 
+@Test func aFailedFileNotificationRetriesTwiceThenStopsUntilNewDataArrives() {
+    let c = RefreshCoalescer(config: .init(minIntervalSeconds: 120, maxEventRetries: 2))
+    c.noteEvent(now: base)
+    for attempt in 0..<3 {
+        let start = base.addingTimeInterval(2 + Double(attempt) * 121)
+        #expect(c.evaluate(now: start) == .fireNow)
+        c.refreshDidFinish(now: start.addingTimeInterval(1), success: false)
+    }
+    #expect(c.evaluate(now: base.addingTimeInterval(86400)) == .idle)
+    c.noteEvent(now: base.addingTimeInterval(86400))
+    #expect(c.evaluate(now: base.addingTimeInterval(86402)) == .fireNow)
+}
+
+@Test
+func slowAutomaticScanGetsNineTimesItsDurationToRest() {
+    let c = RefreshCoalescer(config: .init(minIntervalSeconds: 120, scanRestMultiplier: 9))
+    c.noteEvent(now: base)
+    let start = base.addingTimeInterval(2)
+    #expect(c.evaluate(now: start) == .fireNow)
+    c.noteEvent(now: start.addingTimeInterval(1))
+    let finish = start.addingTimeInterval(40)
+    c.refreshDidFinish(now: finish)
+    #expect(c.evaluate(now: finish.addingTimeInterval(120)) == .wait(until: finish.addingTimeInterval(360)))
+    #expect(c.evaluate(now: finish.addingTimeInterval(360)) == .fireNow)
+    c.refreshDidFinish(now: finish.addingTimeInterval(370))
+    c.noteEvent(now: finish.addingTimeInterval(371))
+    #expect(c.evaluate(now: finish.addingTimeInterval(372)) == .wait(until: finish.addingTimeInterval(490)))
+}
+
 @Test
 func burstCoalescesToOneRefresh() {
     // Cooldown already clear so only the batch window gates the first fire.

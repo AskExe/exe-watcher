@@ -19,9 +19,13 @@ final class RefreshCoalescer {
         /// Short delay to batch a burst of events into one refresh (throttle, not debounce:
         /// anchored to the FIRST event of a batch so it cannot be pushed out indefinitely).
         var batchDelaySeconds: TimeInterval
-        init(minIntervalSeconds: TimeInterval = 15, batchDelaySeconds: TimeInterval = 2) {
+        var scanRestMultiplier: TimeInterval
+        var maxEventRetries: Int
+        init(minIntervalSeconds: TimeInterval = 15, batchDelaySeconds: TimeInterval = 2, scanRestMultiplier: TimeInterval = 0, maxEventRetries: Int = 0) {
             self.minIntervalSeconds = minIntervalSeconds
             self.batchDelaySeconds = batchDelaySeconds
+            self.scanRestMultiplier = max(0, scanRestMultiplier)
+            self.maxEventRetries = max(0, maxEventRetries)
         }
     }
 
@@ -35,6 +39,9 @@ final class RefreshCoalescer {
     private var pendingSince: Date?
     private var refreshing = false
     private var lastFinishedAt: Date
+    private var startedAt: Date?
+    private var adaptiveInterval: TimeInterval = 0
+    private var eventRetries = 0
 
     init(config: Config = .init(), startClock: Date = .distantPast) {
         self.config = config
@@ -44,6 +51,7 @@ final class RefreshCoalescer {
     /// Record filesystem activity. Cheap; call on every FSEvents callback. Anchors the batch
     /// window to the first unserviced event.
     func noteEvent(now: Date) {
+        eventRetries = 0
         if pendingSince == nil { pendingSince = now }
     }
 
@@ -55,20 +63,32 @@ final class RefreshCoalescer {
         if refreshing { return .idle }
         guard let pendingSince else { return .idle }
         let batchReadyAt = pendingSince.addingTimeInterval(config.batchDelaySeconds)
-        let cooldownClearedAt = lastFinishedAt.addingTimeInterval(config.minIntervalSeconds)
+        let cooldownClearedAt = lastFinishedAt.addingTimeInterval(max(config.minIntervalSeconds, adaptiveInterval))
         let readyAt = max(batchReadyAt, cooldownClearedAt)
         if now >= readyAt {
             self.pendingSince = nil
             refreshing = true
+            startedAt = now
             return .fireNow
         }
         return .wait(until: readyAt)
     }
 
     /// Mark the current refresh complete; anchors the cooldown at COMPLETION time.
-    func refreshDidFinish(now: Date) {
+    func refreshDidFinish(now: Date, success: Bool = true) {
         refreshing = false
+        // Automatic scans occupy at most ~10% of elapsed time under sustained
+        // writes. A slow scan buys a longer rest instead of immediate retries.
+        adaptiveInterval = max(0, now.timeIntervalSince(startedAt ?? now)) * config.scanRestMultiplier
+        startedAt = nil
         lastFinishedAt = now
+        if success { eventRetries = 0 }
+        else if eventRetries < config.maxEventRetries {
+            // A notification received during an in-flight scan/backoff must not
+            // be lost. Retry that event a bounded number of times, never forever.
+            eventRetries += 1
+            if pendingSince == nil { pendingSince = now }
+        }
     }
 
     var isRefreshing: Bool { refreshing }

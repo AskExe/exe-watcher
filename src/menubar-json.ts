@@ -47,7 +47,6 @@ const MIN_APP_VERSION = '0.2.40'
 const TOP_ACTIVITIES_LIMIT = 20
 const TOP_MODELS_LIMIT = 20
 const TOP_FINDINGS_LIMIT = 10
-const HISTORY_DAYS_LIMIT = 365
 const SYNTHETIC_MODEL_NAME = '<synthetic>'
 
 export type DailyModelBreakdown = {
@@ -360,6 +359,7 @@ function buildTopActivities(categories: PeriodData['categories']): MenubarPayloa
 function buildTopModels(models: PeriodData['models']): MenubarPayload['current']['topModels'] {
   return models
     .filter(m => m.name !== SYNTHETIC_MODEL_NAME)
+    .sort((a, b) => b.cost - a.cost)
     .slice(0, TOP_MODELS_LIMIT)
     .map(m => ({ name: getShortModelName(m.name), cost: m.cost, calls: m.calls }))
 }
@@ -394,8 +394,7 @@ function buildProviders(providers: ProviderCost[]): Record<string, number> {
 function buildHistory(daily: DailyHistoryEntry[] | undefined): MenubarPayload['history'] {
   if (!daily || daily.length === 0) return { daily: [] }
   const sorted = [...daily].sort((a, b) => a.date.localeCompare(b.date))
-  const trimmed = sorted.slice(-HISTORY_DAYS_LIMIT)
-  return { daily: trimmed }
+  return { daily: sorted }
 }
 
 export function buildMenubarPayload(

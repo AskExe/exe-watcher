@@ -6,8 +6,8 @@ import { chargeRecord, withScanBudget } from './resource-budget.js'
 import { readdir, stat } from 'fs/promises'
 import { basename, join } from 'path'
 import { readSessionLines } from './fs-utils.js'
-import { calculateCost, getShortModelName } from './models.js'
-import { discoverAllSessions, getProvider } from './providers/index.js'
+import { calculateCost, getShortModelName, getPricingFingerprint } from './models.js'
+import { discoverAllSessions, getProvider, getAllProviders } from './providers/index.js'
 import type { ParsedProviderCall } from './providers/types.js'
 import type {
   AssistantMessageContent,
@@ -98,7 +98,9 @@ function parseApiCall(entry: JournalEntry): ParsedApiCall | null {
   const tokens: TokenUsage = {
     inputTokens: usage.input_tokens ?? 0,
     outputTokens: usage.output_tokens ?? 0,
-    cacheCreationInputTokens: usage.cache_creation_input_tokens ?? 0,
+    cacheCreationInputTokens: usage.cache_creation_input_tokens ??
+      ((usage.cache_creation?.ephemeral_5m_input_tokens ?? 0) + (usage.cache_creation?.ephemeral_1h_input_tokens ?? 0)),
+    cacheCreation1hInputTokens: usage.cache_creation?.ephemeral_1h_input_tokens ?? 0,
     cacheReadInputTokens: usage.cache_read_input_tokens ?? 0,
     cachedInputTokens: 0,
     reasoningTokens: 0,
@@ -114,6 +116,8 @@ function parseApiCall(entry: JournalEntry): ParsedApiCall | null {
     tokens.cacheReadInputTokens,
     tokens.webSearchRequests,
     usage.speed ?? 'standard',
+    tokens.inputTokens + tokens.cacheCreationInputTokens + tokens.cacheReadInputTokens,
+    tokens.cacheCreation1hInputTokens,
   )
 
   const bashCmds = extractBashCommandsFromContent(msg.content ?? [])
@@ -135,7 +139,7 @@ function parseApiCall(entry: JournalEntry): ParsedApiCall | null {
 }
 
 async function parseTurns(filePath: string): Promise<ParsedTurn[]> {
-  const seenMsgIds = new Set<string>()
+  const seenCalls = new Map<string, ParsedApiCall>()
   const turns: ParsedTurn[] = []
   let currentUserMessage = ''
   let currentUserSignals = 0
@@ -169,13 +173,31 @@ async function parseTurns(filePath: string): Promise<ParsedTurn[]> {
       }
     } else if (entry.type === 'assistant') {
       const msgId = getMessageId(entry)
-      if (msgId && seenMsgIds.has(msgId)) continue
-      if (msgId) seenMsgIds.add(msgId)
       const call = parseApiCall(entry)
-      if (call) {
-        if (!msgId) call.deduplicationKey = `${filePath}:${lineNumber}`
-        chargeRecord(); currentCalls.push(call)
+      if (!call) continue
+      const previous = msgId ? seenCalls.get(msgId) : undefined
+      if (previous) {
+        // Claude writes several blocks and a final usage snapshot with the same
+        // API message ID. These are cumulative counters, never separate charges.
+        for (const key of Object.keys(call.usage) as Array<keyof TokenUsage>) {
+          previous.usage[key] = Math.max(previous.usage[key] ?? 0, call.usage[key] ?? 0)
+        }
+        previous.tools = [...new Set([...previous.tools, ...call.tools])]
+        previous.mcpTools = extractMcpTools(previous.tools)
+        previous.bashCommands = [...new Set([...previous.bashCommands, ...call.bashCommands])]
+        previous.hasAgentSpawn ||= call.hasAgentSpawn
+        previous.hasPlanMode ||= call.hasPlanMode
+        if (call.speed === 'fast') previous.speed = 'fast'
+        previous.costUSD = calculateCost(previous.model, previous.usage.inputTokens,
+          previous.usage.outputTokens, previous.usage.cacheCreationInputTokens,
+          previous.usage.cacheReadInputTokens, previous.usage.webSearchRequests,
+          previous.speed, previous.usage.inputTokens + previous.usage.cacheCreationInputTokens + previous.usage.cacheReadInputTokens,
+          previous.usage.cacheCreation1hInputTokens)
+        continue
       }
+      if (msgId) seenCalls.set(msgId, call)
+      else call.deduplicationKey = `${filePath}:${lineNumber}`
+      chargeRecord(); currentCalls.push(call)
     }
   }
 
@@ -306,31 +328,24 @@ async function parseSessionFile(
   }
   const rawTurns = await cachedFileParse(filePath, 'claude-turns', () => parseTurns(filePath))
   const sessionId = basename(filePath, '.jsonl')
-  let turns: ParsedTurn[] = []
+  const turns: ParsedTurn[] = []
   for (const turn of rawTurns) {
     const calls = turn.assistantCalls.filter(call => {
       chargeRecord()
+      if (call.costUSD === 0) calculateCost(call.model, call.usage.inputTokens,
+        call.usage.outputTokens, call.usage.cacheCreationInputTokens, call.usage.cacheReadInputTokens, 0)
+      if (dateRange) {
+        const timestamp = new Date(call.timestamp)
+        if (!Number.isFinite(timestamp.getTime()) || timestamp < dateRange.start || timestamp > dateRange.end) return false
+      }
       if (seenMsgIds.has(call.deduplicationKey)) return false
       seenMsgIds.add(call.deduplicationKey)
       return true
     })
-    if (calls.length) turns.push({ ...turn, ...compactUserMessage(turn.userMessage, turn.userMessageSignals), assistantCalls: calls })
+    if (calls.length) turns.push({ ...turn, ...compactUserMessage(turn.userMessage, turn.userMessageSignals),
+      timestamp: calls[0]!.timestamp || turn.timestamp, assistantCalls: calls })
   }
-  if (dateRange) {
-    // Bucket a turn by the timestamp of its first assistant call (when the cost was
-    // actually incurred). Filtering entries directly produced orphan assistant calls
-    // when a user message sat in one day and the response landed in another -- those
-    // got pushed as turns with empty timestamps, which some code paths counted and
-    // others dropped, producing inconsistent Today totals.
-    turns = turns.filter(turn => {
-      if (turn.assistantCalls.length === 0) return false
-      const firstCallTs = turn.assistantCalls[0]!.timestamp
-      if (!firstCallTs) return false
-      const ts = new Date(firstCallTs)
-      return ts >= dateRange.start && ts <= dateRange.end
-    })
-    if (turns.length === 0) return null
-  }
+  if (turns.length === 0) return null
   const classified = turns.map(classifyTurn)
 
   return buildSessionSummary(sessionId, project, classified)
@@ -434,6 +449,8 @@ async function scanProjectDirs(dirs: Array<{ path: string; name: string }>, seen
 }
 
 function providerCallToTurn(call: ParsedProviderCall): ParsedTurn {
+  if (call.costUSD === 0) calculateCost(call.model, call.inputTokens, call.outputTokens,
+    call.cacheCreationInputTokens, call.cacheReadInputTokens, call.webSearchRequests)
   const tools = call.tools
   const usage: TokenUsage = {
     inputTokens: call.inputTokens,
@@ -490,7 +507,7 @@ async function parseProviderSources(
     }
     // Each file is cached independently of date range and global deduplication.
     const warnings: string[] = []
-    const calls = await cachedFileParse(source.path, providerName, async () => {
+    const calls = await cachedFileParse(source.path, providerName === 'codex' ? 'codex-v3' : providerName, async () => {
       const parser = provider.createSessionParser(
         { path: source.path, project: source.project, provider: providerName }, new Set(),
       )
@@ -692,6 +709,23 @@ export function filterProjectsByName(
 }
 
 export async function parseAllSessions(dateRange?: DateRange, providerFilter?: string, summaryOnly = false, signal?: AbortSignal): Promise<ProjectSummary[]> {
+  if (summaryOnly && (!providerFilter || providerFilter === 'all')) {
+    // Lifetime reports ingest each provider in a bounded scan. One large corpus
+    // must not consume the entire wall-clock budget before other providers load.
+    const merged = new Map<string, ProjectSummary>()
+    for (const provider of await getAllProviders()) {
+      const projects = await parseAllSessions(dateRange, provider.name, true, signal)
+      for (const project of projects) {
+        const existing = merged.get(project.project)
+        if (existing) {
+          existing.sessions.push(...project.sessions)
+          existing.totalCostUSD += project.totalCostUSD
+          existing.totalApiCalls += project.totalApiCalls
+        } else merged.set(project.project, { ...project, sessions: [...project.sessions] })
+      }
+    }
+    return [...merged.values()].sort((a, b) => b.totalCostUSD - a.totalCostUSD)
+  }
   return reportMode.run(summaryOnly, () => withScanBudget(() => parseAllSessionsWithinBudget(dateRange, providerFilter), summaryOnly ? 2_000_000 : 200_000, signal, (summaryOnly ? 8 : 1) * 1024 ** 3))
 }
 
@@ -699,7 +733,7 @@ async function parseAllSessionsWithinBudget(dateRange?: DateRange, providerFilte
   _parseWarnings = []
   const sourceContext = await getSourceContext(providerFilter)
   const allSources = sourceContext.sources
-  const key = `${reportMode.getStore() ? 'summary' : 'full'}:${cacheKey(dateRange, providerFilter, sourceContext.fingerprint)}`
+  const key = `${getPricingFingerprint()}:${reportMode.getStore() ? 'summary' : 'full'}:${cacheKey(dateRange, providerFilter, sourceContext.fingerprint)}`
   const cached = sessionCache.get(key)
   if (cached && Date.now() - cached.ts < CACHE_TTL_MS) return cached.data
 
@@ -746,4 +780,9 @@ async function parseAllSessionsWithinBudget(dateRange?: DateRange, providerFilte
 /** Provider discovery already performed by the serialized report load. */
 export function getDiscoveredProviderNames(): string[] {
   return [...new Set([...resolvedSourceContexts.values()].flatMap(c => c.result.sources.map(s => s.provider)))]
+}
+
+/** Reuse discovery for determining the beginning of all-time history. */
+export async function getDiscoveredSources(): Promise<Array<{ provider: string; project: string; path: string }>> {
+  return (await getSourceContext('all')).sources
 }

@@ -9,8 +9,6 @@ private let wlog = Logger(subsystem: "com.askexe.exe-watcher-menubar", category:
 
 /// Keep the always-visible menu bar badge live. This matches the README/product promise and
 /// avoids the badge appearing stuck while the popover is closed during active coding sessions.
-private let refreshIntervalSeconds: UInt64 = 30
-private let idleRefreshIntervalSeconds: UInt64 = 300
 private let statusItemWidth: CGFloat = NSStatusItem.variableLength
 private let popoverWidth: CGFloat = 400
 private let popoverHeight: CGFloat = 660
@@ -68,10 +66,9 @@ struct ExeWatcherApp: App {
 final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private var statusItem: NSStatusItem!
     private var popover: NSPopover!
-    private let store = AppStore()
+    private let store = AppStore(badgeCacheURL: FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent(".cache/exe-watcher/native-badge.json"))
     let updateChecker = UpdateChecker()
-    private var refreshLoopTask: Task<Void, Never>?
-    private var refreshTimer: DispatchSourceTimer?
 
     private var usageLogWatcher: UsageLogWatcher?
     private var usageLogDebounceWork: DispatchWorkItem?
@@ -94,7 +91,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         setupStatusItem()
         setupPopover()
         observeStore()
-        startRefreshLoop()
+        loadInitialBadge()
         startUsageLogWatcher()
         setupWakeObservers()
         cleanupLegacyLaunchAgent()
@@ -111,6 +108,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     }
 
     private func setupWakeObservers() {
+        NotificationCenter.default.addObserver(forName: .NSCalendarDayChanged, object: nil, queue: .main) { [weak self] _ in
+            // A calendar notification clears yesterday's visible badge without
+            // starting a scheduled scan. New usage or opening the menu hydrates today.
+            Task { @MainActor in self?.refreshStatusButton() }
+        }
         NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didWakeNotification,
             object: nil,
@@ -167,6 +169,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     }
 
     private func forceRefresh() {
+        usageLogWatcher?.stop()
+        usageLogWatcher = nil
+        startUsageLogWatcher()
         RefreshTracer.shared.instant(
             name: "force_refresh", category: "lifecycle", tid: .lifecycle,
             args: ["trigger": .string("system_wake")]
@@ -174,7 +179,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         Task {
             store.recoverFromSystemResume()
             await store.refreshTodayBadge()
-            await store.refreshVisibleSelection()
+            if popover.isShown { await store.refreshVisibleSelection() }
             refreshStatusButton()
         }
     }
@@ -206,66 +211,76 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         healthMonitor?.stop()
         RefreshTracer.shared.instant(name: "app_terminating", category: "lifecycle", tid: .lifecycle)
         RefreshTracer.shared.writeToDisk()
-        refreshLoopTask?.cancel()
-        refreshTimer?.cancel()
         usageLogDebounceWork?.cancel()
         usageLogWatcher?.stop()
     }
 
-    private func startRefreshLoop() {
+    private func loadInitialBadge() {
         // Initial fetch: update only the always-visible badge. Do not prefetch every period at
-        // launch: long historical scans can compete with the 30s badge refresh and make the
+        // launch: long historical scans can compete with the badge refresh and make the
         // menubar total look stuck. Historical periods load lazily when selected.
         Task {
             await store.refreshTodayBadge()
             refreshStatusButton()
         }
 
-        // Popover starts closed — use the idle interval. popoverWillShow will tighten to 60s.
-        rescheduleTimer(intervalSeconds: idleRefreshIntervalSeconds)
     }
 
-    /// The 30s timer is a safety net, not the freshness mechanism. Usage files are append-only
-    /// while the user is actively coding, so watch those directories and refresh shortly after
-    /// real writes. Without this, an accessory app can look stale until opening the popover,
-    /// because popoverWillShow/manual Refresh are the only event-driven refresh paths.
+    /// macOS pushes file-change notifications. There is no periodic usage scan.
     private func startUsageLogWatcher() {
         let fm = FileManager.default
         let home = fm.homeDirectoryForCurrentUser.path
-        var candidates = [
-            ProcessInfo.processInfo.environment["CLAUDE_CONFIG_DIR"].map { "\($0)/projects" } ?? "\(home)/.claude/projects",
+        let environment = ProcessInfo.processInfo.environment
+        let claudeRoot = environment["CLAUDE_CONFIG_DIR"] ?? "\(home)/.claude"
+        let codexRoot = environment["CODEX_HOME"] ?? "\(home)/.codex"
+        var candidates: [String] = [
+            claudeRoot + "/projects",
             "\(home)/Library/Application Support/Claude/local-agent-mode-sessions",
-            ProcessInfo.processInfo.environment["CODEX_HOME"].map { "\($0)/sessions" } ?? "\(home)/.codex/sessions",
+            codexRoot + "/sessions",
+            codexRoot + "/archived_sessions",
+            claudeRoot + "/stats-cache.json",
+            "\(home)/.pi/agent/sessions",
+            "\(home)/.omp/agent/sessions",
             "\(home)/.cursor/projects",
-            "\(home)/Library/Application Support/Cursor/User/globalStorage/state.vscdb",
+            "\(home)/Library/Application Support/Cursor/User/globalStorage",
         ]
-        let opencodeDir = "\(home)/.local/share/opencode"
-        if let opencodeEntries = try? fm.contentsOfDirectory(atPath: opencodeDir) {
-            candidates.append(contentsOf: opencodeEntries
-                .filter { $0.hasPrefix("opencode") && $0.hasSuffix(".db") }
-                .map { "\(opencodeDir)/\($0)" })
+        let opencodeDir = (environment["XDG_DATA_HOME"] ?? "\(home)/.local/share") + "/opencode"
+        candidates.append(opencodeDir)
+        // Include separately configured Claude profiles as well as the default root.
+        let configURL = URL(fileURLWithPath: "\(home)/.config/exe-watcher/config.json")
+        if let data = try? Data(contentsOf: configURL),
+           let config = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let roots = config["claudeConfigDirs"] as? [String] {
+            candidates += roots.flatMap { root -> [String] in
+                let expanded = (root as NSString).expandingTildeInPath
+                return [expanded + "/projects", expanded + "/stats-cache.json"]
+            }
         }
-        let paths = candidates.filter { fm.fileExists(atPath: $0) }
+        // If a provider's sessions directory does not exist yet, watch its existing
+        // parent so the first session can trigger an update. Never watch all of HOME.
+        let paths = Array(Set(candidates.compactMap { path -> String? in
+            if fm.fileExists(atPath: path) { return path }
+            let parent = (path as NSString).deletingLastPathComponent
+            return parent != home && fm.fileExists(atPath: parent) ? parent : nil
+        }))
         guard !paths.isEmpty else { return }
 
         usageLogWatcher = UsageLogWatcher(paths: paths) { [weak self] in
             Task { @MainActor in
+                self?.store.noteUsageChange()
                 self?.scheduleUsageLogRefresh()
             }
         }
         usageLogWatcher?.start()
     }
 
-    /// Coalesces timer and FSEvents-driven refreshes so a busy transcript directory produces ONE refresh
+    /// Coalesces FSEvents-driven refreshes so a busy transcript directory produces ONE refresh
     /// per quiet/cooldown window instead of back-to-back full refreshes. The previous "throttle"
     /// stamped its cooldown when a refresh STARTED (with a 5s window shorter than the ~7s refresh
     /// and no in-flight guard), so under sustained agent write load it fired continuously —
     /// ~8.6GB of writes in ~10 min. See RefreshCoalescer for the corrected state machine.
-    private let refreshCoalescer = RefreshCoalescer(config: .init(minIntervalSeconds: 30))
-    private var pendingSelectedPeriodRefresh = false
-
-    private func scheduleUsageLogRefresh(refreshSelectedPeriod: Bool = false) {
-        pendingSelectedPeriodRefresh = pendingSelectedPeriodRefresh || refreshSelectedPeriod
+    private let refreshCoalescer = RefreshCoalescer(config: .init(minIntervalSeconds: 120, scanRestMultiplier: 9, maxEventRetries: 2))
+    private func scheduleUsageLogRefresh() {
         refreshCoalescer.noteEvent(now: Date())
         pumpCoalescer()
     }
@@ -279,14 +294,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         case .fireNow:
             usageLogDebounceWork?.cancel()
             usageLogDebounceWork = nil
-            let refreshSelectedPeriod = pendingSelectedPeriodRefresh
-            pendingSelectedPeriodRefresh = false
             watcherLog("AUTO coalescer: firing refresh")
             RefreshTracer.shared.instant(name: "automatic_trigger", category: "refresh", tid: .refresh)
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                await self.performAutomaticRefresh(refreshSelectedPeriod: refreshSelectedPeriod)
-                self.refreshCoalescer.refreshDidFinish(now: Date())
+                let success = await self.performAutomaticRefresh()
+                self.refreshCoalescer.refreshDidFinish(now: Date(), success: success)
                 self.pumpCoalescer()
             }
         case .wait(let deadline):
@@ -301,45 +314,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         }
     }
 
-    /// Timer and filesystem refreshes share the same in-flight guard and completion cooldown.
-    private func performAutomaticRefresh(refreshSelectedPeriod: Bool) async {
+    private func performAutomaticRefresh() async -> Bool {
         let start = Date()
         watcherLog("REFRESH starting...")
-        await store.refreshTodayBadge()
+        let success = await store.refreshTodayBadge()
         let elapsed = Date().timeIntervalSince(start)
         let cost = store.todayPayload?.current.cost ?? -1
         watcherLog("REFRESH done in \(String(format: "%.1f", elapsed))s — cost=$\(String(format: "%.2f", cost))")
         refreshStatusButton()
-        if refreshSelectedPeriod {
+        if popover.isShown {
             let selected = store.selectedPeriod
             if selected != .today {
                 await store.refreshQuietly(period: selected)
             }
         }
-    }
-
-    private func rescheduleTimer(intervalSeconds: UInt64) {
-        refreshLoopTask?.cancel()
-        refreshLoopTask = nil
-        refreshTimer?.cancel()
-        // Use a DispatchSourceTimer instead of Task.sleep. Swift cooperative task
-        // scheduling can defer .sleep wakeups indefinitely for background/accessory
-        // apps even with beginActivity — the runtime treats them as low-priority.
-        // GCD timers fire reliably regardless of app activation state.
-        let timer = DispatchSource.makeTimerSource(queue: .main)
-        timer.schedule(deadline: .now() + Double(intervalSeconds), repeating: Double(intervalSeconds), leeway: .seconds(1))
-        timer.setEventHandler { [weak self] in
-            let tick = Date()
-            wlog.notice("timer fired at \(refreshTimeFormatter.string(from: tick)) (interval=\(intervalSeconds)s)")
-            watcherLog("TIMER fired (interval=\(intervalSeconds)s)")
-            RefreshTracer.shared.instant(
-                name: "timer_tick", category: "refresh", tid: .refresh,
-                args: ["interval_s": .int(Int(intervalSeconds))]
-            )
-            self?.scheduleUsageLogRefresh(refreshSelectedPeriod: true)
-        }
-        timer.resume()
-        refreshTimer = timer
+        return success
     }
 
     private func observeStore() {
@@ -390,18 +379,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
         let hasPayload = store.todayPayload != nil
         let compact = isCompact
-        // Show $0 when the CLI has successfully run before but no data exists yet for today
-        // (e.g. day rollover). The dash fallback only appears before the very first successful
-        // fetch, when we don't yet know if the CLI is even installed.
-        let hasEverSucceeded = store.lastBadgeRefreshSuccessAt != nil
-        let fallback = hasEverSucceeded
-            ? (compact ? (0.0).asCompactCurrencyWhole() : (0.0).asCompactCurrency())
-            : (compact ? "$-" : "$—")
+        // No successful scan for this date means unknown, including day rollover.
+        let fallback = compact ? "$-" : "$—"
         let formatted = store.todayPayload?.current.cost
         let valueText = compact
             ? (formatted?.asCompactCurrencyWhole() ?? fallback)
             : (formatted?.asCompactCurrency() ?? fallback)
-        let color: NSColor = (hasPayload || hasEverSucceeded) ? .labelColor : .secondaryLabelColor
+        let color: NSColor = hasPayload ? .labelColor : .secondaryLabelColor
 
         button.attributedTitle = NSAttributedString(
             string: valueText,
@@ -467,12 +451,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         // cooldown. The interval is fine for background checks, but when the user actively
         // opens the popover they should see newly available updates immediately.
         Task { await updateChecker.check() }
-        rescheduleTimer(intervalSeconds: refreshIntervalSeconds)
     }
 
     func popoverDidClose(_ notification: Notification) {
         RefreshTracer.shared.instant(name: "popover_close", category: "lifecycle", tid: .lifecycle)
-        rescheduleTimer(intervalSeconds: idleRefreshIntervalSeconds)
     }
 
     // MARK: - Font Registration
@@ -601,9 +583,13 @@ private final class UsageLogWatcher: @unchecked Sendable {
             copyDescription: nil
         )
 
-        let callback: FSEventStreamCallback = { _, info, count, _, _, _ in
+        let callback: FSEventStreamCallback = { _, info, count, eventPaths, flags, _ in
             guard let info else { return }
             guard count > 0 else { return }
+            let paths = unsafeBitCast(eventPaths, to: NSArray.self) as? [String] ?? []
+            guard (0..<min(count, paths.count)).contains(where: {
+                UsageLogEvents.shouldRefresh(path: paths[$0], flags: flags[$0])
+            }) else { return }
 
             let watcher = Unmanaged<UsageLogWatcher>.fromOpaque(info).takeUnretainedValue()
             DispatchQueue.main.async {
@@ -618,7 +604,7 @@ private final class UsageLogWatcher: @unchecked Sendable {
             paths as CFArray,
             FSEventStreamEventId(kFSEventStreamEventIdSinceNow),
             1.0,
-            FSEventStreamCreateFlags(kFSEventStreamCreateFlagUseCFTypes | kFSEventStreamCreateFlagFileEvents)
+            FSEventStreamCreateFlags(kFSEventStreamCreateFlagUseCFTypes | kFSEventStreamCreateFlagFileEvents | kFSEventStreamCreateFlagWatchRoot)
         )
 
         guard let stream else {

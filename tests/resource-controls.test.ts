@@ -22,7 +22,7 @@ it('reuses unchanged parsed results without rewriting and invalidates appends, t
   const parse = vi.fn(async () => (await readFile(path, 'utf8')).split('\n'))
   const first = await cachedFileParse(path, 'test', parse)
   const cacheDir = join(dir, 'cache', 'parsed-files')
-  const filename = (await readdir(cacheDir)).find(p => p.endsWith('.json'))!
+  const filename = (await readdir(cacheDir)).find(p => p.endsWith('.json.gz'))!
   const before = await stat(join(cacheDir, filename))
   expect(await cachedFileParse(path, 'test', parse)).toEqual(first)
   expect(parse).toHaveBeenCalledTimes(1)

@@ -20,6 +20,7 @@ enum DataClientError: Error {
     case decode(Error)
     case timeout(seconds: UInt64 = 60)
     case outputTooLarge
+    case incompleteScan(String)
     case appTooOld(required: String, current: String)
 }
 
@@ -50,6 +51,8 @@ extension DataClientError: LocalizedError {
             return "exe-watcher timed out after \(seconds) seconds. Retry once the machine is idle."
         case .outputTooLarge:
             return "Watcher received an unexpectedly large CLI response and refused to render it."
+        case let .incompleteScan(message):
+            return "Scan incomplete. Keeping the last successful total. \(message)"
         case let .appTooOld(required, current):
             return "This app (v\(current)) is too old for the installed CLI. Update to v\(required)+ via the menubar or reinstall."
         }
@@ -98,7 +101,16 @@ struct DataClient {
             }
         }
 
+        try validate(payload)
         return payload
+    }
+
+    /// Also reject successful-looking responses from older CLIs that swallowed a
+    /// failed usage scan and substituted zero. Pricing warnings alone are allowed.
+    static func validate(_ payload: MenubarPayload) throws {
+        if let warning = payload.diagnostics?.warnings.first(where: {
+            $0.hasPrefix("parseAllSessions failed:")
+        }) { throw DataClientError.incompleteScan(warning) }
     }
 
     static func subcommand(period: Period, provider: ProviderFilter, includeOptimize: Bool) -> [String] {
@@ -176,6 +188,7 @@ final class CLIProcessRunner: @unchecked Sendable {
             _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK)
         }
         do { try process.run() } catch { throw DataClientError.spawn(error.localizedDescription) }
+        _ = setpriority(PRIO_PROCESS, UInt32(process.processIdentifier), 10)
         try? stdout.fileHandleForWriting.close()
         try? stderr.fileHandleForWriting.close()
         let started = ProcessInfo.processInfo.systemUptime

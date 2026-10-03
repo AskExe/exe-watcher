@@ -1,7 +1,5 @@
 import Foundation
 
-private let periodHistoryCapDays = 365
-
 struct PeriodHistoryWindow: Sendable {
     let label: String
     let comparisonLabel: String?
@@ -76,7 +74,7 @@ func makePeriodHistoryWindow(
             comparisonEntries: entries(start: priorStart, end: priorEnd)
         )
     case .all:
-        let start = calendar.date(byAdding: .day, value: -(periodHistoryCapDays - 1), to: today) ?? today
+        let start = history.compactMap { formatter.date(from: $0.date) }.min() ?? today
         return PeriodHistoryWindow(
             label: "All time",
             comparisonLabel: nil,

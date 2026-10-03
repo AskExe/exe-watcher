@@ -1,3 +1,4 @@
+import { mergeCounters } from './report-summary.js'
 import type { DailyEntry, ProviderDailyBreakdown } from './daily-cache.js'
 import type { PeriodData } from './menubar-json.js'
 import { CATEGORY_LABELS, type ProjectSummary, type TaskCategory } from './types.js'
@@ -73,6 +74,10 @@ export function aggregateProjectsIntoDays(projects: ProjectSummary[]): DailyEntr
 
   for (const project of projects) {
     for (const session of project.sessions) {
+      if (session.reportSummary?.dailyEntries) {
+        for (const day of Object.values(session.reportSummary.dailyEntries)) mergeCounters(ensure(day.date), day)
+        continue
+      }
       const sessionDate = dateKey(session.firstTimestamp)
       ensure(sessionDate).sessions += 1
       ensureProject(sessionDate, project.project).sessions += 1

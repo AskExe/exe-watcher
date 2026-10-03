@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.54 (2026-10-03)
+
+- Refresh the macOS menu bar when usage files change, with one bounded worker and spaced retries instead of recurring usage scans.
+- Preserve the last successful total when a scan fails; never turn a timeout into a successful $0 result.
+- Count retained Claude usage across account switches, configured profile folders, and Desktop sessions; deduplicate streaming messages and recover identifiable historical totals from local statistics.
+- Include Codex archives and uncapped retained history. Missing logs remain missing rather than being invented.
+- Reprice retained history using the latest available model API rates, with official provider overrides, cache-write durations, context tiers, and explicit warnings for unknown models. These are API-equivalent estimates, not historical invoices.
+- Bound scan memory, runtime, output, disk caches, and background refresh frequency; cancel workers when the app exits.
+
 ## 0.2.38 (2026-05-25)
 
 ### Fixes

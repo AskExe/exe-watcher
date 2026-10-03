@@ -113,7 +113,9 @@ function createParser(
   source: SessionSource,
   seenKeys: Set<string>,
 ): SessionParser {
+  const warnings: string[] = []
   return {
+    warnings,
     async *parse(): AsyncGenerator<ParsedProviderCall> {
       if (!isSqliteAvailable()) {
         process.stderr.write(getSqliteLoadError() + '\n')
@@ -203,6 +205,7 @@ function createParser(
             tokens.cacheRead === 0 &&
             tokens.cacheWrite === 0
           if (allZero && (data.cost ?? 0) === 0) continue
+          if (allZero && (data.cost ?? 0) > 0) warnings.push(`OpenCode message ${msg.id} has a recorded charge but no token counts; its API-equivalent cost cannot be calculated.`)
 
           const msgParts = partsByMsg.get(msg.id) ?? []
           const toolParts = msgParts.filter((p) => p.type === 'tool')
@@ -219,18 +222,16 @@ function createParser(
           seenKeys.add(dedupKey)
 
           const model = data.modelID ?? 'unknown'
-          let costUSD = calculateCost(
+          const costUSD = calculateCost(
             model,
             tokens.input,
             tokens.output + tokens.reasoning,
             tokens.cacheWrite,
             tokens.cacheRead,
             0,
+            'standard',
+            tokens.input + tokens.cacheWrite + tokens.cacheRead,
           )
-
-          if (costUSD === 0 && typeof data.cost === 'number' && data.cost > 0) {
-            costUSD = data.cost
-          }
 
           yield {
             provider: 'opencode',
