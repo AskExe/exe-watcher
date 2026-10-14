@@ -7,9 +7,9 @@ import { getCacheDir } from './cache-dir.js'
 import type { BackfillCursor } from './progressive-backfill.js'
 import { getPricingFingerprint } from './models.js'
 
-// v8: historical rows are tied to the effective pricing catalog, so newly
-// refreshed rates cannot be mixed with previously cached prices.
-export const DAILY_CACHE_VERSION = 8
+// v9 includes native Kimi Code logs. Valid v8 rows are retained while the
+// missing provider is indexed; prices still invalidate all affected rows.
+export const DAILY_CACHE_VERSION = 9
 export const DEFAULT_DAILY_CACHE_SCOPE = 'global'
 const DAILY_CACHE_FILENAME = 'daily-cache.json'
 
@@ -73,6 +73,7 @@ export type DailyCache = {
   backfill?: BackfillCursor | null
   /** Days recorded without a complete scan because they exhausted their retries. */
   partialDates?: string[]
+  missingProviders?: string[]
   /** Uncommitted provider rollups; never exposed as complete historical totals. */
   historyBuild?: {
     start: string
@@ -81,6 +82,9 @@ export type DailyCache = {
     days: DailyEntry[]
     chunked?: { provider: string; nextDate: string }
     partialDates?: string[]
+    providers?: string[]
+    mergeExisting?: boolean
+    previousBackfill?: BackfillCursor | null
   }
 }
 
@@ -116,15 +120,18 @@ export function buildDailyCacheScopeKey(include?: string[], exclude?: string[]):
 function isValidCache(parsed: unknown): parsed is DailyCache {
   if (!parsed || typeof parsed !== 'object') return false
   const c = parsed as Partial<DailyCache>
-  if (c.version !== DAILY_CACHE_VERSION) return false
+  if (c.version !== DAILY_CACHE_VERSION && c.version !== 8) return false
   if (typeof c.scopeKey !== 'string' || c.scopeKey.length === 0) return false
   if (!Array.isArray(c.days)) return false
+  if (c.missingProviders && (!Array.isArray(c.missingProviders) || !c.missingProviders.every(p => typeof p === 'string'))) return false
   if (c.historyBuild) {
     const stage = c.historyBuild
     const validDate = (value: unknown) => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value) && Number.isFinite(Date.parse(value))
     if (!validDate(stage.start) || !validDate(stage.end) || stage.start > stage.end ||
         !Array.isArray(stage.days) || !Array.isArray(stage.completedProviders) ||
         !stage.completedProviders.every(p => typeof p === 'string') ||
+        (stage.providers && (!Array.isArray(stage.providers) || !stage.providers.every(p => typeof p === 'string'))) ||
+        (stage.mergeExisting !== undefined && typeof stage.mergeExisting !== 'boolean') ||
         (stage.chunked && (typeof stage.chunked.provider !== 'string' || !validDate(stage.chunked.nextDate)))) return false
   }
   return true
@@ -140,6 +147,10 @@ export async function loadDailyCache(scopeKey = DEFAULT_DAILY_CACHE_SCOPE): Prom
     if (parsed.scopeKey !== scopeKey) return emptyCache(scopeKey)
     if ((parsed.days.length || parsed.historyBuild) && parsed.pricingFingerprint !== getPricingFingerprint()) {
       return { ...emptyCache(scopeKey), needsRepricing: true, previousHistoryStart: parsed.days[0]?.date ?? parsed.historyBuild?.start }
+    }
+    if (parsed.version !== DAILY_CACHE_VERSION) {
+      return { ...parsed, version: DAILY_CACHE_VERSION, historyBuild: undefined,
+        missingProviders: parsed.days.length ? ['kimi'] : undefined }
     }
     return parsed
   } catch {

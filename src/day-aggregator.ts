@@ -19,10 +19,10 @@ function emptyEntry(date: string): DailyEntry {
     cacheWriteTokens: 0,
     editTurns: 0,
     oneShotTurns: 0,
-    models: {},
-    categories: {},
-    providers: {},
-    projects: {},
+    models: Object.create(null),
+    categories: Object.create(null),
+    providers: Object.create(null),
+    projects: Object.create(null),
   }
 }
 
@@ -37,8 +37,8 @@ function emptyProviderBreakdown(): ProviderDailyBreakdown {
     cacheWriteTokens: 0,
     editTurns: 0,
     oneShotTurns: 0,
-    models: {},
-    categories: {},
+    models: Object.create(null),
+    categories: Object.create(null),
   }
 }
 
@@ -230,8 +230,8 @@ export function buildPeriodDataFromDays(days: DailyEntry[], label: string): Peri
   }
   let cost = 0, calls = 0, sessions = 0
   let inputTokens = 0, outputTokens = 0, cacheReadTokens = 0, cacheWriteTokens = 0
-  const catTotals: Record<string, { turns: number; cost: number; editTurns: number; oneShotTurns: number }> = {}
-  const modelTotals: Record<string, { calls: number; cost: number }> = {}
+  const catTotals: Record<string, { turns: number; cost: number; editTurns: number; oneShotTurns: number }> = Object.create(null)
+  const modelTotals: Record<string, { calls: number; cost: number }> = Object.create(null)
 
   for (const d of days) {
     cost += d.cost

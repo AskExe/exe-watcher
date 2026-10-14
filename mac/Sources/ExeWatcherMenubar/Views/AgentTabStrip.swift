@@ -38,11 +38,10 @@ struct AgentTabStrip: View {
 
     private var visibleFilters: [ProviderFilter] {
         guard let tabSourcePayload else { return [] }
-        // Only show providers that have actual spend (cost > 0). Providers that are merely
-        // "installed" (CLI found credential files) but never used just add clutter.
+        // The CLI includes only providers with usage. Free or unpriced models
+        // still have real tokens and need a visible detail tab.
         let activeKeys = Set(
             tabSourcePayload.current.providers
-                .filter { $0.value > 0 }
                 .keys.map { $0.lowercased() }
         )
         let tabs = ProviderFilter.allCases.filter { filter in
@@ -115,6 +114,7 @@ extension ProviderFilter {
         case .cursorAgent: return Color(red: 0x8A/255.0, green: 0x6E/255.0, blue: 0xD9/255.0)
         case .copilot: return Color(red: 0x6D/255.0, green: 0x8F/255.0, blue: 0xA6/255.0)
         case .opencode: return Color(red: 0x5B/255.0, green: 0x83/255.0, blue: 0x5B/255.0)
+        case .kimi: return Theme.brandAccent
         case .omp: return Color(red: 0xC2/255.0, green: 0x8A/255.0, blue: 0x36/255.0)
         case .pi: return Color(red: 0xB2/255.0, green: 0x6B/255.0, blue: 0x3D/255.0)
         }

@@ -617,6 +617,7 @@ enum ProviderFilter: String, CaseIterable, Identifiable {
     case cursorAgent = "Cursor Agent"
     case copilot = "Copilot"
     case opencode = "OpenCode"
+    case kimi = "Kimi"
     case omp = "OMP"
     case pi = "Pi"
 
@@ -632,6 +633,7 @@ enum ProviderFilter: String, CaseIterable, Identifiable {
         case .cursorAgent: "cursor-agent"
         case .copilot: "copilot"
         case .opencode: "opencode"
+        case .kimi: "kimi"
         case .omp: "omp"
         case .pi: "pi"
         }

@@ -16,8 +16,13 @@ export async function completeHistoryBuild(
   cache: DailyCache, start: Date, end: Date, providers: string[],
   scan: (provider: string, start: Date, end: Date) => Promise<DailyEntry[]>,
   save: (cache: DailyCache) => Promise<void>,
+  options: { mergeExisting?: boolean } = {},
 ): Promise<DailyCache> {
-  const stage = cache.historyBuild ? structuredClone(cache.historyBuild) : { start: key(start), end: key(end), completedProviders: [], days: [] }
+  const stage: NonNullable<DailyCache['historyBuild']> = cache.historyBuild ? structuredClone(cache.historyBuild) : {
+    start: key(start), end: key(end), completedProviders: [], days: [], providers,
+    mergeExisting: options.mergeExisting, previousBackfill: cache.backfill,
+  }
+  const scanProviders = stage.providers ?? providers
   let current: DailyCache = { ...cache, historyBuild: stage }
   const first = date(stage.start)
   const last = date(stage.end); last.setHours(23, 59, 59, 999)
@@ -31,7 +36,7 @@ export async function completeHistoryBuild(
     }
     stage.days = [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date))
   }
-  for (const provider of providers) {
+  for (const provider of scanProviders) {
     if (stage.completedProviders.includes(provider)) continue
     if (!stage.chunked) {
       try {
@@ -73,12 +78,22 @@ export async function completeHistoryBuild(
     stage.completedProviders.push(provider)
     await save(current)
   }
-  const rebuilt = fillMissingDays(first, last, stage.days)
+  let rebuilt = fillMissingDays(first, last, stage.days)
+  if (stage.mergeExisting) {
+    const existing = new Map(cache.days.map(day => [day.date, structuredClone(day)]))
+    rebuilt = rebuilt.map(day => {
+      const previous = existing.get(day.date)
+      if (!previous) return day
+      mergeCounters(previous, day)
+      return previous
+    })
+  }
   current = {
     ...current, ...addNewDays(current, rebuilt, stage.end, { coveredThrough: stage.end }),
     historyBuild: undefined, revalidatedAt: Date.now(),
-    partialDates: [...new Set([...(cache.partialDates ?? []).filter(d => d < stage.start || d > stage.end), ...(stage.partialDates ?? [])])],
-    backfill: null,
+    partialDates: [...new Set([...(cache.partialDates ?? []).filter(d => stage.mergeExisting || d < stage.start || d > stage.end), ...(stage.partialDates ?? [])])],
+    backfill: stage.mergeExisting ? stage.previousBackfill ?? null : null,
+    missingProviders: (cache.missingProviders ?? []).filter(p => !scanProviders.includes(p)),
   }
   // A suspended build may span a day rollover. Only clear repricing after
   // its original range is committed; the caller then fills the new-day gap.

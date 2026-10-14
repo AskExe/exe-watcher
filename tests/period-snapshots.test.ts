@@ -47,11 +47,19 @@ describe('period snapshots', () => {
     expect(Object.keys(build(partial))).toEqual(['today'])
     const repricing = fixture(); repricing.needsRepricing = true
     expect(Object.keys(build(repricing))).toEqual(['today'])
+    const missingProvider = fixture(); missingProvider.missingProviders = ['kimi']
+    expect(Object.keys(build(missingProvider))).toEqual(['today'])
   })
   it('uses the same provider buckets for aggregates and filtered views', () => {
     const cache = fixture()
     expect(build(cache).all!.current.providers.claude).toBe(build(cache, 2, 'claude').all!.current.cost)
     expect(build(cache, 2, 'codex').all!.current.cost).toBe(0)
+  })
+  it('keeps unpriced-model warnings when usage comes only from cached closed days', () => {
+    const cache = fixture()
+    cache.days[0]!.models['kimi-for-coding'] = { calls: 1, cost: 0, inputTokens: 100,
+      outputTokens: 50, cacheReadTokens: 0, cacheWriteTokens: 0 }
+    expect(build(cache).all!.diagnostics!.warnings.some(w => w.includes('kimi-for-coding') && w.includes('tokens are counted'))).toBe(true)
   })
   it('adds undated lifetime recovery only to All Time without inventing calls', () => {
     const tokens = { inputTokens: 100, outputTokens: 50, cacheReadTokens: 0, cacheWriteTokens: 0 }

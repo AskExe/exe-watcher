@@ -1,3 +1,4 @@
+import { DAILY_CACHE_VERSION } from '../src/daily-cache.js'
 import { execFileSync } from 'child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
@@ -80,7 +81,7 @@ function makeCorpus(): Env {
 
   // Seed the cache the way a healthy install looks four days ago, so the run has a gap.
   writeFileSync(join(cache, 'daily-cache.json'), JSON.stringify({
-    version: 8, scopeKey: 'global', lastComputedDate: dateKey(midday(4)), days: [],
+    version: DAILY_CACHE_VERSION, scopeKey: 'global', lastComputedDate: dateKey(midday(4)), days: [],
   }))
   return { home, cache }
 }

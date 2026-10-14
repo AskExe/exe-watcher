@@ -228,7 +228,7 @@ export function buildProjectSpend(
   projects30d: ProjectSummary[],
 ): Array<{ name: string; cost24h: number; cost7d: number; cost30d: number; selectedPeriodCost: number; sessions: number }> {
   const aggregate = (projects: ProjectSummary[]) => {
-    const byName: Record<string, { cost: number; sessions: number }> = {}
+    const byName: Record<string, { cost: number; sessions: number }> = Object.create(null)
     for (const p of projects) {
       const name = cleanProjectName(p.project)
       if (!byName[name]) byName[name] = { cost: 0, sessions: 0 }
@@ -262,7 +262,7 @@ export function buildProjectSpendFromDays(
   days30d: DailyEntry[],
 ): Array<{ name: string; cost24h: number; cost7d: number; cost30d: number; selectedPeriodCost: number; sessions: number }> {
   const aggregate = (days: DailyEntry[]) => {
-    const byName: Record<string, { cost: number; sessions: number }> = {}
+    const byName: Record<string, { cost: number; sessions: number }> = Object.create(null)
     for (const day of days) {
       for (const [projectName, totals] of Object.entries(day.projects)) {
         const name = cleanProjectName(projectName)
