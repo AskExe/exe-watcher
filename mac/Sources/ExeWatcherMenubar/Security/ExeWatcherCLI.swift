@@ -38,14 +38,27 @@ enum ExeWatcherCLI {
     /// plain `exe-watcher` name (resolved via PATH).
     static func baseArgv() -> [String] {
         guard let raw = ProcessInfo.processInfo.environment["EXE_WATCHER_BIN"], !raw.isEmpty else {
-            return [defaultBinaryName]
+            return bundledArgv() ?? [defaultBinaryName]
         }
         let parts = raw.split(separator: " ", omittingEmptySubsequences: true).map(String.init)
         guard parts.allSatisfy(isSafe) else {
-            NSLog("Exe Watcher: refusing unsafe EXE_WATCHER_BIN; using default 'exe-watcher'")
-            return [defaultBinaryName]
+            NSLog("Exe Watcher: refusing unsafe EXE_WATCHER_BIN; using bundled or default CLI")
+            return bundledArgv() ?? [defaultBinaryName]
         }
         return parts
+    }
+
+    /// Prefer the version shipped with this app, including on Macs without Node/npm.
+    /// Preserve spaces in the app path as one argv element; never split a trusted bundle URL.
+    static func bundledArgv(
+        bundleURL: URL = Bundle.main.bundleURL,
+        filesystem: ResolverFilesystem = .live
+    ) -> [String]? {
+        guard bundleURL.pathExtension == "app" else { return nil }
+        let launcher = bundleURL.appendingPathComponent("Contents/Resources/cli/exe-watcher").path
+        let runtime = bundleURL.appendingPathComponent("Contents/Helpers/node").path
+        guard filesystem.isExecutable(launcher), filesystem.isExecutable(runtime) else { return nil }
+        return [launcher]
     }
 
     /// Builds a `Process` that runs the CLI with the given subcommand args. Uses `/usr/bin/env`

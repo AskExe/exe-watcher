@@ -1,0 +1,26 @@
+{
+  "refined_tucked": {
+    "label": "01A · Folded wings",
+    "description": "Narrow feathers tucked against the sides, with a slimmer pointed beak.",
+    "beak": [["M",47,54],["Q",50,53,53,54],["L",50,61],["Z"]],
+    "detail": [
+      [["M",29,69],["Q",28,79,37,86],["Q",36,77,29,69],["Z"]],
+      [["M",71,69],["Q",72,79,63,86],["Q",64,77,71,69],["Z"]]
+    ]
+  },
+  "refined_low": {
+    "label": "01B · Low feather folds",
+    "description": "Short feather folds sit lower on the body. A smaller, gently rounded beak.",
+    "beak": [["M",46.5,54],["Q",50,52.5,53.5,54],["Q",53,57.5,50,59],["Q",47,57.5,46.5,54],["Z"]],
+    "detail": [
+      [["M",29,76],["Q",32,85,41,88],["Q",36,81,29,76],["Z"]],
+      [["M",71,76],["Q",68,85,59,88],["Q",64,81,71,76],["Z"]]
+    ]
+  },
+  "refined_clean": {
+    "label": "01C · Clean silhouette",
+    "description": "A smooth body and a neat little triangular beak. The simplest treatment.",
+    "beak": [["M",47,54],["L",53,54],["L",50,59],["Z"]],
+    "detail": []
+  }
+}

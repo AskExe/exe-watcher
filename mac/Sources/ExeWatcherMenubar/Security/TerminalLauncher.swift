@@ -2,8 +2,7 @@ import AppKit
 import Foundation
 
 /// Runs commands in the user's Terminal. Every string that reaches AppleScript `do script`
-/// must be whitespace-joined argv where each token passes `ExeWatcherCLI.isSafe` (regex allowlist
-/// that excludes shell metacharacters), OR a hardcoded literal defined here. The private
+/// is individually shell-quoted argv, OR a hardcoded literal defined here. The private
 /// `runInTerminal` re-validates any non-literal input defensively so a future caller can't
 /// bypass the invariant.
 /// Falls back to a detached headless spawn on machines without Terminal.app (iTerm/Ghostty/Warp
@@ -16,11 +15,11 @@ enum TerminalLauncher {
 
     static func open(subcommand: [String]) {
         let argv = ExeWatcherCLI.baseArgv() + subcommand
-        guard argv.allSatisfy(ExeWatcherCLI.isSafe) else {
+        guard subcommand.allSatisfy(ExeWatcherCLI.isSafe) else {
             NSLog("Exe Watcher: refusing to open terminal with unsafe argv")
             return
         }
-        let command = argv.joined(separator: " ")
+        let command = shellCommand(argv)
 
         if terminalPaths.contains(where: FileManager.default.fileExists(atPath:)) {
             runInTerminal(command: command, preValidated: true)
@@ -35,6 +34,11 @@ enum TerminalLauncher {
         } catch {
             NSLog("Exe Watcher: headless report launch failed: \(error)")
         }
+    }
+
+    /// Each argument is quoted independently, including an app name containing spaces or quotes.
+    static func shellCommand(_ argv: [String]) -> String {
+        argv.map { "'" + $0.replacingOccurrences(of: "'", with: "'\\''") + "'" }.joined(separator: " ")
     }
 
     /// Launches `claude login` in Terminal.app so the user can complete the OAuth flow
@@ -58,14 +62,16 @@ enum TerminalLauncher {
             }
         }
         let script = """
+        on run argv
         tell application "Terminal"
             activate
-            do script "\(command)"
+            do script (item 1 of argv)
         end tell
+        end run
         """
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-        process.arguments = ["-e", script]
+        process.arguments = ["-e", script, command]
         try? process.run()
     }
 }

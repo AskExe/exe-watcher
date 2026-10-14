@@ -1,8 +1,7 @@
 import AppKit
 import SwiftUI
 
-/// Reusable owl icon drawn programmatically. Same drawing as the menubar icon.
-/// Renders as a template image (white on dark backgrounds).
+/// Shared artwork for the gold header mark and the adaptive macOS menu bar icon.
 struct OwlIcon: View {
     let size: CGFloat
 
@@ -18,83 +17,11 @@ struct OwlIcon: View {
 
     static func cachedImage(size: CGFloat) -> NSImage {
         cacheLock.lock()
-        if let cached = imageCache[size] {
-            cacheLock.unlock()
-            return cached
-        }
-        cacheLock.unlock()
-
-        let image = draw(size: size)
-        image.isTemplate = true
-
-        cacheLock.lock()
+        defer { cacheLock.unlock() }
+        if let cached = imageCache[size] { return cached }
+        let image = OwlArtwork.image(size: size)
         imageCache[size] = image
-        cacheLock.unlock()
         return image
-    }
-
-    /// Draws the owl at the requested size using the same NSBezierPath approach as the menubar.
-    private static func draw(size: CGFloat) -> NSImage {
-        let s = size / 100.0
-        let img = NSImage(size: NSSize(width: size, height: size), flipped: false) { _ in
-            let fill = NSColor.black
-
-            // Ear tufts
-            let leftEar = NSBezierPath()
-            leftEar.move(to: NSPoint(x: 26*s, y: (100-32)*s))
-            leftEar.line(to: NSPoint(x: 18*s, y: (100-6)*s))
-            leftEar.line(to: NSPoint(x: 36*s, y: (100-26)*s))
-            leftEar.close()
-            fill.setFill(); leftEar.fill()
-
-            let rightEar = NSBezierPath()
-            rightEar.move(to: NSPoint(x: 74*s, y: (100-32)*s))
-            rightEar.line(to: NSPoint(x: 82*s, y: (100-6)*s))
-            rightEar.line(to: NSPoint(x: 64*s, y: (100-26)*s))
-            rightEar.close()
-            rightEar.fill()
-
-            // Head
-            NSBezierPath(ovalIn: NSRect(
-                x: (50-24)*s, y: (100-38-24)*s, width: 48*s, height: 48*s)).fill()
-
-            // Body
-            NSBezierPath(ovalIn: NSRect(
-                x: (50-21)*s, y: (100-70-23)*s, width: 42*s, height: 46*s)).fill()
-
-            // Feet
-            NSBezierPath(ovalIn: NSRect(
-                x: (40-7)*s, y: (100-92-3.5)*s, width: 14*s, height: 7*s)).fill()
-            NSBezierPath(ovalIn: NSRect(
-                x: (60-7)*s, y: (100-92-3.5)*s, width: 14*s, height: 7*s)).fill()
-
-            // Punch out eyes + beak
-            if let ctx = NSGraphicsContext.current?.cgContext {
-                ctx.setBlendMode(.clear)
-                NSBezierPath(ovalIn: NSRect(
-                    x: (38-10)*s, y: (100-35-10)*s, width: 20*s, height: 20*s)).fill()
-                NSBezierPath(ovalIn: NSRect(
-                    x: (62-10)*s, y: (100-35-10)*s, width: 20*s, height: 20*s)).fill()
-                let beak = NSBezierPath()
-                beak.move(to: NSPoint(x: 46*s, y: (100-46)*s))
-                beak.line(to: NSPoint(x: 50*s, y: (100-53)*s))
-                beak.line(to: NSPoint(x: 54*s, y: (100-46)*s))
-                beak.close()
-                beak.fill()
-                ctx.setBlendMode(.normal)
-            }
-
-            // Pupils
-            fill.setFill()
-            NSBezierPath(ovalIn: NSRect(
-                x: (38-4.5)*s, y: (100-35-4.5)*s, width: 9*s, height: 9*s)).fill()
-            NSBezierPath(ovalIn: NSRect(
-                x: (62-4.5)*s, y: (100-35-4.5)*s, width: 9*s, height: 9*s)).fill()
-
-            return true
-        }
-        img.isTemplate = true
-        return img
     }
 }
 

@@ -15,6 +15,7 @@ Thumbs.db
 
 # Planning artifacts (internal, not shipped)
 docs/superpowers/
+docs/launch-readiness.md
 .claude/
 CLAUDE.md
 
