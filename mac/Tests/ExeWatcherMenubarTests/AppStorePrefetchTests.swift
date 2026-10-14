@@ -34,6 +34,90 @@ private func makePayload(
     )
 }
 
+private func bundledPayload(now: Date, cost: Double = 20) -> MenubarPayload {
+    var payload = makePayload(label: "Today", cost: 2, providers: ["claude": 2])
+    payload.periodSnapshots = Dictionary(uniqueKeysWithValues: Period.allCases.map { period in
+        (period.cliArg, PeriodSnapshot(
+            current: makePayload(label: period.rawValue, cost: period == .today ? 2 : cost,
+                                 providers: ["claude": period == .today ? 2 : cost]).current,
+            projectSpend: nil, diagnostics: nil, historyValidatedAt: now.timeIntervalSince1970 * 1000
+        ))
+    })
+    return payload
+}
+
+@Suite("Shared period snapshots")
+struct SharedPeriodSnapshotsTests {
+    @Test("one daily scan supplies every period and survives restart")
+    @MainActor
+    func cachedPeriodRestart() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let badge = root.appendingPathComponent("badge.json")
+        let now = Date()
+        let counter = CallCounter()
+        let store = AppStore(fetchPayload: { _, _, _ in
+            _ = await counter.next(); return bundledPayload(now: now)
+        }, now: { now }, badgeCacheURL: badge)
+        #expect(await store.refreshTodayBadge())
+        for period in Period.allCases {
+            await store.switchTo(period: period)
+            #expect(store.hasCachedData)
+            #expect(store.payload.current.cost == (period == .today ? 2 : 20))
+        }
+        try await Task.sleep(nanoseconds: 30_000_000)
+        #expect(await counter.value() == 1)
+        let restored = AppStore(fetchPayload: { _, _, _ in
+            _ = await counter.next(); return bundledPayload(now: now)
+        }, now: { now }, badgeCacheURL: badge)
+        await restored.switchTo(period: .all)
+        #expect(restored.hasCachedData)
+        #expect(restored.payload.current.cost == 20)
+        try await Task.sleep(nanoseconds: 30_000_000)
+        #expect(await counter.value() == 1)
+    }
+
+    @Test("daily updates do not suppress needed historical revalidation")
+    @MainActor
+    func historyValidationClock() async throws {
+        let clock = TestClock(Date())
+        let original = clock.now
+        let counter = CallCounter()
+        let store = AppStore(fetchPayload: { period, _, _ in
+            _ = await counter.next()
+            if period == .today { return bundledPayload(now: original) }
+            return makePayload(label: period.rawValue, cost: 30, providers: ["claude": 30])
+        }, now: { clock.now })
+        #expect(await store.refreshTodayBadge())
+        clock.now = original.addingTimeInterval(360)
+        #expect(await store.refreshTodayBadge())
+        await store.switchTo(period: .sevenDays)
+        #expect(store.payload.current.cost == 20)
+        try await Task.sleep(nanoseconds: 50_000_000)
+        #expect(await counter.value() == 3)
+        #expect(store.payload.current.cost == 30)
+    }
+
+    @Test("queued period loads are skipped when the first scan fills their cache")
+    @MainActor
+    func queuedPeriodReuse() async throws {
+        let gate = Gate()
+        let now = Date()
+        let counter = CallCounter()
+        let store = AppStore(fetchPayload: { _, _, _ in
+            _ = await counter.next(); await gate.wait(); return bundledPayload(now: now)
+        }, now: { now })
+        await store.switchTo(period: .sevenDays)
+        await gate.waitUntilBlocked()
+        await store.switchTo(period: .month)
+        try await Task.sleep(nanoseconds: 20_000_000)
+        await gate.open()
+        try await Task.sleep(nanoseconds: 70_000_000)
+        #expect(await counter.value() == 1)
+        #expect(store.payload.current.cost == 20)
+    }
+}
+
 private actor FetchRecorder {
     private let payloads: [PayloadCacheKey: MenubarPayload]
     private let now: @Sendable () -> Date

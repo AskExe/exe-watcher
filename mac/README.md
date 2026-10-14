@@ -53,6 +53,8 @@ On launch, wake, and relevant usage-file changes, the app spawns `exe-watcher st
 
 Override the binary via the `EXE_WATCHER_BIN` environment variable (default: `exe-watcher` on PATH). The value is validated against a strict allowlist (alphanumerics plus `._/-` space) before use, so a malicious env var can't inject shell commands.
 
+From 0.2.56, each daily refresh also updates every period whose history is fully cached. Closed days are reused and today's bucket is replaced with fresh usage, so switching periods needs no separate scan. These summaries survive same-day restarts. Historical validation still runs when needed to catch late usage; a large repricing job saves completed provider scans and resumes after a timeout.
+
 ## Project layout
 
 ```

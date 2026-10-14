@@ -73,6 +73,15 @@ export type DailyCache = {
   backfill?: BackfillCursor | null
   /** Days recorded without a complete scan because they exhausted their retries. */
   partialDates?: string[]
+  /** Uncommitted provider rollups; never exposed as complete historical totals. */
+  historyBuild?: {
+    start: string
+    end: string
+    completedProviders: string[]
+    days: DailyEntry[]
+    chunked?: { provider: string; nextDate: string }
+    partialDates?: string[]
+  }
 }
 
 type AddNewDaysOptions = {
@@ -110,6 +119,14 @@ function isValidCache(parsed: unknown): parsed is DailyCache {
   if (c.version !== DAILY_CACHE_VERSION) return false
   if (typeof c.scopeKey !== 'string' || c.scopeKey.length === 0) return false
   if (!Array.isArray(c.days)) return false
+  if (c.historyBuild) {
+    const stage = c.historyBuild
+    const validDate = (value: unknown) => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value) && Number.isFinite(Date.parse(value))
+    if (!validDate(stage.start) || !validDate(stage.end) || stage.start > stage.end ||
+        !Array.isArray(stage.days) || !Array.isArray(stage.completedProviders) ||
+        !stage.completedProviders.every(p => typeof p === 'string') ||
+        (stage.chunked && (typeof stage.chunked.provider !== 'string' || !validDate(stage.chunked.nextDate)))) return false
+  }
   return true
 }
 
@@ -121,8 +138,8 @@ export async function loadDailyCache(scopeKey = DEFAULT_DAILY_CACHE_SCOPE): Prom
     const parsed: unknown = JSON.parse(raw)
     if (!isValidCache(parsed)) return emptyCache(scopeKey)
     if (parsed.scopeKey !== scopeKey) return emptyCache(scopeKey)
-    if (parsed.days.length && parsed.pricingFingerprint !== getPricingFingerprint()) {
-      return { ...emptyCache(scopeKey), needsRepricing: true, previousHistoryStart: parsed.days[0]?.date }
+    if ((parsed.days.length || parsed.historyBuild) && parsed.pricingFingerprint !== getPricingFingerprint()) {
+      return { ...emptyCache(scopeKey), needsRepricing: true, previousHistoryStart: parsed.days[0]?.date ?? parsed.historyBuild?.start }
     }
     return parsed
   } catch {

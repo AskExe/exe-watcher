@@ -14,6 +14,14 @@ struct MenubarPayload: Codable, Sendable {
     let exeOsDetected: Bool?
     let statsFileAge: Double?
     let projectSpend: [ProjectSpendEntry]?
+    var periodSnapshots: [String: PeriodSnapshot]? = nil
+}
+
+struct PeriodSnapshot: Codable, Sendable {
+    let current: CurrentBlock
+    let projectSpend: [ProjectSpendEntry]?
+    let diagnostics: DiagnosticsBlock?
+    let historyValidatedAt: Double
 }
 
 struct DiagnosticsBlock: Codable, Sendable {

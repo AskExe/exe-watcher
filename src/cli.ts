@@ -28,6 +28,8 @@ import { getPresetPlan, isPlanId, isPlanProvider, planDisplayName } from './plan
 import { MAX_BLOCKED_CHUNK_ATTEMPTS, computeProgressiveBackfillStart, nextBackfillCursor, planBackfillChunks, resolveColdStartHistoryDays, shouldSkipBlockedChunk } from './progressive-backfill.js'
 import { parseHistoryStartDate, resolveHistoryStart } from './history-start.js'
 import { readClaudeUsageSnapshot, recoverClaudeUsage, sumClaudeModelTokens, getClaudeRecoveryForRange } from './claude-recovery.js'
+import { buildPeriodSnapshots } from './period-snapshots.js'
+import { completeHistoryBuild } from './history-build.js'
 import { createInterface } from 'node:readline'
 import { createRequire } from 'node:module'
 import { watchMenubarParent } from './menubar-lifecycle.js'
@@ -43,8 +45,7 @@ function toDateString(date: Date): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
 }
 
-function getDateRange(period: string): { range: DateRange; label: string } {
-  const now = new Date()
+function getDateRange(period: string, now = new Date()): { range: DateRange; label: string } {
   const end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999)
 
   switch (period) {
@@ -429,7 +430,6 @@ program
       const dailyCacheScope = buildDailyCacheScopeKey(opts.project, opts.exclude)
 
       const backfillWarnings: string[] = []
-
       /**
        * Scan [start, end] one slice at a time, persisting the daily cache after each.
        *
@@ -489,12 +489,34 @@ program
         return c
       }
 
+      const providerNames = (await getAllProviders()).map(p => p.name)
+      const buildHistory = (c: DailyCache, start: Date, end: Date) => completeHistoryBuild(
+        c, start, end, providerNames,
+        async (provider, from, through) => aggregateProjectsIntoDays(filterProjectsByName(
+          await parseAllSessions({ start: from, end: through }, provider, true), opts.project, opts.exclude,
+        )), saveDailyCache,
+      )
+      const pausedHistory = (c: DailyCache) => {
+        if (!c.historyBuild) return false
+        backfillWarnings.push(`History rebuild paused at ${c.historyBuild.chunked?.nextDate ?? c.historyBuild.start}; completed scans are saved and will resume on the next historical refresh.`)
+        return true
+      }
+
       const cache = await withDailyCacheLock(async () => {
         let c = await loadDailyCache(dailyCacheScope)
 
         // The always-visible badge must not rebuild or revalidate history on every
         // filesystem event. Historical views maintain the cache when requested.
         if (opts.period === 'today' && opts.optimize === false) return c
+
+        // Resume the exact saved range before calculating new gaps (including day rollover).
+        if (c.historyBuild) {
+          const from = parseHistoryStartDate(c.historyBuild.start)!
+          const through = parseHistoryStartDate(c.historyBuild.end)!
+          through.setHours(23, 59, 59, 999)
+          c = await buildHistory(c, from, through)
+          if (pausedHistory(c)) return c
+        }
 
         // Reprice retained history in one compact scan per provider, preserving
         // request-level context tiers and cache TTLs. Aggregated daily tokens
@@ -503,18 +525,8 @@ program
         if (c.needsRepricing || (opts.period === 'all' && c.days.length === 0)) {
           const start = parseHistoryStartDate(c.previousHistoryStart) ?? historyStart
           if (start <= yesterdayEnd) {
-            try {
-              const historicalProjects = filterProjectsByName(await parseAllSessions({ start, end: yesterdayEnd }, 'all', true), opts.project, opts.exclude)
-              c = addNewDays(c, fillMissingDays(start, yesterdayEnd, aggregateProjectsIntoDays(historicalProjects)), yesterdayStr)
-              delete c.needsRepricing; delete c.previousHistoryStart
-              c.backfill = null
-              c.partialDates = []
-              c.revalidatedAt = Date.now()
-              await saveDailyCache(c)
-            } catch (err) {
-              if (!(err instanceof ResourceBudgetError)) throw err
-              backfillWarnings.push(`History repricing will resume in smaller slices: ${err.message}`)
-            }
+            c = await buildHistory(c, start, yesterdayEnd)
+            if (pausedHistory(c)) return c
           }
         }
 
@@ -658,10 +670,10 @@ program
       }
 
       let historicalRecovery = null as ReturnType<typeof recoverClaudeUsage>
-      if (opts.period === 'all' && (isAllProviders || pf === 'claude') && !opts.project.length && !opts.exclude.length && !cache.partialDates?.length && !cache.backfill) {
+      if ((opts.period === 'all' || opts.optimize === false) && (isAllProviders || pf === 'claude') && !opts.project.length && !opts.exclude.length && !cache.partialDates?.length && !cache.backfill) {
         const snapshot = await readClaudeUsageSnapshot()
         historicalRecovery = recoverClaudeUsage(snapshot, sumClaudeModelTokens([...cache.days, ...todayDays], snapshot?.lastComputedDate ?? ''), historyStart)
-        if (historicalRecovery) {
+        if (historicalRecovery && opts.period === 'all') {
           currentData.cost += historicalRecovery.costUSD
           currentData.inputTokens += historicalRecovery.inputTokens
           currentData.outputTokens += historicalRecovery.outputTokens
@@ -788,8 +800,8 @@ program
       // 7d/30d columns on cold historical selections.
       let projectSpend: ReturnType<typeof buildProjectSpendFromDays> | null = null
       try {
-        const weekStartStr = toDateString(getDateRange('week').range.start)
-        const thirtyDayStartStr = toDateString(getDateRange('30days').range.start)
+        const weekStartStr = toDateString(getDateRange('week', now).range.start)
+        const thirtyDayStartStr = toDateString(getDateRange('30days', now).range.start)
         const todayOnlyDays = todayDays.filter(d => d.date > yesterdayStr)
         const days7d = [
           ...getDaysInRange(cache, weekStartStr, yesterdayStr),
@@ -809,7 +821,14 @@ program
       warnings.push(...getDiscoveryWarnings(), ...getPricingWarnings(), ...getParseWarnings())
       const diagnostics: DiagnosticsBlock = { daysCount, parseTimeMs, warnings }
       const payload = buildMenubarPayload(currentData, providers, optimize, dailyHistory, agentStats, projectSpend, exeOsDetected, statsFileAge, diagnostics)
-      const json = JSON.stringify({ ...payload, costBasis: 'api-equivalent', pricing: getPricingMetadata(), historicalRecovery })
+      const periodSnapshots = opts.optimize === false ? buildPeriodSnapshots(
+        cache, todayDays, toDateString(todayStart),
+        ['today', 'week', '30days', 'month', 'all'].map(key => {
+          const { range, label } = getDateRange(key, now)
+          return { key, label, start: toDateString(key === 'all' ? historyStart : range.start) }
+        }), pf, displayNameByName, historicalRecovery, parseTimeMs, warnings,
+      ) : undefined
+      const json = JSON.stringify({ ...payload, periodSnapshots, costBasis: 'api-equivalent', pricing: getPricingMetadata(), historicalRecovery: opts.period === 'all' ? historicalRecovery : null })
       console.log(json)
       return
     }
