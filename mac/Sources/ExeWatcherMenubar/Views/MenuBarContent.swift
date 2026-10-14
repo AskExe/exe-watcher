@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-/// Shared artwork for the gold header mark and the adaptive macOS menu bar icon.
+/// Shared artwork for the header mark and the gold macOS menu bar icon.
 struct OwlIcon: View {
     let size: CGFloat
 
@@ -13,14 +13,23 @@ struct OwlIcon: View {
     }
 
     private static let cacheLock = NSLock()
-    private static var imageCache: [CGFloat: NSImage] = [:]
+    private struct CacheKey: Hashable {
+        let size: CGFloat
+        let menuBar: Bool
+    }
+    private static var imageCache: [CacheKey: NSImage] = [:]
 
-    static func cachedImage(size: CGFloat) -> NSImage {
+    static func cachedImage(size: CGFloat, menuBar: Bool = false) -> NSImage {
         cacheLock.lock()
         defer { cacheLock.unlock() }
-        if let cached = imageCache[size] { return cached }
-        let image = OwlArtwork.image(size: size)
-        imageCache[size] = image
+        let key = CacheKey(size: size, menuBar: menuBar)
+        if let cached = imageCache[key] { return cached }
+        let image = OwlArtwork.image(
+            size: size,
+            color: menuBar ? NSColor(Theme.brandAccent) : .black,
+            isTemplate: !menuBar
+        )
+        imageCache[key] = image
         return image
     }
 }

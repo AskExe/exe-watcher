@@ -9,13 +9,13 @@ enum OwlStyle: String, CaseIterable {
 }
 
 enum OwlArtwork {
-    static func image(size: CGFloat, style: OwlStyle = .selected) -> NSImage {
+    static func image(size: CGFloat, style: OwlStyle = .selected, color: NSColor = .black, isTemplate: Bool = true) -> NSImage {
         let image = NSImage(size: NSSize(width: size, height: size), flipped: false) { _ in
             guard let ctx = NSGraphicsContext.current?.cgContext else { return false }
             ctx.saveGState()
             ctx.translateBy(x: 0, y: size)
             ctx.scaleBy(x: size / 100, y: -size / 100)
-            ctx.setFillColor(NSColor.black.cgColor)
+            ctx.setFillColor(color.cgColor)
             func ellipse(_ x: CGFloat, _ y: CGFloat, _ rx: CGFloat, _ ry: CGFloat) {
                 ctx.fillEllipse(in: CGRect(x: x-rx, y: y-ry, width: 2*rx, height: 2*ry))
             }
@@ -220,7 +220,7 @@ enum OwlArtwork {
             ctx.restoreGState()
             return true
         }
-        image.isTemplate = true
+        image.isTemplate = isTemplate
         return image
     }
 }

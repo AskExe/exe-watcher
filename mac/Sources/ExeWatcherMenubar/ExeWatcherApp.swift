@@ -372,7 +372,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         let iconH: CGFloat = menubarTitleFontSize + 3
 
         // Draw the owl programmatically — PDF/SVG template images are unreliable at menubar size.
-        let owlImage: NSImage = OwlIcon.cachedImage(size: iconH)
+        let owlImage: NSImage = OwlIcon.cachedImage(size: iconH, menuBar: true)
 
         button.image = owlImage
         button.imagePosition = .imageLeading
