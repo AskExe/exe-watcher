@@ -1,0 +1,23 @@
+{
+  "refined_round_eyes": {
+    "label": "01D · Round & open",
+    "description": "Circular eyes and round pupils give the owl a softer, more welcoming expression.",
+    "eyes": [["ellipse",37,39,11.5,11.5],["ellipse",63,39,11.5,11.5]],
+    "pupils": [["ellipse",37.5,39,5,5],["ellipse",62.5,39,5,5]]
+  },
+  "refined_oval_eyes": {
+    "label": "01E · Tall & calm",
+    "description": "Taller eye shapes and narrow pupils make the face feel quieter and more distinctive.",
+    "eyes": [["ellipse",37,39,10.5,12.5],["ellipse",63,39,10.5,12.5]],
+    "pupils": [["ellipse",37,40,3.6,6.5],["ellipse",63,40,3.6,6.5]]
+  },
+  "refined_focused_eyes": {
+    "label": "01F · Watchful gaze",
+    "description": "Lower upper eyelids give a focused expression, with slightly smaller pupils.",
+    "eyes": [
+      [["M",26,35],["Q",37,30,48,36],["C",48,45,44,51,37,51],["C",29,51,25,43,26,35],["Z"]],
+      [["M",74,35],["Q",63,30,52,36],["C",52,45,56,51,63,51],["C",71,51,75,43,74,35],["Z"]]
+    ],
+    "pupils": [["ellipse",37,41,4.3,5.5],["ellipse",63,41,4.3,5.5]]
+  }
+}

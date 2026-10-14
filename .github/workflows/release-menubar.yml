@@ -1,9 +1,8 @@
 name: Release macOS Menubar
 
 # Triggers on a `mac-v*` tag push (e.g. `git tag mac-v0.8.0 && git push origin mac-v0.8.0`),
-# or manually via the Actions tab. Builds a universal arm64+x86_64 bundle, ad-hoc signs it,
-# zips via `ditto`, and uploads the zip to the GitHub Release. `npx exe-watcher menubar` clears
-# the download quarantine flag on install so Gatekeeper stays quiet.
+# or manually via the Actions tab. Tag releases require Developer ID signing and Apple
+# notarization. Manual builds produce review artifacts. Both include the CLI + Node runtime.
 on:
   push:
     tags:
@@ -25,27 +24,82 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+
       - name: Resolve version label
         id: version
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
         run: |
           if [[ "${GITHUB_REF}" == refs/tags/mac-v* ]]; then
             echo "value=${GITHUB_REF#refs/tags/mac-}" >> "$GITHUB_OUTPUT"
           else
-            echo "value=${{ github.event.inputs.version }}" >> "$GITHUB_OUTPUT"
+            echo "value=${INPUT_VERSION}" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: Configure release signing
+        if: startsWith(github.ref, 'refs/tags/mac-v')
+        env:
+          CERTIFICATE_BASE64: ${{ secrets.WATCHER_CERTIFICATE_BASE64 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.WATCHER_CERTIFICATE_PASSWORD }}
+          CODESIGN_IDENTITY: ${{ secrets.WATCHER_CODESIGN_IDENTITY }}
+          APPLE_ID: ${{ secrets.WATCHER_APPLE_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.WATCHER_APPLE_APP_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.WATCHER_APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          for key in CERTIFICATE_BASE64 CERTIFICATE_PASSWORD CODESIGN_IDENTITY APPLE_ID APPLE_APP_PASSWORD APPLE_TEAM_ID; do
+            [[ -n "${!key}" ]] || { echo "Missing release secret: ${key}" >&2; exit 1; }
+          done
+          certificate="${RUNNER_TEMP}/watcher-signing.p12"
+          keychain="${RUNNER_TEMP}/watcher-signing.keychain-db"
+          password="$(openssl rand -hex 24)"
+          echo "::add-mask::${password}"
+          printf '%s' "${CERTIFICATE_BASE64}" | base64 --decode > "${certificate}"
+          security create-keychain -p "${password}" "${keychain}"
+          security set-keychain-settings -lut 21600 "${keychain}"
+          security unlock-keychain -p "${password}" "${keychain}"
+          security import "${certificate}" -P "${CERTIFICATE_PASSWORD}" -T /usr/bin/codesign -t cert -f pkcs12 -k "${keychain}"
+          security list-keychains -d user -s "${keychain}" login.keychain-db
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -k "${password}" "${keychain}" >/dev/null
+          xcrun notarytool store-credentials watcher-release \
+            --apple-id "${APPLE_ID}" --password "${APPLE_APP_PASSWORD}" --team-id "${APPLE_TEAM_ID}"
+          rm "${certificate}"
+          {
+            echo "CODESIGN_IDENTITY=${CODESIGN_IDENTITY}"
+            echo "NOTARY_PROFILE=watcher-release"
+            echo "REQUIRE_NOTARIZATION=1"
+          } >> "$GITHUB_ENV"
 
       - name: Show Swift toolchain
         run: swift --version
 
-      - name: Build + bundle + zip
-        run: mac/Scripts/package-app.sh "${{ steps.version.outputs.value }}"
+      - name: Validate release source
+        run: |
+          npm run build
+          npx tsc --noEmit
+          npx vitest run
+          swift test --package-path mac --filter ExeWatcherMenubarTests
+
+      - name: Build self-contained app, zip and disk image
+        env:
+          VERSION_LABEL: ${{ steps.version.outputs.value }}
+        run: mac/Scripts/package-app.sh "${VERSION_LABEL}"
 
       - name: Upload artifact (for manual runs)
         if: github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@v4
         with:
           name: ExeWatcherMenubar-${{ steps.version.outputs.value }}
-          path: mac/.build/dist/ExeWatcherMenubar-*.zip
+          path: |
+            mac/.build/dist/ExeWatcherMenubar-*.zip
+            mac/.build/dist/Watcher-*.dmg
+            mac/.build/dist/SHA256SUMS.txt
+            mac/.build/dist/BUILD-INFO.txt
           if-no-files-found: error
 
       - name: Create / update GitHub Release
@@ -55,19 +109,27 @@ jobs:
           tag_name: ${{ github.ref_name }}
           name: Menubar ${{ steps.version.outputs.value }}
           body: |
-            Install with:
+            Download the universal Watcher DMG below, drag Watcher by EXE into Applications,
+            and open it. macOS 14+; Apple Silicon and Intel. Node and the CLI are included.
+
+            The app is Developer ID signed and Apple notarized.
+            Or install with:
 
             ```
             npm install -g exe-watcher@latest --registry=https://registry.npmjs.org
             exe-watcher menubar --force
             ```
 
-            Update both components to receive CLI accounting and native scheduling fixes.
-            The app Update button updates the app only.
-
-            The menubar command drops the app into `~/Applications`, clears the download
-            quarantine, and launches it. If you download the zip from this page directly
-            and macOS shows "cannot verify developer", right-click the app in Finder and
-            pick Open to whitelist it once.
-          files: mac/.build/dist/ExeWatcherMenubar-*.zip
+            App updates include the matching CLI. Terminal-only npm users should also update
+            their global CLI with `npm install -g exe-watcher@latest`.
+          files: |
+            mac/.build/dist/ExeWatcherMenubar-*.zip
+            mac/.build/dist/Watcher-*.dmg
+            mac/.build/dist/SHA256SUMS.txt
           fail_on_unmatched_files: true
+
+      - name: Remove temporary signing material
+        if: always() && startsWith(github.ref, 'refs/tags/mac-v')
+        run: |
+          security delete-keychain "${RUNNER_TEMP}/watcher-signing.keychain-db" || true
+          rm -f "${RUNNER_TEMP}/watcher-signing.p12"

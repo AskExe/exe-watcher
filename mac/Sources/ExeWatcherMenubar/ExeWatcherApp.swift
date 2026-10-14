@@ -372,7 +372,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         let iconH: CGFloat = menubarTitleFontSize + 3
 
         // Draw the owl programmatically — PDF/SVG template images are unreliable at menubar size.
-        let owlImage: NSImage = Self.drawOwl(height: iconH)
+        let owlImage: NSImage = OwlIcon.cachedImage(size: iconH, menuBar: true)
 
         button.image = owlImage
         button.imagePosition = .imageLeading
@@ -474,88 +474,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         }
     }
 
-    // MARK: - Owl Icon
-
-    /// Draws a crisp owl icon at the requested point size. Returns an NSImage marked as
-    /// template so macOS auto-colors it for the menubar (white on dark, black on light).
-    /// All coordinates are relative to a 100×100 design grid, scaled to `height`.
-    private static func drawOwl(height: CGFloat) -> NSImage {
-        let s = height / 100.0  // scale factor
-        let size = NSSize(width: height, height: height)
-        let img = NSImage(size: size, flipped: false) { _ in
-            let fill = NSColor.black
-
-            // --- Ear tufts ---
-            let leftEar = NSBezierPath()
-            leftEar.move(to: NSPoint(x: 26*s, y: (100-32)*s))
-            leftEar.line(to: NSPoint(x: 18*s, y: (100-6)*s))
-            leftEar.line(to: NSPoint(x: 36*s, y: (100-26)*s))
-            leftEar.close()
-            fill.setFill()
-            leftEar.fill()
-
-            let rightEar = NSBezierPath()
-            rightEar.move(to: NSPoint(x: 74*s, y: (100-32)*s))
-            rightEar.line(to: NSPoint(x: 82*s, y: (100-6)*s))
-            rightEar.line(to: NSPoint(x: 64*s, y: (100-26)*s))
-            rightEar.close()
-            rightEar.fill()
-
-            // --- Head ---
-            let head = NSBezierPath(ovalIn: NSRect(
-                x: (50-24)*s, y: (100-38-24)*s, width: 48*s, height: 48*s))
-            head.fill()
-
-            // --- Body ---
-            let body = NSBezierPath(ovalIn: NSRect(
-                x: (50-21)*s, y: (100-70-23)*s, width: 42*s, height: 46*s))
-            body.fill()
-
-            // --- Feet ---
-            let leftFoot = NSBezierPath(ovalIn: NSRect(
-                x: (40-7)*s, y: (100-92-3.5)*s, width: 14*s, height: 7*s))
-            leftFoot.fill()
-            let rightFoot = NSBezierPath(ovalIn: NSRect(
-                x: (60-7)*s, y: (100-92-3.5)*s, width: 14*s, height: 7*s))
-            rightFoot.fill()
-
-            // --- Eye sockets (punch out with clear using CGContext) ---
-            if let ctx = NSGraphicsContext.current?.cgContext {
-                ctx.setBlendMode(.clear)
-
-                let leftSocket = NSBezierPath(ovalIn: NSRect(
-                    x: (38-10)*s, y: (100-35-10)*s, width: 20*s, height: 20*s))
-                leftSocket.fill()
-
-                let rightSocket = NSBezierPath(ovalIn: NSRect(
-                    x: (62-10)*s, y: (100-35-10)*s, width: 20*s, height: 20*s))
-                rightSocket.fill()
-
-                // --- Beak (punch out) ---
-                let beak = NSBezierPath()
-                beak.move(to: NSPoint(x: 46*s, y: (100-46)*s))
-                beak.line(to: NSPoint(x: 50*s, y: (100-53)*s))
-                beak.line(to: NSPoint(x: 54*s, y: (100-46)*s))
-                beak.close()
-                beak.fill()
-
-                ctx.setBlendMode(.normal)
-            }
-
-            // --- Pupils (filled dots inside the clear sockets) ---
-            fill.setFill()
-            let leftPupil = NSBezierPath(ovalIn: NSRect(
-                x: (38-4.5)*s, y: (100-35-4.5)*s, width: 9*s, height: 9*s))
-            leftPupil.fill()
-            let rightPupil = NSBezierPath(ovalIn: NSRect(
-                x: (62-4.5)*s, y: (100-35-4.5)*s, width: 9*s, height: 9*s))
-            rightPupil.fill()
-
-            return true
-        }
-        img.isTemplate = true
-        return img
-    }
 }
 
 private final class UsageLogWatcher: @unchecked Sendable {

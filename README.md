@@ -18,6 +18,10 @@
 
 Exe Watcher turns your local AI coding sessions into a live spend cockpit: today's burn, provider/model mix, activity breakdown, one-shot rate, token trends, optimization hints, and project cost — without API keys, cloud sync, or wrappers around your tools.
 
+**macOS app:** Download the universal DMG from [Releases](https://github.com/AskExe/exe-watcher/releases/latest), drag **Watcher by EXE** into **Applications**, and open it. macOS 14+ on Apple Silicon or Intel. From 0.2.55, Node and the CLI are included.
+
+**Terminal CLI** (Node 22.5+):
+
 ```bash
 npm install -g exe-watcher
 ```

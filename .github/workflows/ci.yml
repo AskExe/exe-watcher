@@ -59,6 +59,11 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
       - name: Scheduler, cancellation, output budgets, and cache isolation
         run: swift test --package-path mac --filter ExeWatcherMenubarTests
       - name: Build and verify signed macOS package

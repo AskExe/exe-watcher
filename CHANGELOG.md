@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.55 (release candidate, 2026-10-14)
+
+- Adopt the chosen 01A owl with folded wings, a slim beak and the original eyes, preserving the existing fonts and palette. Use one native drawing for the header, loading state and menu bar, with simpler details at small sizes.
+- Include three alternative owl studies and the current mark in an interactive comparison page.
+- Package a universal macOS app with its matching CLI and a checksum-pinned Node runtime; no global Node/npm installation is needed for the downloaded app.
+- Add a drag-to-install DMG, updater ZIP, SHA-256 checksums, Developer ID signing and Apple notarization support. Public tagged releases fail closed when signing credentials are missing.
+- Quote Terminal launch arguments so reports also open from app paths containing spaces or apostrophes.
+- Limit test discovery to the current checkout, excluding nested worktrees.
+
 ## 0.2.54 (2026-10-03)
 
 - Refresh the macOS menu bar when usage files change, with one bounded worker and spaced retries instead of recurring usage scans.
