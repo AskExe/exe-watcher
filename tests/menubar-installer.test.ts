@@ -244,6 +244,43 @@ describe('menubar-installer', () => {
       expect(spawnCalls.filter(c => c.command === '/usr/bin/pgrep').length).toBeGreaterThanOrEqual(3)
     })
 
+    it('unpacks the update with ditto so the app signature survives', async () => {
+      process.env.EXE_WATCHER_FORCE_MACOS_MAJOR = '15'
+      process.env.EXE_WATCHER_APP_EXIT_TIMEOUT_MS = '0'
+      process.env.EXE_WATCHER_APP_LAUNCH_TIMEOUT_MS = '1'
+
+      const fsMock = await import('node:fs/promises')
+      vi.mocked(fsMock.stat).mockResolvedValue({} as any)
+      vi.mocked(fsMock.mkdtemp).mockResolvedValue('/tmp/exe-watcher-menubar-mock')
+      vi.mocked(fsMock.mkdir).mockResolvedValue(undefined)
+      vi.mocked(fsMock.rename).mockResolvedValue(undefined)
+      vi.mocked(fsMock.rm).mockResolvedValue(undefined)
+
+      vi.stubGlobal('fetch', vi.fn()
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ tag_name: 'v0.2.59', assets: [{ name: 'ExeWatcherMenubar-v0.2.59.zip', browser_download_url: 'https://github.com/AskExe/exe-watcher/releases/download/mac-v0.2.59/ExeWatcherMenubar-v0.2.59.zip' }] }) } as unknown as Response)
+        .mockResolvedValueOnce({ ok: true, body: new ReadableStream({ start(controller) { controller.close() } }) } as unknown as Response))
+
+      const pgrepOutputs = ['111\n', '', '222\n']
+      const spawnCalls: Array<{ command: string; args: string[] }> = []
+      vi.mocked(childProcess.spawn).mockImplementation((command: string, args: readonly string[] = []) => {
+        spawnCalls.push({ command, args: [...args] })
+        const proc = new EventEmitter() as any
+        proc.stdout = new EventEmitter()
+        proc.stderr = new EventEmitter()
+        process.nextTick(() => {
+          const out = command === '/usr/bin/pgrep' ? pgrepOutputs.shift() ?? '' : ''
+          if (out) proc.stdout.emit('data', Buffer.from(out))
+          proc.emit('close', command === '/usr/bin/pgrep' && !out ? 1 : 0)
+        })
+        return proc
+      })
+
+      await installMenubarApp({ force: true })
+
+      expect(spawnCalls).toContainEqual({ command: '/usr/bin/ditto', args: ['-x', '-k', '/tmp/exe-watcher-menubar-mock/ExeWatcherMenubar-v0.2.59.zip', '/tmp/exe-watcher-menubar-mock'] })
+      expect(spawnCalls.map(c => c.command)).not.toContain('/usr/bin/unzip')
+    })
+
 
 
     it('restores the previous app when a forced update installs but fails launch verification', async () => {

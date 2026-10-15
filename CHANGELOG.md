@@ -1,8 +1,9 @@
 # Changelog
 
-## 0.2.59 (unreleased)
+## Unreleased
 
 - Bring the owl to life. When the popover opens, the header owl looks left and right, blinks, tilts its head and settles, then keeps glancing and blinking for as long as the popover stays open. Clicking the menu bar owl plays a short glance and blink before returning to the static gold mark. With Reduce Motion the owl only blinks. Nothing animates or is scheduled while the popover is closed.
+- Redraw the terminal loading-screen owl from the 01A logo itself (half-block pixel art in Exe Gold) instead of the old cartoon; it looks left, right and blinks while sessions are scanned.
 
 ## 0.2.58 (unreleased)
 

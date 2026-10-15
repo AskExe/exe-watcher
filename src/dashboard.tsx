@@ -16,6 +16,7 @@ import { dateKey } from './day-aggregator.js'
 import { CompareView } from './compare.js'
 import { getPlanUsageOrNull, type PlanUsage } from './plan-usage.js'
 import { planDisplayName } from './plans.js'
+import { owlFrame } from './owl-art.js'
 import { join } from 'path'
 
 type Period = 'today' | 'week' | '30days' | 'month' | 'all'
@@ -150,25 +151,13 @@ function Panel({ title, color, children, width }: { title: string; color: string
   )
 }
 
-const OWL_ART = [
-  '     ▄▄       ▄▄    ',
-  '    █▀▀█▄▄▄▄▄█▀▀█   ',
-  '    █  ●     ●  █   ',
-  '    █     ▼     █   ',
-  '     ▀▄ ╰───╯ ▄▀   ',
-  '       ▀█████▀      ',
-  '       ▐█████▌      ',
-  '       ██   ██      ',
-  '       ▀▀   ▀▀      ',
-]
-
-function LoadingScreen({ width, dots }: { width: number; dots: number }) {
+function LoadingScreen({ width, dots, tick }: { width: number; dots: number; tick: number }) {
   const dotStr = '.'.repeat(dots)
   return (
     <Box flexDirection="column" width={width} alignItems="center" justifyContent="center" paddingY={2}>
       <Box flexDirection="column" alignItems="center">
-        {OWL_ART.map((line, i) => (
-          <Text key={i} color={i < 5 ? GOLD : PINK}>{line}</Text>
+        {owlFrame(tick).map((line, i) => (
+          <Text key={i} color={GOLD}>{line}</Text>
         ))}
       </Box>
       <Text> </Text>
@@ -678,6 +667,7 @@ function InteractiveDashboard({ initialPeriod, initialProvider, refreshSeconds, 
   const [projectBudgets, setProjectBudgets] = useState<Map<string, ContextBudget>>(new Map())
   const [planUsage, setPlanUsage] = useState<PlanUsage | undefined>(undefined)
   const [loadingDots, setLoadingDots] = useState(1)
+  const [loadingTick, setLoadingTick] = useState(0)
   const { columns } = useWindowSize()
   const { dashWidth } = getLayout(columns)
   const multipleProviders = detectedProviders.length > 1
@@ -693,7 +683,10 @@ function InteractiveDashboard({ initialPeriod, initialProvider, refreshSeconds, 
   // Animate loading dots
   useEffect(() => {
     if (!initialLoading) return
-    const id = setInterval(() => setLoadingDots(d => (d % 3) + 1), 400)
+    const id = setInterval(() => {
+      setLoadingDots(d => (d % 3) + 1)
+      setLoadingTick(t => t + 1)
+    }, 400)
     return () => clearInterval(id)
   }, [initialLoading])
 
@@ -810,7 +803,7 @@ function InteractiveDashboard({ initialPeriod, initialProvider, refreshSeconds, 
   })
 
   if (initialLoading) {
-    return <LoadingScreen width={dashWidth} dots={loadingDots} />
+    return <LoadingScreen width={dashWidth} dots={loadingDots} tick={loadingTick} />
   }
 
   if (loadError && !loading) {
