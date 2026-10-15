@@ -260,7 +260,11 @@ export async function installMenubarApp(options: { force?: boolean; version?: st
     await downloadToFile(asset.browser_download_url, archivePath)
 
     console.log('Unpacking...')
-    await runCommand('/usr/bin/unzip', ['-q', archivePath, '-d', stagingDir])
+    // ditto, not unzip: the release ZIP is made with `ditto -c -k --sequesterRsrc`, and unzip
+    // writes its AppleDouble entries into the bundle as ._ files (._PkgInfo, .__CodeSignature,
+    // Helpers/._node). That breaks the sealed signature, so macOS reports the update as
+    // "damaged and can't be opened" and the install is rolled back.
+    await runCommand('/usr/bin/ditto', ['-x', '-k', archivePath, stagingDir])
 
     const unpackedApp = join(stagingDir, APP_BUNDLE_NAME)
     if (!(await exists(unpackedApp))) {
