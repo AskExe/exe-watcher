@@ -137,6 +137,10 @@ export function observeTime(provider: string, state: TimeState, x: any): void {
     }
     return
   }
+  if ((provider === 'cursor' || provider === 'opencode') && x.type === 'user') {
+    state.observed++; prompt(state, at)
+    return
+  }
   if ((provider === 'cursor-agent' || provider === 'cursor') && x.type === 'result') {
     state.observed++
     const end = timestamp(x.timestamp ?? x.completed_at)

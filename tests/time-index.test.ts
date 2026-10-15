@@ -102,6 +102,35 @@ it('keeps separate Kimi main agents and isolates an unsupported database', async
   expect(index.warnings).toContain('An OpenCode database has no readable timing schema; its time is unknown.')
 })
 
+it('recovers OpenCode interaction gaps while excluding identified child sessions', async () => {
+  const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite')
+  const path = join(dir, 'opencode.db'), db = new DatabaseSync(path)
+  db.exec('CREATE TABLE session (id TEXT, directory TEXT, parent_id TEXT); CREATE TABLE message (id TEXT, session_id TEXT, time_created INTEGER, data TEXT)')
+  for (const id of ['main', 'child']) {
+    db.prepare('INSERT INTO session VALUES (?,?,?)').run(id, '/fixture', id === 'child' ? 'main' : null)
+    for (const [seconds, data] of [[0, { role: 'assistant', time: { created: start, completed: start + 60_000 } }], [120, { role: 'user' }]] as const) {
+      db.prepare('INSERT INTO message VALUES (?,?,?,?)').run(`${id}-${seconds}`, id, start + seconds * 1000, JSON.stringify(data))
+    }
+  }
+  db.close()
+  const index = await refreshTimeIndex({ sources: [source(path + ':main', 'opencode')], history: true })
+  expect(duration(index)).toBe(120_000)
+  expect(summarizeTime(index, range).userActiveMs).toBe(60_000)
+})
+
+it('recovers Cursor interaction gaps from saved user clocks without loading text', async () => {
+  const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite')
+  const path = join(dir, 'cursor.db'), db = new DatabaseSync(path)
+  db.exec('CREATE TABLE cursorDiskKV (key TEXT, value TEXT)')
+  for (const [key, data] of [
+    ['reply', { type: 2, timingInfo: { clientStartTime: start, clientEndTime: start + 60_000 } }],
+    ['prompt', { type: 1, createdAt: new Date(start + 120_000).toISOString() }],
+  ] as const) db.prepare('INSERT INTO cursorDiskKV VALUES (?,?)').run(`bubbleId:chat:${key}`, JSON.stringify({ conversationId: 'chat', ...data }))
+  db.close()
+  const index = await refreshTimeIndex({ sources: [source(path, 'cursor')], history: true })
+  expect(summarizeTime(index, range).userActiveMs).toBe(60_000)
+})
+
 it('cancellation preserves previously recovered time and does not change cost history', async () => {
   const path = join(dir, 's.jsonl'), costs = join(dir, 'cache', 'daily-cache.json')
   await writeFile(path, event(60, 'task_complete', { duration_ms: 60_000 }))

@@ -1,6 +1,6 @@
 import { openDatabase } from './sqlite.js'
 import { chargeRecord } from './resource-budget.js'
-import { timestamp, type TimeFile, type TimeState } from './time-tracking.js'
+import { observeTime, timestamp, type TimeFile, type TimeState } from './time-tracking.js'
 import type { SessionSource } from './providers/types.js'
 
 const PAGE = 1000
@@ -16,6 +16,7 @@ function interval(state: TimeState, startValue: unknown, endValue: unknown, id: 
   const start = timestamp(startValue), end = timestamp(endValue)
   state.observed++
   if (start !== undefined && end !== undefined && end > start && end - start <= 31 * 86_400_000) state.ai.push([start, end, 0, id])
+  if (end !== undefined) state.lastEnd = end
 }
 
 /** Read only clocks/IDs in pages; never load stored prompts, images or code blocks. */
@@ -28,24 +29,31 @@ export async function scanTimeDatabase(source: SessionSource, file: TimeFile): P
     if (source.provider === 'cursor') {
       rows = db.query(`SELECT key,
         json_extract(value, '$.conversationId') AS conversation,
+        json_extract(value, '$.type') AS role,
+        json_extract(value, '$.createdAt') AS created,
         json_extract(value, '$.timingInfo.clientStartTime') AS started,
         COALESCE(json_extract(value, '$.timingInfo.clientEndTime'), json_extract(value, '$.timingInfo.clientSettleTime')) AS completed
         FROM cursorDiskKV WHERE key LIKE 'bubbleId:%' ORDER BY rowid LIMIT ? OFFSET ?`, [PAGE, file.dbOffset ?? 0])
       for (const row of rows) {
         chargeRecord()
         const conversation = typeof row.conversation === 'string' ? row.conversation : String(row.key).split(':')[1]
-        interval(stateFor(file, `cursor:${conversation}`), row.started, row.completed, `${String(row.key).split(':').at(-1)}:${String(row.started)}`)
+        const state = stateFor(file, `cursor:${conversation}`)
+        if (row.role === 1) observeTime('cursor', state, { type: 'user', timestamp: row.created })
+        else interval(state, row.started, row.completed, `${String(row.key).split(':').at(-1)}:${String(row.started)}`)
       }
     } else {
-      rows = db.query(`SELECT id,
+      rows = db.query(`SELECT message.id, session.parent_id AS parent,
         json_extract(data, '$.role') AS role,
-        COALESCE(json_extract(data, '$.time.created'), time_created) AS started,
+        COALESCE(json_extract(data, '$.time.created'), message.time_created) AS started,
         json_extract(data, '$.time.completed') AS completed
-        FROM message WHERE session_id = ? ORDER BY time_created, id LIMIT ? OFFSET ?`, [source.path.slice(separator + 1), PAGE, file.dbOffset ?? 0])
+        FROM message JOIN session ON message.session_id = session.id
+        WHERE message.session_id = ? ORDER BY message.time_created, message.id LIMIT ? OFFSET ?`, [source.path.slice(separator + 1), PAGE, file.dbOffset ?? 0])
       const state = stateFor(file, `opencode:${source.path.slice(separator + 1)}`)
       for (const row of rows) {
         chargeRecord()
-        if (row.role === 'assistant') interval(state, row.started, row.completed, String(row.id))
+        state.child = !!row.parent
+        if (row.role === 'user') observeTime('opencode', state, { type: 'user', timestamp: row.started })
+        else if (row.role === 'assistant') interval(state, row.started, row.completed, String(row.id))
       }
     }
     file.dbOffset = (file.dbOffset ?? 0) + rows.length
