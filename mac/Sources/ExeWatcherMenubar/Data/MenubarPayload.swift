@@ -15,6 +15,7 @@ struct MenubarPayload: Codable, Sendable {
     let statsFileAge: Double?
     let projectSpend: [ProjectSpendEntry]?
     var periodSnapshots: [String: PeriodSnapshot]? = nil
+    var time: TimeBlock? = nil
 
     // Old same-day snapshots have no coverage fields. Their recovery warning
     // still prevents an unknown count from appearing as an exact zero or total.
@@ -37,6 +38,39 @@ struct PeriodSnapshot: Codable, Sendable {
     let projectSpend: [ProjectSpendEntry]?
     let diagnostics: DiagnosticsBlock?
     let historyValidatedAt: Double
+    var time: TimeBlock? = nil
+}
+
+struct TimeBlock: Codable, Sendable {
+    let since: String
+    let through: String
+    let aiRunningMs: Double?
+    let elapsedBusyMs: Double?
+    let userActiveMs: Double?
+    let estimatedAiMs: Double
+    let coverage: String
+    let pendingFiles: Int
+    let indexedFiles: Int
+    let firstRecordedAt: String?
+    let lastRecordedAt: String?
+    let providers: [TimeProviderBlock]
+    let notes: [String]
+
+    static func duration(_ milliseconds: Double?) -> String {
+        guard let value = milliseconds, value.isFinite, value >= 0, value < 315_576_000_000_000 else { return "Unknown" }
+        if value < 60_000 { return "<1 min" }
+        let minutes = Int(value / 60_000)
+        return minutes >= 60 ? "\(minutes / 60)h \(minutes % 60)m" : "\(minutes)m"
+    }
+}
+
+struct TimeProviderBlock: Codable, Sendable, Identifiable {
+    let name: String
+    let files: Int
+    let timedFiles: Int
+    let aiRunningMs: Double?
+    let status: String
+    var id: String { name }
 }
 
 struct DiagnosticsBlock: Codable, Sendable {

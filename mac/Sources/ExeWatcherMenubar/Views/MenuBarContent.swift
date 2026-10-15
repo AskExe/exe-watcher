@@ -55,6 +55,8 @@ struct MenuBarContent: View {
                     Divider().opacity(0.5)
                     PeriodSegmentedControl()
                     Divider().opacity(0.5)
+                    AITimeSection()
+                    Divider().opacity(0.5)
                     if isFilteredEmpty {
                         EmptyProviderState(provider: store.selectedProvider, period: store.selectedPeriod)
                     } else {

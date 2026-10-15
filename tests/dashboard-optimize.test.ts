@@ -8,6 +8,7 @@ vi.mock('../src/models.js', async () => ({ ...await vi.importActual('../src/mode
 vi.mock('../src/optimize.js', async () => ({ ...await vi.importActual('../src/optimize.js'), scanAndDetect: vi.fn() }))
 vi.mock('../src/context-budget.js', () => ({ discoverProjectCwd: vi.fn().mockResolvedValue(null), estimateContextBudget: vi.fn() }))
 vi.mock('../src/plan-usage.js', () => ({ getPlanUsageOrNull: vi.fn().mockResolvedValue(null) }))
+vi.mock('../src/time-index.js', () => ({ getTimeReport: vi.fn().mockResolvedValue(undefined) }))
 import { InteractiveDashboard } from '../src/dashboard.js'
 import { parseAllSessions } from '../src/parser.js'
 import { scanAndDetect } from '../src/optimize.js'

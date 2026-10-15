@@ -3,8 +3,10 @@ import { applyClaudeRecovery, type HistoricalRecovery } from './claude-recovery.
 import { buildPeriodDataFromDays, filterDaysToProvider } from './day-aggregator.js'
 import { buildMenubarPayload, buildProjectSpendFromDays, type MenubarPayload } from './menubar-json.js'
 import { getModelCosts } from './models.js'
+import type { TimeReport } from './time-tracking.js'
 
 export type PeriodSnapshot = {
+  time?: TimeReport
   current: MenubarPayload['current']
   projectSpend: MenubarPayload['projectSpend']
   diagnostics: MenubarPayload['diagnostics']
