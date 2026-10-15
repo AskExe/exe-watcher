@@ -57,7 +57,7 @@ struct TimeBlock: Codable, Sendable {
     let notes: [String]
 
     static func duration(_ milliseconds: Double?) -> String {
-        guard let value = milliseconds, value.isFinite, value >= 0 else { return "Unknown" }
+        guard let value = milliseconds, value.isFinite, value >= 0, value < 315_576_000_000_000 else { return "Unknown" }
         if value < 60_000 { return "<1 min" }
         let minutes = Int(value / 60_000)
         return minutes >= 60 ? "\(minutes / 60)h \(minutes % 60)m" : "\(minutes)m"

@@ -5,11 +5,12 @@ import { gzip, gunzip } from 'node:zlib'
 import { promisify } from 'node:util'
 import { getCacheDir } from './cache-dir.js'
 import { acquireFileLock } from './file-lock.js'
-import { chargeRead, chargeRecord, withScanBudget } from './resource-budget.js'
+import { chargeRead, chargeRecord, ResourceBudgetError, withScanBudget } from './resource-budget.js'
 import { observeTime, summarizeTime, TIME_HISTORY_START, unionIntervals, type TimeFile, type TimeIndex, type TimeReport } from './time-tracking.js'
 import type { SessionSource } from './providers/types.js'
 import type { DateRange } from './types.js'
 import { expandOpenCodeTimingSources, scanTimeDatabase } from './time-sqlite.js'
+import { getOpenCodeDbPaths } from './providers/opencode.js'
 
 const compress = promisify(gzip), decompress = promisify(gunzip)
 const MAX_INDEX = 32 * 1024 ** 2, MAX_DISK = 16 * 1024 ** 2, MAX_FILES = 20_000
@@ -21,9 +22,16 @@ export async function readTimeIndex(): Promise<TimeIndex> {
   try {
     if ((await stat(indexPath())).size > MAX_DISK) throw new Error('Timing index exceeds its disk limit')
     const value = JSON.parse((await decompress(await readFile(indexPath()), { maxOutputLength: MAX_INDEX })).toString('utf8'))
-    if (value.version !== 1 || !value.files || typeof value.files !== 'object' || Object.keys(value.files).length > MAX_FILES) throw new Error('Invalid timing index')
+    if (value.version !== 1 || !value.files || typeof value.files !== 'object' || Array.isArray(value.files) || Object.keys(value.files).length > MAX_FILES ||
+        !Array.isArray(value.warnings) || !value.warnings.every((x: unknown) => typeof x === 'string') || typeof value.updatedAt !== 'string') throw new Error('Invalid timing index')
     for (const row of Object.values(value.files) as TimeFile[]) {
-      if (!row?.state || !Array.isArray(row.state.ai) || !Array.isArray(row.state.user) || typeof row.state.agent !== 'string' || !Number.isSafeInteger(row.offset) || row.offset < 0) throw new Error('Invalid timing entry')
+      const interval = (x: unknown): boolean => Array.isArray(x) && x.length >= 3 &&
+        typeof x[0] === 'number' && Number.isFinite(x[0]) && typeof x[1] === 'number' && Number.isFinite(x[1]) &&
+        (x[2] === 0 || x[2] === 1) && (x[3] === undefined || typeof x[3] === 'string')
+      const state = (s: TimeFile['state']) => s && typeof s.agent === 'string' && Array.isArray(s.ai) && s.ai.every(interval) && Array.isArray(s.user) && s.user.every(interval)
+      if (typeof row?.provider !== 'string' || typeof row.project !== 'string' || !state(row.state) ||
+          !Number.isSafeInteger(row.offset) || row.offset < 0 || !Number.isSafeInteger(row.size) || row.size < 0 ||
+          !Object.values(row.state.children ?? {}).every(state)) throw new Error('Invalid timing entry')
     }
     return value as TimeIndex
   } catch (error) {
@@ -47,14 +55,21 @@ async function save(index: TimeIndex): Promise<void> {
   } finally { await unlink(temp).catch(() => {}) }
 }
 
-async function expandSources(sources: SessionSource[]): Promise<SessionSource[]> {
+async function expandSources(sources: SessionSource[], warnings: string[]): Promise<SessionSource[]> {
   const out: SessionSource[] = []
   const databases = new Set<string>()
   for (const source of sources) {
     chargeRead(0)
     if (source.provider === 'opencode') {
       const path = source.path.slice(0, source.path.lastIndexOf(':'))
-      if (!databases.has(path)) { out.push(...expandOpenCodeTimingSources(source)); databases.add(path) }
+      if (!databases.has(path)) {
+        databases.add(path)
+        try { out.push(...expandOpenCodeTimingSources(source)) }
+        catch (error) {
+          if (error instanceof ResourceBudgetError) throw error
+          warnings.push('An OpenCode database has no readable timing schema; its time is unknown.')
+        }
+      }
       continue
     }
     if (source.provider !== 'claude') { out.push(source); continue }
@@ -83,8 +98,10 @@ async function anchor(path: string, offset: number): Promise<string> {
 }
 function fresh(source: SessionSource, identity: string, size: number, mtime: number, ctime: number): TimeFile {
   const child = source.path.includes('/subagents/') || basename(source.path).startsWith('agent-')
+    || (source.provider === 'kimi' && basename(dirname(source.path)) !== 'main')
+  const kimiSession = source.path.split('/').find(part => part.startsWith('session_')) ?? basename(dirname(dirname(source.path)))
   const agent = source.provider === 'copilot' ? basename(dirname(source.path))
-    : source.provider === 'kimi' ? `${basename(dirname(dirname(source.path)))}/${basename(dirname(source.path))}`
+    : source.provider === 'kimi' ? `${kimiSession}/${basename(dirname(source.path))}`
     : `${child ? basename(dirname(dirname(source.path))) + '/' : ''}${basename(source.path, '.jsonl')}`
   return { provider: source.provider, project: source.project, identity, size, mtime, ctime, offset: 0, anchor: '',
     state: { agent: `${source.provider}:${agent}`, child, ai: [], user: [], observed: 0, dropped: 0 } }
@@ -120,6 +137,8 @@ async function scanBlock(source: SessionSource, row: TimeFile): Promise<void> {
             observeTime(source.provider, row.state, entry)
           } catch {
             if (atEnd && row.offset + bytesRead >= row.size) break
+            // Retry an ordinary record split across blocks from its own start.
+            if (atEnd && start > 0) { consumed = start; break }
             if (!atEnd) row.state.dropped++
             else { row.discarding = true; row.state.dropped++ }
           }
@@ -142,19 +161,22 @@ export type TimeRefreshOptions = { history?: boolean; signal?: AbortSignal; sour
  * No timer or daemon: callers already react to client usage-file changes.
  */
 export async function refreshTimeIndex(options: TimeRefreshOptions = {}): Promise<TimeIndex> {
-  const index = await readTimeIndex()
+  let current = await readTimeIndex()
   let release: (() => Promise<void>) | undefined
   try {
     release = await acquireFileLock(join(getCacheDir(), 'time-index.lock'), 100)
-  } catch { index.warnings.push('Another timing update is running; showing the saved timing snapshot.'); return index }
+  } catch { current.warnings.push('Another timing update is running; showing the saved timing snapshot.'); return current }
   // Re-read under the lease so concurrent manual recovery cannot be overwritten.
-  let current = await readTimeIndex()
+  current = await readTimeIndex()
   current.warnings = []
   let changed = false
   try {
     await withScanBudget(async () => {
-      const sources = options.sources ?? await (await import('./parser.js')).getDiscoveredSources()
-      const expanded = await expandSources(sources)
+      const sources = options.sources ?? [
+        ...await (await import('./parser.js')).getDiscoveredSources(),
+        ...((await getOpenCodeDbPaths()).map(path => ({ provider: 'opencode', path: `${path}:timing-root`, project: 'opencode' }))),
+      ]
+      const expanded = await expandSources(sources, current.warnings)
       const candidates = []
       let fileCount = Object.keys(current.files).length
       for (const source of expanded) {
@@ -167,6 +189,7 @@ export async function refreshTimeIndex(options: TimeRefreshOptions = {}): Promis
       }
       // Recent clients become useful first; pending historical files still advance on recovery.
       candidates.sort((a, b) => b.s.mtimeMs - a.s.mtimeMs || a.source.path.localeCompare(b.source.path))
+      if (candidates.length > MAX_FILES) current.warnings.push('Some timing sources exceed the bounded file limit; their time remains unknown.')
       const deadline = Date.now() + (options.history ? 15_000 : 750)
       // Even unvisited files must be visible as pending, not successful zeroes.
       for (const { source, s, wal } of candidates) {
@@ -174,7 +197,7 @@ export async function refreshTimeIndex(options: TimeRefreshOptions = {}): Promis
         if (!current.files[key] && fileCount < MAX_FILES) {
           current.files[key] = fresh(source, `${s.dev}:${s.ino}:${wal?.size ?? 0}:${wal?.mtimeMs ?? 0}`, s.size, s.mtimeMs, s.ctimeMs)
           changed = true; fileCount++
-        } else if (current.files[key] && (current.files[key]!.size !== s.size || current.files[key]!.mtime !== s.mtimeMs || current.files[key]!.ctime !== s.ctimeMs)) {
+        } else if (current.files[key] && (current.files[key]!.identity !== `${s.dev}:${s.ino}:${wal?.size ?? 0}:${wal?.mtimeMs ?? 0}` || current.files[key]!.size !== s.size || current.files[key]!.mtime !== s.mtimeMs || current.files[key]!.ctime !== s.ctimeMs)) {
           current.files[key]!.unavailable = true; changed = true
         }
       }
@@ -183,7 +206,7 @@ export async function refreshTimeIndex(options: TimeRefreshOptions = {}): Promis
         const key = createHash('sha256').update(`${source.provider}:${source.path}`).digest('hex')
         const identity = `${s.dev}:${s.ino}:${wal?.size ?? 0}:${wal?.mtimeMs ?? 0}`
         let row = current.files[key]
-        if (row && row.identity === identity && row.size === s.size && row.mtime === s.mtimeMs && row.ctime === s.ctimeMs && row.offset >= row.size) continue
+        if (row && !row.unavailable && row.identity === identity && row.size === s.size && row.mtime === s.mtimeMs && row.ctime === s.ctimeMs && row.offset >= row.size) continue
         if (Date.now() >= deadline) break
         if (!row && fileCount >= MAX_FILES) { current.warnings.push('Timing file limit reached; additional files remain unknown.'); break }
         // A shrink, replacement, or rewrite invalidates timings from that snapshot.
@@ -201,12 +224,14 @@ export async function refreshTimeIndex(options: TimeRefreshOptions = {}): Promis
             // Saved Cursor Agent text transcripts have neither turn clocks nor durations.
             row.offset = row.size
           } else await scanBlock(source, row)
-          row.state.ai = unionIntervals(row.state.ai)
+          // Keep run IDs: forks can copy the same run into a different session.
+          // Per-agent overlap merging is performed only when summarizing a view.
           row.state.user = unionIntervals(row.state.user)
           row.unavailable = false
         } catch (error) {
-          row.unavailable = true
-          throw error
+          if (error instanceof ResourceBudgetError) { row.unavailable = true; throw error }
+          row.state.dropped++; row.offset = row.size; row.unavailable = false
+          current.warnings.push(`${source.provider} has a timing source that could not be read. Its missing timing remains unknown.`)
         }
       }
 

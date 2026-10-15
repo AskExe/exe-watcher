@@ -2,12 +2,13 @@ import type { DateRange } from './types.js'
 
 export const TIME_HISTORY_START = new Date('2025-07-01T00:00:00').getTime()
 export const TIME_PROVIDERS = ['claude', 'codex', 'cursor', 'cursor-agent', 'copilot', 'opencode', 'kimi', 'pi', 'omp']
-export type TimeInterval = [start: number, end: number, estimated: 0 | 1]
+export type TimeInterval = [start: number, end: number, estimated: 0 | 1, recordId?: string]
 export type TimeState = {
   agent: string
   children?: Record<string, TimeState>
   child?: boolean
   pending?: number
+  pendingId?: string
   lastAssistant?: number
   lastEnd?: number
   ai: TimeInterval[]
@@ -33,9 +34,9 @@ export function timestamp(value: unknown): number | undefined {
     : typeof value === 'string' ? Date.parse(value) : NaN
   return Number.isFinite(n) && n >= TIME_HISTORY_START && n <= Date.now() + 86_400_000 ? n : undefined
 }
-function add(list: TimeInterval[], start: number | undefined, end: number | undefined, estimated: 0 | 1): void {
+function add(list: TimeInterval[], start: number | undefined, end: number | undefined, estimated: 0 | 1, recordId?: string): void {
   if (start === undefined || end === undefined || end <= start || end - start > 31 * 86_400_000) return
-  list.push([start, end, estimated])
+  list.push(recordId ? [start, end, estimated, recordId] : [start, end, estimated])
 }
 function prompt(state: TimeState, at: number | undefined): void {
   if (at === undefined) return
@@ -49,16 +50,16 @@ function prompt(state: TimeState, at: number | undefined): void {
 export function finishInferred(state: TimeState): void {
   if (state.pending !== undefined && state.lastAssistant !== undefined) {
     // A distant reply cannot prove the agent worked throughout a sleep/idle gap.
-    if (state.lastAssistant - state.pending <= 30 * 60_000) add(state.ai, state.pending, state.lastAssistant, 1)
+    if (state.lastAssistant - state.pending <= 30 * 60_000) add(state.ai, state.pending, state.lastAssistant, 1, state.pendingId)
     else state.dropped++
     state.lastEnd = state.lastAssistant
   }
-  state.pending = undefined; state.lastAssistant = undefined
+  state.pending = undefined; state.pendingId = undefined; state.lastAssistant = undefined
 }
-function complete(state: TimeState, start: number | undefined, end: number | undefined, estimated: 0 | 1 = 0): void {
-  add(state.ai, start, end, estimated)
+function complete(state: TimeState, start: number | undefined, end: number | undefined, estimated: 0 | 1 = 0, recordId?: string): void {
+  add(state.ai, start, end, estimated, recordId ?? state.pendingId)
   if (end !== undefined) state.lastEnd = end
-  state.pending = undefined; state.lastAssistant = undefined
+  state.pending = undefined; state.pendingId = undefined; state.lastAssistant = undefined
 }
 
 /** Only timestamps, boundaries and durations survive ingestion; no conversation text. */
@@ -72,12 +73,18 @@ export function observeTime(provider: string, state: TimeState, x: any): void {
       state.child = typeof p.source === 'object' && p.source !== null && 'subagent' in p.source
     }
     if (x.type !== 'event_msg') return
-    if (p.type === 'task_started') { state.observed++; prompt(state, timestamp(p.started_at) ?? at) }
+    if (p.type === 'task_started' || p.type === 'user_message') {
+      if (p.type === 'task_started' || state.pending === undefined) {
+        state.observed++; prompt(state, timestamp(p.started_at) ?? at)
+        state.pendingId = typeof p.turn_id === 'string' ? p.turn_id : undefined
+      }
+    }
+    else if (p.type === 'agent_message' && p.phase !== 'commentary') state.lastAssistant = at
     else if (p.type === 'task_complete' || p.type === 'turn_aborted') {
       const end = timestamp(p.completed_at) ?? at
       const duration = typeof p.duration_ms === 'number' && Number.isFinite(p.duration_ms) && p.duration_ms > 0 ? p.duration_ms : undefined
       const start = timestamp(p.started_at) ?? (end !== undefined && duration ? end - duration : state.pending)
-      complete(state, start, end, duration || timestamp(p.started_at) ? 0 : 1)
+      complete(state, start, end, duration || timestamp(p.started_at) ? 0 : 1, typeof p.turn_id === 'string' ? p.turn_id : undefined)
     }
     return
   }
@@ -85,14 +92,17 @@ export function observeTime(provider: string, state: TimeState, x: any): void {
     if (typeof x.sessionId === 'string') state.agent = `claude:${x.sessionId}${state.child ? ':' + state.agent.split(':').at(-1) : ''}`
     if (x.type === 'system' && x.subtype === 'turn_duration') {
       const duration = typeof x.durationMs === 'number' && Number.isFinite(x.durationMs) && x.durationMs > 0 ? x.durationMs : undefined
-      complete(state, duration && at !== undefined ? at - duration : undefined, at)
+      complete(state, duration && at !== undefined ? at - duration : undefined, at, 0, typeof x.uuid === 'string' ? x.uuid : undefined)
     } else if (x.type === 'user' && !x.isMeta && (typeof x.message?.content === 'string' || x.message?.content?.some?.((b: any) => b?.type === 'text'))) {
-      state.observed++; prompt(state, at)
+      state.observed++; prompt(state, at); state.pendingId = typeof x.uuid === 'string' ? x.uuid : undefined
     } else if (x.type === 'assistant') { state.observed++; state.lastAssistant = at ?? state.lastAssistant }
     return
   }
   if (provider === 'copilot') {
-    if (x.type === 'assistant.turn_start') { state.observed++; state.pending = at }
+    if (x.type === 'assistant.turn_start') {
+      state.observed++; state.pending = at; state.lastAssistant = undefined
+      state.pendingId = typeof x.data?.turnId === 'string' ? x.data.turnId : typeof x.id === 'string' ? x.id : undefined
+    }
     if (x.type === 'assistant.turn_end') complete(state, state.pending, at)
     // Old logs without paired boundaries can only supply an estimate.
     if (x.type === 'user.message') { state.observed++; prompt(state, at) }
@@ -102,14 +112,25 @@ export function observeTime(provider: string, state: TimeState, x: any): void {
   if (provider === 'kimi') {
     const event = x.message ?? x.event ?? x.params ?? x
     const type = event.type ?? x.type
-    if (type === 'TurnBegin' || type === 'turn.begin' || type === 'turn.start') { state.observed++; prompt(state, at) }
-    else if (type === 'TurnEnd' || type === 'turn.end') complete(state, state.pending, at)
+    if (x.type === 'turn.prompt') { state.observed++; prompt(state, at) }
+    else if (type === 'TurnBegin' || type === 'turn.begin' || type === 'turn.start') { state.observed++; prompt(state, at) }
+    else if (type === 'step.begin') {
+      state.observed++; state.pending = at; state.lastAssistant = undefined
+      state.pendingId = typeof event.uuid === 'string' ? `${event.uuid}:${at}` : undefined
+    }
+    else if (type === 'TurnEnd' || type === 'turn.end' || type === 'step.end') complete(state, state.pending, at)
     else if (x.type === 'usage.record') state.observed++
     return
   }
   if (provider === 'pi' || provider === 'omp') {
-    if (x.type === 'session' && typeof x.id === 'string') state.agent = `${provider}:${x.id}`
-    if (x.type === 'message' && x.message?.role === 'user') { state.observed++; prompt(state, at) }
+    if (x.type === 'session' && typeof x.id === 'string') {
+      state.agent = `${provider}:${x.id}`
+      if (x.parentSession) state.child = true
+    }
+    if (x.type === 'message' && x.message?.role === 'user') {
+      state.observed++; prompt(state, at)
+      state.pendingId = typeof x.id === 'string' ? `${x.id}:${at}` : undefined
+    }
     else if (x.type === 'message' && x.message?.role === 'assistant') {
       state.observed++; state.lastAssistant = at ?? state.lastAssistant
       if (x.message.stopReason === 'stop') { finishInferred(state) }
@@ -142,7 +163,24 @@ export function summarizeTime(index: TimeIndex, range: DateRange, provider = 'al
   const matches = (name: string, terms?: string[]) => terms?.some(t => name.toLowerCase().includes(t.toLowerCase()))
   const files = Object.values(index.files).filter(f => (provider === 'all' || f.provider === provider)
     && (!include?.length || matches(f.project, include)) && !matches(f.project, exclude))
-  const agents = new Map<string, TimeInterval[]>(), user: TimeInterval[] = [], estimated: TimeInterval[] = []
+  const agents = new Map<string, TimeInterval[]>(), estimatedAgents = new Map<string, TimeInterval[]>(), user: TimeInterval[] = []
+  const records = new Map<string, TimeInterval>()
+  const states = new Map<TimeFile, TimeState[]>()
+  for (const file of files) {
+    const copies = [file.state, ...Object.values(file.state.children ?? {})].map(original => {
+      const state = { ...original, ai: [...original.ai] }
+      finishInferred(state)
+      for (const interval of state.ai) {
+        if (!interval[3]) continue
+        const key = `${file.provider}:${interval[3]}`, prior = records.get(key)
+        // A fork may retain an interrupted/estimated copy before its final record.
+        if (!prior || interval[2] < prior[2] || (interval[2] === prior[2] && interval[1] - interval[0] > prior[1] - prior[0])) records.set(key, interval)
+      }
+      return state
+    })
+    states.set(file, copies)
+  }
+  const consumed = new Set<string>()
   const byProvider = new Map<string, { files: number; timedFiles: number; agents: Map<string, TimeInterval[]> }>()
   let pendingFiles = 0
   for (const file of files) {
@@ -151,28 +189,35 @@ export function summarizeTime(index: TimeIndex, range: DateRange, provider = 'al
     row.files++
     // A running/unclosed fragment is deliberately not extended to "now" or across idle gaps.
     let timed = false
-    for (const original of [file.state, ...Object.values(file.state.children ?? {})]) {
-      const state = { ...original, ai: [...original.ai] }
-      finishInferred(state)
-      const ai = unionIntervals(state.ai, range)
-      timed ||= ai.length > 0
+    for (const state of states.get(file)!) {
+      timed ||= unionIntervals(state.ai, range).length > 0
+      const unique = state.ai.filter(interval => {
+        if (!interval[3]) return true
+        const key = `${file.provider}:${interval[3]}`
+        if (records.get(key) !== interval || consumed.has(key)) return false
+        consumed.add(key); return true
+      })
+      const ai = unionIntervals(unique, range)
+      const inferred = estimatedAgents.get(state.agent) ?? []
+      inferred.push(...unique.filter(interval => interval[2]))
+      estimatedAgents.set(state.agent, inferred)
       for (const map of [agents, row.agents]) {
         const list = map.get(state.agent) ?? []
         for (const interval of ai) list.push(interval)
         map.set(state.agent, list)
       }
       for (const interval of state.user) user.push(interval)
-      for (const interval of ai) if (interval[2]) estimated.push(interval)
     }
     if (timed) row.timedFiles++
     byProvider.set(file.provider, row)
   }
   const all = [...agents.values()].flatMap(v => unionIntervals(v, range))
+  const estimated = [...estimatedAgents.values()].flatMap(v => unionIntervals(v, range))
   const busy = unionIntervals(all, range), human = unionIntervals(user, range)
   return {
     since: new Date(Math.max(TIME_HISTORY_START, range.start.getTime())).toISOString(), through: range.end.toISOString(),
     aiRunningMs: all.length ? sum(all) : null, elapsedBusyMs: busy.length ? sum(busy) : null,
-    userActiveMs: human.length ? sum(human) : null, estimatedAiMs: sum(unionIntervals(estimated, range)),
+    userActiveMs: human.length ? sum(human) : null, estimatedAiMs: sum(estimated),
     coverage: all.length ? 'partial' : 'missing', pendingFiles, indexedFiles: files.length,
     firstRecordedAt: busy.length ? new Date(busy[0]![0]).toISOString() : null,
     lastRecordedAt: busy.length ? new Date(busy.at(-1)![1]).toISOString() : null,

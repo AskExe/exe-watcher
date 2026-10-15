@@ -638,7 +638,7 @@ function TimePanel({ time, width }: { time?: TimeReport; width: number }) {
 function DashboardContent({ projects, period, columns, activeProvider, budgets, planUsage, recovery, time }: { projects: ProjectSummary[]; period: Period; columns?: number; activeProvider?: string; budgets?: Map<string, ContextBudget>; planUsage?: PlanUsage; recovery?: HistoricalRecovery | null; time?: TimeReport }) {
   const { dashWidth, wide, halfWidth, barWidth } = getLayout(columns)
   const isCursor = activeProvider === 'cursor'
-  if (projects.length === 0) return <Panel title="Exe Watcher" color={ORANGE} width={dashWidth}><Text dimColor>No usage data found for {PERIOD_LABELS[period]}.</Text></Panel>
+  if (projects.length === 0) return <Box flexDirection="column"><TimePanel time={time} width={dashWidth} /><Panel title="Exe Watcher" color={ORANGE} width={dashWidth}><Text dimColor>No usage data found for {PERIOD_LABELS[period]}.</Text></Panel></Box>
   const pw = wide ? halfWidth : dashWidth
   const days = period === 'all' ? undefined : (period === 'month' || period === '30days' ? 31 : 14)
   return (

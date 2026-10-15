@@ -120,6 +120,39 @@ Models are independent of clients: GLM, Kimi, DeepSeek, Gemini and other known m
 
 This is not universal interception of every AI request. A client must retain a supported usage format with token counts. Deleted logs, cloud-only chats and unsupported formats (including Python Kimi CLI's `~/.kimi/` Wire events and older OpenCode JSON storage) cannot be recovered automatically. Copilot's saved data currently provides output tokens only; Cursor Auto mode uses an estimate. See the table for coverage before treating a total as complete.
 
+### AI time
+
+The menu bar dashboard and full terminal report show three times beneath the spending overview. They follow the selected day, 7 days, 30 days, month or all-time view, with the same provider and project filters:
+
+- **AI running:** recorded run time added across agents. Two agents running for one hour add two hours. Duplicate run IDs copied into forks count once.
+- **Elapsed busy:** time when at least one agent was running. Those two parallel agents count as one elapsed hour.
+- **Your time ≈:** an interaction estimate from reply-to-next-prompt gaps of up to five minutes, merged across chats. Known subagents and longer idle gaps are excluded. This does not measure attention, typing or time reading while an agent runs; unidentified automation may be included.
+
+Timing recovery starts July 1, 2025 and uses retained local evidence. **Partial history** stays visible; missing timing is **Unknown**, never zero. Recorded durations may include tool execution and waiting, rather than only time generating tokens. Open runs are not extended to the present.
+
+| Client | Available timing evidence |
+|--------|---------------------------|
+| Claude Code | Recorded turn durations; older prompt/reply clocks are inferred |
+| Codex | Completed/interrupted run boundaries or durations; older reply clocks are inferred |
+| Cursor IDE | Saved conversation message start/end clocks, when retained |
+| Cursor Agent | Timestamped CLI result durations; ordinary text transcripts lack clocks |
+| Copilot | Saved assistant turn start/end pairs |
+| OpenCode | Completed assistant message clocks, including archived sessions and subagents |
+| Kimi Code | Native saved step boundaries, including separate agents |
+| Pi / OMP | Inferred prompt-to-final-reply spans |
+
+Inferred spans are capped at 30 minutes; longer unmeasured gaps remain unknown. Deleted logs, unsupported formats and sessions without complete clocks cannot supply a full lifetime total. Provider details show how many files have usable timing in the selected period.
+
+Timing uses a separate private index and leaves financial history intact. Existing usage-file events trigger small bounded updates; no extra polling service is installed. Historical recovery advances saved byte cursors in bounded passes, without rereading unchanged transcripts:
+
+```bash
+exe-watcher time --period all                  # saved/recent timing and coverage
+exe-watcher time --period week --format json
+exe-watcher time --recover --period all        # one bounded historical pass
+```
+
+Repeat a recovery pass while files remain pending and progress advances. Automatic parsing is capped at 16 MiB per update; explicit historical parsing at 256 MiB per pass. Incomplete or unreadable records remain clearly marked.
+
 ---
 
 ## CLI reference

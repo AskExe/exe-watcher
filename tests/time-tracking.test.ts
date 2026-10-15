@@ -22,6 +22,33 @@ it('adds parallel agent hours, unions elapsed time, and deduplicates copied sess
   expect(r.coverage).toBe('partial')
 })
 
+it('does not recount run IDs inherited by a fork with a different session ID', () => {
+  const a = state('codex:original'), fork = state('codex:fork')
+  a.ai = [[base, base + 60_000, 0, 'same-turn']]
+  fork.ai = [[base, base + 60_000, 0, 'same-turn'], [base + 120_000, base + 150_000, 0, 'new-turn']]
+  expect(report([file('codex', a), file('codex', fork)]).aiRunningMs).toBe(90_000)
+})
+
+it('reads native Kimi step boundaries without treating gaps between steps as human time', () => {
+  const s = state('kimi:session/main')
+  for (const [second, type] of [[0, 'step.begin'], [60, 'step.end'], [65, 'step.begin'], [90, 'step.end']] as const) {
+    observeTime('kimi', s, { type: 'context.append_loop_event', time: base + second * 1000, event: { type, uuid: `${second}` } })
+  }
+  expect(report([file('kimi', s)]).aiRunningMs).toBe(85_000)
+  expect(s.user).toEqual([])
+})
+
+it('prefers the completed run over a shorter copy and sums inferred time across parallel agents', () => {
+  const a = state('codex:original'), fork = state('codex:fork'), other = state('pi:parallel')
+  a.ai = [[base, base + 30_000, 1, 'same-turn']]
+  fork.ai = [[base, base + 60_000, 0, 'same-turn'], [base + 60_000, base + 120_000, 1, 'inferred-turn']]
+  other.ai = [[base + 60_000, base + 120_000, 1, 'parallel-turn']]
+  const result = report([file('codex', a), file('codex', fork), file('pi', other)])
+  expect(result.aiRunningMs).toBe(180_000)
+  expect(result.estimatedAiMs).toBe(120_000)
+  expect(result.elapsedBusyMs).toBe(120_000)
+})
+
 it('clips cross-midnight, weekly and monthly windows and handles a 23-hour DST day', () => {
   const start = new Date('2026-03-08T00:00:00-05:00'), end = new Date('2026-03-09T00:00:00-04:00')
   expect(unionIntervals([[start.getTime() - 1000, end.getTime() + 1000, 0]], { start, end }))

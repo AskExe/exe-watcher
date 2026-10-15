@@ -2,10 +2,14 @@ import SwiftUI
 
 struct AITimeSection: View {
     @Environment(AppStore.self) private var store
+    var body: some View { AITimeContent(time: store.payload.time) }
+}
+
+struct AITimeContent: View {
+    let time: TimeBlock?
     @State private var showDetails = false
 
     var body: some View {
-        let time = store.payload.time
         VStack(alignment: .leading, spacing: 9) {
             HStack {
                 Label("AI time", systemImage: "clock")
@@ -73,6 +77,13 @@ struct AITimeSection: View {
         guard let time else { return "Missing records · about these times" }
         if time.pendingFiles > 0 { return "\(time.pendingFiles) files awaiting recovery · details" }
         if time.estimatedAiMs > 0 { return "Includes inferred AI time · missing records · details" }
+        if let recorded = time.firstRecordedAt {
+            let formatter = ISO8601DateFormatter()
+            formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            if let date = formatter.date(from: recorded) {
+                return "Recorded from \(date.formatted(date: .abbreviated, time: .omitted)) · partial history"
+            }
+        }
         return "Since Jul 1, 2025 · missing records · details"
     }
 }

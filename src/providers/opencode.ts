@@ -89,6 +89,11 @@ async function findDbFiles(dir: string): Promise<string[]> {
   }
 }
 
+/** Timing recovery also needs databases containing only archived/child sessions. */
+export function getOpenCodeDbPaths(): Promise<string[]> {
+  return findDbFiles(getDataDir())
+}
+
 function parseTimestamp(raw: number): string {
   const ms = raw < 1e12 ? raw * 1000 : raw
   return new Date(ms).toISOString()

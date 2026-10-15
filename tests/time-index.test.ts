@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { mkdtemp, writeFile, appendFile, readFile, rm, rename } from 'node:fs/promises'
+import { mkdtemp, mkdir, writeFile, appendFile, readFile, rm, rename } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createRequire } from 'node:module'
@@ -64,7 +64,7 @@ it('recovers Cursor conversation clocks without merging parallel conversations i
   const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite')
   const path = join(dir, 'cursor.db'), db = new DatabaseSync(path)
   db.exec('CREATE TABLE cursorDiskKV (key TEXT, value TEXT)')
-  for (const conversationId of ['a', 'b']) db.prepare('INSERT INTO cursorDiskKV VALUES (?,?)').run(`bubbleId:${conversationId}:bubble`, JSON.stringify({ conversationId, timingInfo: { clientStartTime: start, clientEndTime: start + 60_000 } }))
+  for (const conversationId of ['a', 'b']) db.prepare('INSERT INTO cursorDiskKV VALUES (?,?)').run(`bubbleId:${conversationId}:${conversationId}-bubble`, JSON.stringify({ conversationId, timingInfo: { clientStartTime: start, clientEndTime: start + 60_000 } }))
   db.close()
   const index = await refreshTimeIndex({ sources: [source(path, 'cursor')], history: true })
   expect(duration(index)).toBe(120_000)
@@ -83,6 +83,23 @@ it('includes OpenCode archived sessions and subagents, using completed message c
   const index = await refreshTimeIndex({ sources: [source(path + ':parent', 'opencode')], history: true })
   expect(duration(index)).toBe(120_000)
   expect(summarizeTime(index, range).elapsedBusyMs).toBe(60_000)
+})
+
+it('keeps separate Kimi main agents and isolates an unsupported database', async () => {
+  const paths = ['session_a', 'session_b'].map(id => join(dir, id, 'agents', 'main', 'wire.jsonl'))
+  for (const [i, path] of paths.entries()) {
+    await mkdir(join(path, '..'), { recursive: true })
+    await writeFile(path, [
+      { type: 'context.append_loop_event', time: start, event: { type: 'step.begin', uuid: `step-${i}` } },
+      { type: 'context.append_loop_event', time: start + 60_000, event: { type: 'step.end' } },
+    ].map(x => JSON.stringify(x)).join('\n') + '\n')
+  }
+  const unsupported = join(dir, 'unsupported.db')
+  await writeFile(unsupported, 'not a database')
+  const index = await refreshTimeIndex({ sources: [...paths.map(path => source(path, 'kimi')), source(unsupported + ':root', 'opencode')], history: true })
+  expect(duration(index)).toBe(120_000)
+  expect(summarizeTime(index, range).elapsedBusyMs).toBe(60_000)
+  expect(index.warnings).toContain('An OpenCode database has no readable timing schema; its time is unknown.')
 })
 
 it('cancellation preserves previously recovered time and does not change cost history', async () => {

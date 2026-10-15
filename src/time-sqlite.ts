@@ -12,10 +12,10 @@ function stateFor(file: TimeFile, agent: string): TimeState {
   })
   return children[agent]!
 }
-function interval(state: TimeState, startValue: unknown, endValue: unknown): void {
+function interval(state: TimeState, startValue: unknown, endValue: unknown, id: string): void {
   const start = timestamp(startValue), end = timestamp(endValue)
   state.observed++
-  if (start !== undefined && end !== undefined && end > start && end - start <= 31 * 86_400_000) state.ai.push([start, end, 0])
+  if (start !== undefined && end !== undefined && end > start && end - start <= 31 * 86_400_000) state.ai.push([start, end, 0, id])
 }
 
 /** Read only clocks/IDs in pages; never load stored prompts, images or code blocks. */
@@ -34,7 +34,7 @@ export async function scanTimeDatabase(source: SessionSource, file: TimeFile): P
       for (const row of rows) {
         chargeRecord()
         const conversation = typeof row.conversation === 'string' ? row.conversation : String(row.key).split(':')[1]
-        interval(stateFor(file, `cursor:${conversation}`), row.started, row.completed)
+        interval(stateFor(file, `cursor:${conversation}`), row.started, row.completed, `${String(row.key).split(':').at(-1)}:${String(row.started)}`)
       }
     } else {
       rows = db.query(`SELECT id,
@@ -45,7 +45,7 @@ export async function scanTimeDatabase(source: SessionSource, file: TimeFile): P
       const state = stateFor(file, `opencode:${source.path.slice(separator + 1)}`)
       for (const row of rows) {
         chargeRecord()
-        if (row.role === 'assistant') interval(state, row.started, row.completed)
+        if (row.role === 'assistant') interval(state, row.started, row.completed, String(row.id))
       }
     }
     file.dbOffset = (file.dbOffset ?? 0) + rows.length
