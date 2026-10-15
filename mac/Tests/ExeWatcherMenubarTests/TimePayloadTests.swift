@@ -47,7 +47,7 @@ struct TimePayloadTests {
 
     @Test @MainActor func compactTimePanelRendersAtPopoverWidth() throws {
         let renderer = ImageRenderer(content: AITimeContent(time: try fixture())
-            .frame(width: 380).environment(\.colorScheme, .light))
+            .frame(width: 380).background(Color.white).environment(\.colorScheme, .light))
         renderer.scale = 2
         let image = renderer.nsImage
         #expect(image != nil)
