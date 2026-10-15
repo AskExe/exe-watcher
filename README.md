@@ -32,7 +32,7 @@ npm install -g exe-watcher
 
 - **Local-first spend tracking** — reads session data already on your machine; no telemetry service, no account, no proxy.
 - **Terminal + native macOS menu bar** — run the full TUI in your terminal or keep today's spend visible in the menu bar.
-- **Multi-provider view** — Claude Code, Codex, Cursor, Cursor Agent, Copilot, OpenCode, OMP, and Pi are auto-detected.
+- **Multi-provider view** — Claude Code, Codex, Cursor, Cursor Agent, Copilot, OpenCode, Kimi Code, OMP, and Pi are auto-detected.
 - **Actually useful metrics** — cost, calls, sessions, tokens, cache hit %, one-shot rate, activity type, model split, tools, MCP servers, shell commands, and top sessions.
 - **Optimization built in** — finds token waste and gives copy-paste fixes for bloated prompts, repeated file reads, uncapped shell output, unused MCP servers, and ghost agents.
 - **Exe OS aware** — when Exe OS is present, Watcher adds AI employee memory growth and per-agent spend.
@@ -108,10 +108,17 @@ Side-by-side model comparison on your own data. One-shot rate, retry rate, cost 
 | **Cursor Agent** | CLI sessions | Full support |
 | **Copilot** | `~/.copilot/session-state/` | Output tokens only |
 | **OpenCode** | SQLite (`~/.local/share/opencode/`) | Subtask sessions excluded |
+| **Kimi Code** | `~/.kimi-code/sessions/` | Native `usage.record` logs, including subagents; rotating model aliases remain unpriced |
 | **OMP** (Oh My Pi) | `~/.omp/agent/sessions/` | Full support |
 | **Pi** | `~/.pi/agent/sessions/` | Full support |
 
 All providers auto-detected. If multiple tools have data, press `p` in the dashboard to toggle between them. The provider plugin system makes adding new tools straightforward — each provider is a single file in `src/providers/`.
+
+On a new Mac, install and open Watcher: no client executables, API keys, shell setup or account connection are required. It reads supported clients' saved usage in the standard folders above. The menu bar app also picks up the first session from a client installed after Watcher starts. Custom folders require the matching environment override or an additional Claude profile root; Finder-launched apps do not inherit variables set only in your terminal shell.
+
+Models are independent of clients: GLM, Kimi, DeepSeek, Gemini and other known models are priced from the model name recorded by Claude Code, OpenCode or another supported client. Costs use current API list rates, including separately recorded cache reads and writes. Subscription quotas, discounts, broker markups and old invoices are not reconstructed. Missing model prices preserve token counts and show an incomplete-cost notice in the app.
+
+This is not universal interception of every AI request. A client must retain a supported usage format with token counts. Deleted logs, cloud-only chats and unsupported formats (including Python Kimi CLI's `~/.kimi/` Wire events and older OpenCode JSON storage) cannot be recovered automatically. Copilot's saved data currently provides output tokens only; Cursor Auto mode uses an estimate. See the table for coverage before treating a total as complete.
 
 ---
 
@@ -292,6 +299,9 @@ For unfiltered All Time Claude totals, Watcher also reconciles `stats-cache.json
 |----------|-------------|
 | `CLAUDE_CONFIG_DIR` | Override Claude data directory (default: `~/.claude`) |
 | `CODEX_HOME` | Override Codex data directory (default: `~/.codex`) |
+| `KIMI_CODE_HOME` | Override native Kimi Code data directory (default: `~/.kimi-code`) |
+| `XDG_DATA_HOME` | Base data directory for OpenCode (default: `~/.local/share`) |
+| `XDG_CONFIG_HOME` | Base directory for Watcher configuration (default: `~/.config`) |
 | `EXE_WATCHER_CACHE_DIR` | Override cache directory (default: `~/.cache/exe-watcher`) |
 
 ---

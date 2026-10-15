@@ -231,42 +231,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         let fm = FileManager.default
         let home = fm.homeDirectoryForCurrentUser.path
         let environment = ProcessInfo.processInfo.environment
-        let claudeRoot = environment["CLAUDE_CONFIG_DIR"] ?? "\(home)/.claude"
-        let codexRoot = environment["CODEX_HOME"] ?? "\(home)/.codex"
-        var candidates: [String] = [
-            claudeRoot + "/projects",
-            "\(home)/Library/Application Support/Claude/local-agent-mode-sessions",
-            codexRoot + "/sessions",
-            codexRoot + "/archived_sessions",
-            claudeRoot + "/stats-cache.json",
-            "\(home)/.pi/agent/sessions",
-            "\(home)/.omp/agent/sessions",
-            (environment["KIMI_CODE_HOME"] ?? "\(home)/.kimi-code") + "/sessions",
-            "\(home)/.cursor/projects",
-            "\(home)/Library/Application Support/Cursor/User/globalStorage",
-        ]
-        let opencodeDir = (environment["XDG_DATA_HOME"] ?? "\(home)/.local/share") + "/opencode"
-        candidates.append(opencodeDir)
-        // Include separately configured Claude profiles as well as the default root.
-        let configURL = URL(fileURLWithPath: "\(home)/.config/exe-watcher/config.json")
+        var additionalClaudeRoots: [String] = []
+        let configRoot = environment["XDG_CONFIG_HOME"] ?? "\(home)/.config"
+        let configURL = URL(fileURLWithPath: "\(configRoot)/exe-watcher/config.json")
         if let data = try? Data(contentsOf: configURL),
            let config = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
            let roots = config["claudeConfigDirs"] as? [String] {
-            candidates += roots.flatMap { root -> [String] in
-                let expanded = (root as NSString).expandingTildeInPath
-                return [expanded + "/projects", expanded + "/stats-cache.json"]
-            }
+            additionalClaudeRoots = roots
         }
-        // If a provider's sessions directory does not exist yet, watch its existing
-        // parent so the first session can trigger an update. Never watch all of HOME.
-        let paths = Array(Set(candidates.compactMap { path -> String? in
-            if fm.fileExists(atPath: path) { return path }
-            let parent = (path as NSString).deletingLastPathComponent
-            return parent != home && fm.fileExists(atPath: parent) ? parent : nil
-        }))
+        let roots = UsageLogLocations.roots(home: home, environment: environment, additionalClaudeRoots: additionalClaudeRoots)
+        let paths = UsageLogLocations.watchPaths(roots: roots, exists: fm.fileExists(atPath:))
         guard !paths.isEmpty else { return }
 
-        usageLogWatcher = UsageLogWatcher(paths: paths) { [weak self] in
+        usageLogWatcher = UsageLogWatcher(paths: paths, usageRoots: roots) { [weak self] in
             Task { @MainActor in
                 self?.store.noteUsageChange()
                 self?.scheduleUsageLogRefresh()
@@ -479,11 +456,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
 private final class UsageLogWatcher: @unchecked Sendable {
     private let paths: [String]
+    private let usageRoots: [String]
     private let onChange: @Sendable () -> Void
     private var stream: FSEventStreamRef?
 
-    init(paths: [String], onChange: @escaping @Sendable () -> Void) {
+    init(paths: [String], usageRoots: [String], onChange: @escaping @Sendable () -> Void) {
         self.paths = paths
+        self.usageRoots = usageRoots
         self.onChange = onChange
     }
 
@@ -505,12 +484,11 @@ private final class UsageLogWatcher: @unchecked Sendable {
         let callback: FSEventStreamCallback = { _, info, count, eventPaths, flags, _ in
             guard let info else { return }
             guard count > 0 else { return }
+            let watcher = Unmanaged<UsageLogWatcher>.fromOpaque(info).takeUnretainedValue()
             let paths = unsafeBitCast(eventPaths, to: NSArray.self) as? [String] ?? []
             guard (0..<min(count, paths.count)).contains(where: {
-                UsageLogEvents.shouldRefresh(path: paths[$0], flags: flags[$0])
+                UsageLogLocations.shouldRefresh(path: paths[$0], flags: flags[$0], roots: watcher.usageRoots)
             }) else { return }
-
-            let watcher = Unmanaged<UsageLogWatcher>.fromOpaque(info).takeUnretainedValue()
             DispatchQueue.main.async {
                 watcher.onChange()
             }

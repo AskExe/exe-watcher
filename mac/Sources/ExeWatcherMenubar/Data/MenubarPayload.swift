@@ -28,6 +28,14 @@ struct DiagnosticsBlock: Codable, Sendable {
     let daysCount: Int
     let parseTimeMs: Int
     let warnings: [String]
+
+    var hasUnpricedUsage: Bool {
+        warnings.contains { $0.hasPrefix("No API pricing for model") || $0.contains("no token counts; its API-equivalent cost cannot be calculated") }
+    }
+
+    var discoveryWarning: String? {
+        warnings.first { $0.hasPrefix("Provider \"") && $0.contains("discovery failed:") }
+    }
 }
 
 struct ProjectSpendEntry: Codable, Sendable, Identifiable {

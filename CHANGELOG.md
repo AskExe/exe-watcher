@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.58 (unreleased)
+
+- Discover a supported client's first usage even when its data folder is created after Watcher starts. Include Copilot, custom Claude configuration roots and symlinked profiles in live monitoring, while ignoring unrelated home-folder events.
+- Show when costs exclude usage without known API prices and when a provider's discovery fails. Label today's spend as an API-equivalent estimate.
+- Verify default Codex, Claude Code, native Kimi Code and OpenCode discovery from an isolated new user home with no configuration, client executables or API keys. Check token normalization, cache pricing, provider totals, restarts and unknown models.
+- Document supported clients, model pricing, custom data locations and formats that cannot yet be imported.
+
 ## 0.2.57 (unreleased)
 
 - Include native Kimi Code wire logs for main agents and subagents, with separate uncached input, output and cache token counts. Ignore context-size measurements and deduplicate copied records.
