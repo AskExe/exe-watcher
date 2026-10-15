@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest'
-import { mkdtemp, mkdir, open, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, open, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { cachedFileParse } from '../src/parsed-file-cache.js'
@@ -92,4 +92,19 @@ it('keeps cached schema warnings when deriving ranges from legacy parsed entries
   await cachedFileParse(path, 'fixture', parse, warnings, { ...range, end: new Date('2025-07-01T00:00:00Z') })
   expect(warnings).toEqual(legacyWarnings)
   clearDiscoveryCache()
+})
+
+it('accounts for the replaced entry after a source shrinks', async () => {
+  dir = await mkdtemp(join(tmpdir(), 'watcher-replace-quota-'))
+  vi.stubEnv('EXE_WATCHER_CACHE_DIR', dir)
+  const path = join(dir, 'session.jsonl'); await writeFile(path, 'large source')
+  await cachedFileParse(path, 'fixture', async () => Array.from({ length: 100 }, (_, n) => ({ n, text: String(n).repeat(100) })))
+  const cacheDir = join(dir, 'parsed-files')
+  const before = Number(await readFile(join(cacheDir, 'quota'), 'utf8'))
+  await writeFile(path, 'small source')
+  await cachedFileParse(path, 'fixture', async () => [1])
+  const quota = Number(await readFile(join(cacheDir, 'quota'), 'utf8'))
+  const sizes = await Promise.all((await readdir(cacheDir)).filter(name => name.endsWith('.json.gz')).map(async name => (await stat(join(cacheDir, name))).size))
+  expect(quota).toBe(sizes.reduce((sum, size) => sum + size, 0))
+  expect(quota).toBeLessThan(before)
 })

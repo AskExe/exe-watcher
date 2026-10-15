@@ -112,7 +112,9 @@ export async function cachedFileParse<T>(path: string, kind: string, parse: () =
     // Concurrent readers/writers never see partial JSON; identical results incur no rewrite.
     if (!(await readFile(cachePath).catch(() => Buffer.alloc(0))).equals(encoded)) {
       const oldSize = (await stat(cachePath).catch(() => null))?.size ?? 0
-      let nextSize = total - oldSize + encoded.length
+      // Reserve both the existing entry and its replacement until rename succeeds.
+      // A crash while a smaller replacement is pending must never under-count disk use.
+      let nextSize = total + encoded.length
       if (!Number.isFinite(nextSize)) return data
       if (nextSize > MAX_DISK) {
         // Make room in batches so reaching the cap never disables future caching.
@@ -136,6 +138,7 @@ export async function cachedFileParse<T>(path: string, kind: string, parse: () =
         // Reserve before writing: a crash can over-count disk use, never under-count it.
         await writeQuota(nextSize)
         await writeFile(tmp, encoded, { mode: 0o600 }); await rename(tmp, cachePath)
+        if (oldSize) await writeQuota(nextSize - oldSize)
       }
       finally { await unlink(tmp).catch(() => {}) }
     }
