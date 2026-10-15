@@ -121,6 +121,16 @@ const allPeriodResults = Object.fromEntries(
 // ---------------------------------------------------------------------------
 
 describe('CLI menubar-json E2E', { timeout: 60_000 }, () => {
+  it('one complete history response includes rollups equivalent to every direct period', async () => {
+    const { data } = await allPeriodResults.all
+    const snapshots = data.periodSnapshots as Record<string, { current: unknown; projectSpend: unknown }>
+    for (const period of PERIODS) {
+      // Earlier Today responses can precede the one-time historical fill.
+      const direct = (await runCLI(period)).data
+      expect(snapshots[period]!.current).toEqual(direct.current)
+      expect(snapshots[period]!.projectSpend).toEqual(direct.projectSpend)
+    }
+  })
   // =========================================================================
   // 1. Schema Validation
   // =========================================================================

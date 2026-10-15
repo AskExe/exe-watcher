@@ -51,6 +51,17 @@ afterEach(async () => {
 })
 
 describe('loadDailyCache', () => {
+  it('invalidates uncommitted repricing progress when prices change again', async () => {
+    await saveDailyCache({ version: DAILY_CACHE_VERSION, scopeKey: DEFAULT_DAILY_CACHE_SCOPE,
+      lastComputedDate: null, days: [], needsRepricing: true,
+      historyBuild: { start: '2026-04-01', end: '2026-04-10', completedProviders: ['claude'], days: [emptyDay('2026-04-10', 10)] } })
+    expect((await loadDailyCache()).historyBuild?.days).toHaveLength(1)
+    setModelAliases({ 'custom-model': 'gpt-6-astra' })
+    const cache = await loadDailyCache()
+    expect(cache.historyBuild).toBeUndefined()
+    expect(cache.needsRepricing).toBe(true)
+    expect(cache.previousHistoryStart).toBe('2026-04-01')
+  })
   it('invalidates stored history when effective model pricing changes', async () => {
     await saveDailyCache({ version: DAILY_CACHE_VERSION, scopeKey: DEFAULT_DAILY_CACHE_SCOPE,
       lastComputedDate: '2026-04-10', days: [emptyDay('2026-04-10', 10)] })

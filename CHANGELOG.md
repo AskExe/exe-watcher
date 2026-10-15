@@ -1,6 +1,12 @@
 # Changelog
 
-## 0.2.55 (release candidate, 2026-10-14)
+## 0.2.56 (unreleased)
+
+- Update all covered period summaries from one fresh daily scan. Switching between Today, Week, Month and All Time reuses the same historical daily totals.
+- Keep period summaries in a private cache across same-day app restarts, and skip queued scans when another refresh has already supplied the result.
+- Save completed provider scans during historical repricing so a timeout resumes work instead of restarting. Keep incomplete dates visible as warnings and preserve historical revalidation for late usage.
+
+## 0.2.55 (2026-10-14)
 
 - Adopt the chosen 01A owl with folded wings, a slim beak and the original eyes, preserving the existing fonts and palette. Use one native drawing for the header, loading state and menu bar, with simpler details at small sizes.
 - Include three alternative owl studies and the current mark in an interactive comparison page.

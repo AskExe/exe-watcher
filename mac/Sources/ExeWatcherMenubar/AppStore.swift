@@ -15,10 +15,25 @@ private struct BadgeSnapshot: Codable {
 struct CachedPayload {
     let payload: MenubarPayload
     let fetchedAt: Date
+    var historicalValidatedAt: Date? = nil
     func isFresh(now: Date, period: Period) -> Bool {
         let ttl = period == .today ? todayCacheTTLSeconds : historicalCacheTTLSeconds
-        return now.timeIntervalSince(fetchedAt) < ttl
+        let timestamp = period == .today ? fetchedAt : historicalValidatedAt ?? fetchedAt
+        return now.timeIntervalSince(timestamp) < ttl
     }
+}
+
+private struct PersistedPeriod: Codable {
+    let period: String
+    let provider: String
+    let fetchedAt: Date
+    let historicalValidatedAt: Date?
+    let payload: MenubarPayload
+}
+private struct PeriodCacheSnapshot: Codable {
+    let version: Int
+    let dateAnchor: String
+    let entries: [PersistedPeriod]
 }
 
 struct PayloadCacheKey: Hashable {
@@ -68,6 +83,9 @@ final class AppStore {
     private let fetchPayload: MenubarPayloadFetcher
     private let now: AppStoreDateProvider
     private let badgeCacheURL: URL?
+    private var periodCacheURL: URL? {
+        badgeCacheURL?.deletingLastPathComponent().appendingPathComponent("period-snapshots.json")
+    }
     private var cache: [PayloadCacheKey: CachedPayload] = [:]
     private var errorsByKey: [PayloadCacheKey: String] = [:]
     private var retryAfter: [PayloadCacheKey: Date] = [:]
@@ -101,6 +119,55 @@ final class AppStore {
            (try? DataClient.validate(saved.payload)) != nil {
             cache[todayKey] = CachedPayload(payload: saved.payload, fetchedAt: saved.fetchedAt)
             lastBadgeRefreshSuccessAt = saved.fetchedAt
+        }
+        if let url = periodCacheURL,
+           let data = try? SafeFile.read(from: url.path, maxBytes: 20 * 1024 * 1024),
+           let saved = try? JSONDecoder().decode(PeriodCacheSnapshot.self, from: data),
+           saved.version == 1, saved.dateAnchor == todayKey.dateAnchor {
+            for entry in saved.entries {
+                guard let period = Period(rawValue: entry.period),
+                      let provider = ProviderFilter(rawValue: entry.provider),
+                      entry.fetchedAt <= now(),
+                      (try? DataClient.validate(entry.payload)) != nil else { continue }
+                let target = PayloadCacheKey(period: period, provider: provider, now: now())
+                if cache[target].map({ $0.fetchedAt > entry.fetchedAt }) == true { continue }
+                cache[target] = CachedPayload(payload: entry.payload, fetchedAt: entry.fetchedAt,
+                                              historicalValidatedAt: entry.historicalValidatedAt)
+            }
+        }
+    }
+
+    private func persistPeriods() {
+        guard let url = periodCacheURL else { return }
+        let anchor = PayloadCacheKey(period: .today, provider: .all, now: now()).dateAnchor
+        let entries = cache.filter { !$0.key.includeOptimize && $0.key.dateAnchor == anchor }.map { key, value in
+            PersistedPeriod(period: key.period.rawValue, provider: key.provider.rawValue,
+                            fetchedAt: value.fetchedAt, historicalValidatedAt: value.historicalValidatedAt,
+                            payload: value.payload)
+        }
+        let saved = PeriodCacheSnapshot(version: 1, dateAnchor: anchor, entries: entries)
+        if let data = try? JSONEncoder().encode(saved), data.count <= 20 * 1024 * 1024 {
+            try? SafeFile.write(data, to: url.path)
+        }
+    }
+
+    private func ingestPeriods(from fresh: MenubarPayload, provider: ProviderFilter, dateAnchor: String) {
+        guard dateAnchor == key(period: .today, provider: provider, includeOptimize: false).dateAnchor,
+              let snapshots = fresh.periodSnapshots else { return }
+        for period in Period.allCases {
+            guard let snapshot = snapshots[period.cliArg] else { continue }
+            let target = key(period: period, provider: provider, includeOptimize: false)
+            let payload = MenubarPayload(
+                generated: fresh.generated, cliVersion: fresh.cliVersion, minAppVersion: fresh.minAppVersion,
+                current: snapshot.current, optimize: MenubarPayload.empty.optimize, history: fresh.history,
+                diagnostics: snapshot.diagnostics, agentStats: fresh.agentStats,
+                exeOsDetected: fresh.exeOsDetected, statsFileAge: fresh.statsFileAge, projectSpend: snapshot.projectSpend
+            )
+            cache[target] = CachedPayload(payload: payload, fetchedAt: now(),
+                historicalValidatedAt: Date(timeIntervalSince1970: snapshot.historyValidatedAt / 1000))
+            errorsByKey.removeValue(forKey: target)
+            retryAfter.removeValue(forKey: target)
+            failureCounts.removeValue(forKey: target)
         }
     }
 
@@ -287,7 +354,7 @@ final class AppStore {
     }
 
     @discardableResult
-    private func refreshKey(_ key: PayloadCacheKey, includeOptimize: Bool) async -> Bool {
+    private func refreshKey(_ key: PayloadCacheKey, includeOptimize: Bool, allowCached: Bool = false) async -> Bool {
         // Date-scoped data never accumulates indefinitely as the app stays open.
         cache = cache.filter { $0.key.dateAnchor == key.dateAnchor }
         errorsByKey = errorsByKey.filter { $0.key.dateAnchor == key.dateAnchor }
@@ -320,10 +387,17 @@ final class AppStore {
             try await admission.acquire()
             do {
                 try Task.checkCancellation()
+                // Another period's scan may have populated this key while queued.
+                if allowCached && self.isFresh(key) { throw CancellationError() }
                 self.activeFetchCount += 1
                 defer { self.activeFetchCount -= 1 }
                 let result = try await fetcher(key.period, key.provider, includeOptimize)
                 try Task.checkCancellation()
+                if generation == self.refreshGeneration && !includeOptimize {
+                    try DataClient.validate(result)
+                    // Populate sibling keys before admitting the next queued detail.
+                    self.ingestPeriods(from: result, provider: key.provider, dateAnchor: key.dateAnchor)
+                }
                 await admission.release()
                 return result
             } catch {
@@ -354,6 +428,10 @@ final class AppStore {
             failureCounts.removeValue(forKey: key)
             retryAfter.removeValue(forKey: key)
             cache[key] = CachedPayload(payload: fresh, fetchedAt: now())
+            if !includeOptimize {
+                ingestPeriods(from: fresh, provider: key.provider, dateAnchor: key.dateAnchor)
+                persistPeriods()
+            }
             if isBadge, let url = badgeCacheURL,
                let data = try? JSONEncoder().encode(BadgeSnapshot(dateAnchor: key.dateAnchor, fetchedAt: now(), payload: fresh)),
                data.count <= 2 * 1024 * 1024 {
@@ -396,7 +474,7 @@ final class AppStore {
     private func refreshIfNeeded(_ key: PayloadCacheKey, includeOptimize: Bool) async {
         guard !Task.isCancelled else { return }
         guard !isFresh(key) else { return }
-        await refreshKey(key, includeOptimize: includeOptimize)
+        await refreshKey(key, includeOptimize: includeOptimize, allowCached: true)
     }
 
     /// Fetch only the requested aggregate. Provider detail loads when its tab is selected.
