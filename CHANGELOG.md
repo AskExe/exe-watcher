@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Redraw the terminal loading-screen owl from the 01A logo itself (half-block pixel art in Exe Gold) instead of the old cartoon; it looks left, right and blinks while sessions are scanned.
+
 ## 0.2.58 (unreleased)
 
 - Discover a supported client's first usage even when its data folder is created after Watcher starts. Include Copilot, custom Claude configuration roots and symlinked profiles in live monitoring, while ignoring unrelated home-folder events.
