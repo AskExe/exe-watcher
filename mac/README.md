@@ -103,7 +103,13 @@ REQUIRE_NOTARIZATION=1 mac/Scripts/package-app.sh v0.2.55
 
 The release mode signs the runtime and app with hardened runtime, submits both app and DMG to Apple, staples their tickets, and verifies the app's Gatekeeper assessment. An unsigned or unnotarized package is a review build, not a public launch artifact. See [Apple's notarization documentation](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution).
 
-Tagged GitHub releases require these repository secrets: `WATCHER_CERTIFICATE_BASE64` (Developer ID `.p12`), `WATCHER_CERTIFICATE_PASSWORD`, `WATCHER_CODESIGN_IDENTITY`, `WATCHER_APPLE_ID`, `WATCHER_APPLE_APP_PASSWORD`, and `WATCHER_APPLE_TEAM_ID`. The workflow fails before publishing when configuration is missing. Manual workflow runs produce development artifacts. Local signing remains supported without putting private signing material in GitHub.
+Releases are built and signed locally. The hosted `Release macOS Menubar` workflow is disabled: it has no signing secrets and only failed on each tag. To ship a version:
+
+1. Bump `package.json`, `package-lock.json` and `CHANGELOG.md`, open the PR, and merge it once CI passes.
+2. Package with the release command above. `BUILD-INFO.txt` must name a commit whose tree equals the merge commit (`git rev-parse <sha>^{tree}`), with zero modified files.
+3. Publish the release at the merge commit, attaching all four files from `mac/.build/dist`: `gh release create mac-vX.Y.Z --target <merge sha> --latest <dmg> <zip> SHA256SUMS.txt BUILD-INFO.txt`. The in-app updater reads the latest release, so this is what customers receive.
+4. Update the download on odd.community (`OddCommunity/odd-website`): the `/watcher/download` redirect in `vercel.json`, the version line and release-notes link in `public/watcher/index.html`, and the README note. Merge that PR, then deploy it. Merging does not publish the site: run `vercel deploy --prod` from a clean checkout of the merged commit.
+5. Verify as a customer: `curl -I https://odd.community/watcher/download` redirects to the new DMG, the downloaded DMG matches `SHA256SUMS.txt`, and `spctl` accepts it as Notarized Developer ID.
 
 ## Owl artwork and review
 
