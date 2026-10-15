@@ -19,7 +19,7 @@ import { aggregateProjectsIntoDays, buildPeriodDataFromDays, filterDaysToProvide
 import { CATEGORY_LABELS, type DateRange, type ProjectSummary, type TaskCategory } from './types.js'
 import { renderDashboard } from './dashboard.js'
 import { parseDateRangeFlags } from './cli-date.js'
-import { prewarmOptimizeScan, runOptimize, scanAndDetect } from './optimize.js'
+import { runOptimize, scanAndDetect } from './optimize.js'
 import { renderCompare } from './compare.js'
 import { getAllProviders, getDiscoveryWarnings } from './providers/index.js'
 import { clearPlan, readConfig, readPlan, saveConfig, savePlan, getConfigFilePath, type PlanId } from './config.js'
@@ -762,14 +762,13 @@ program
         try {
           const optimizeProjects = isAllProviders && opts.period === 'today'
             ? todayProjects
-            : fp(await parseAllSessions(scanRange, isAllProviders ? 'all' : pf))
+            : fp(await parseAllSessions(scanRange, isAllProviders ? 'all' : pf, true))
           optimize = await scanAndDetect(optimizeProjects, scanRange)
         } catch (err: unknown) {
           const msg = err instanceof Error ? err.message : String(err)
           const warn = `optimize parse failed: ${msg}`
           warnings.push(warn)
           process.stderr.write(`[exe-watcher] WARNING: ${warn}\n`)
-          optimize = await scanAndDetect(todayProjects, scanRange)
         }
       }
 
@@ -1191,9 +1190,8 @@ program
   .action(async (opts) => {
     await loadPricing()
     const { range, label } = getDateRange(opts.period)
-    const scanPromise = prewarmOptimizeScan(range)
-    const projects = await parseAllSessions(range, opts.provider)
-    await runOptimize(projects, label, range, scanPromise)
+    const projects = await parseAllSessions(range, opts.provider, true)
+    await runOptimize(projects, label, range)
   })
 
 program

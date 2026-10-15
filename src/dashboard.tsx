@@ -1,6 +1,6 @@
 import { getClaudeRecoveryForRange, type HistoricalRecovery } from './claude-recovery.js'
 import { LatestLoad } from './latest-load.js'
-import { withScanBudget } from './resource-budget.js'
+import { ResourceBudgetError, withScanBudget } from './resource-budget.js'
 import { homedir } from 'os'
 
 import React, { useState, useCallback, useEffect, useRef } from 'react'
@@ -583,6 +583,7 @@ function OptimizeView({ findings, costRate, projects, label, width, healthScore,
           <Text bold color={gradeColor}>{healthGrade}</Text>
           <Text dimColor> ({healthScore}/100)</Text>
         </Text>
+        <Text dimColor>Claude Code recommendations. Changes are yours to apply.</Text>
         <Text color="#16A34A" wrap="truncate-end">Savings: ~{formatTokens(totalTokens)} tokens (~{formatCost(totalCost)}, ~{pct}% of spend)</Text>
       </Box>
       {findings.map((f, i) => <FindingPanel key={i} index={i + 1} finding={f} costRate={costRate} width={width} />)}
@@ -643,7 +644,7 @@ function DashboardContent({ projects, period, columns, activeProvider, budgets, 
   )
 }
 
-function InteractiveDashboard({ initialPeriod, initialProvider, refreshSeconds, projectFilter, excludeFilter }: {
+export function InteractiveDashboard({ initialPeriod, initialProvider, refreshSeconds, projectFilter, excludeFilter }: {
   initialPeriod: Period
   initialProvider: string
   refreshSeconds?: number
@@ -664,6 +665,8 @@ function InteractiveDashboard({ initialPeriod, initialProvider, refreshSeconds, 
   const [detectedProviders, setDetectedProviders] = useState<string[]>([])
   const [view, setView] = useState<View>('dashboard')
   const [optimizeResult, setOptimizeResult] = useState<OptimizeResult | null>(null)
+  const [optimizeError, setOptimizeError] = useState<string | null>(null)
+  const [optimizeAttempt, setOptimizeAttempt] = useState(0)
   const [projectBudgets, setProjectBudgets] = useState<Map<string, ContextBudget>>(new Map())
   const [planUsage, setPlanUsage] = useState<PlanUsage | undefined>(undefined)
   const [loadingDots, setLoadingDots] = useState(1)
@@ -715,21 +718,26 @@ function InteractiveDashboard({ initialPeriod, initialProvider, refreshSeconds, 
 
   useEffect(() => {
     if (!optimizeAvailable || view !== 'optimize' || loading || initialLoading || loadError) { setOptimizeResult(null); return }
+    setOptimizeError(null)
     let cancelled = false
     const controller = new AbortController()
     async function scan() {
-      if (projects.length === 0) { setOptimizeResult(null); return }
       const result = await loader.current.run(signal => withScanBudget(() => scanAndDetect(projects, getDateRange(period)), 200_000, AbortSignal.any([signal, controller.signal])))
       if (!cancelled && result) setOptimizeResult(result)
     }
-    void scan().catch(error => { if (!cancelled) setLoadError(error instanceof Error ? error.message : String(error)) })
+    void scan().catch(error => {
+      if (!cancelled) setOptimizeError(error instanceof ResourceBudgetError
+        ? 'The analysis reached its safety limit. Completed session details are saved for your next attempt.'
+        : error instanceof Error ? error.message : String(error))
+    })
     return () => { cancelled = true; controller.abort() }
-  }, [projects, period, optimizeAvailable, view, loading, initialLoading, loadError])
+  }, [projects, period, optimizeAvailable, view, loading, initialLoading, loadError, optimizeAttempt])
 
   const reloadData = useCallback(async (p: Period, prov: string) => {
     const generation = ++reloadGenerationRef.current
     setLoading(true)
     setOptimizeResult(null)
+    setOptimizeError(null)
     try {
       setLoadError(null)
       const result = await loader.current.run(async signal => {
@@ -768,6 +776,7 @@ function InteractiveDashboard({ initialPeriod, initialProvider, refreshSeconds, 
 
   const switchPeriod = useCallback((np: Period) => {
     if (np === period) return
+    setLoading(true)
     setPeriod(np)
     if (debounceRef.current) clearTimeout(debounceRef.current)
     debounceRef.current = setTimeout(() => { reloadData(np, activeProvider) }, 600)
@@ -782,9 +791,13 @@ function InteractiveDashboard({ initialPeriod, initialProvider, refreshSeconds, 
 
   useInput((input, key) => {
     if (input === 'q') { loader.current.cancel(); exit(); return }
-    if (input === 'r') { void reloadData(period, activeProvider); return }
+    if (input === 'r') {
+      if (view === 'optimize' && !loading) { setOptimizeResult(null); setOptimizeAttempt(n => n + 1) }
+      else void reloadData(period, activeProvider)
+      return
+    }
     if (input === 'o' && view === 'dashboard' && optimizeAvailable) { setView('optimize'); return }
-    if ((input === 'b' || key.escape) && view === 'optimize') { setLoadError(null); setView('dashboard'); return }
+    if ((input === 'b' || key.escape) && view === 'optimize') { setOptimizeError(null); setView('dashboard'); return }
     if (input === 'c' && compareAvailable && view === 'dashboard') { setView('compare'); return }
     if (input === 'p' && multipleProviders && view !== 'compare') {
       const opts = ['all', ...detectedProviders]; const next = opts[(opts.indexOf(activeProvider) + 1) % opts.length] ?? 'all'
@@ -839,6 +852,11 @@ function InteractiveDashboard({ initialPeriod, initialProvider, refreshSeconds, 
       <PeriodTabs active={period} providerName={activeProvider} showProvider={multipleProviders && view !== 'compare'} />
       {view === 'compare'
         ? <CompareView projects={projects} onBack={() => setView('dashboard')} />
+        : view === 'optimize' && optimizeError
+          ? <Panel title="Optimize could not finish" color={ORANGE} width={dashWidth}>
+              <Text>{optimizeError}</Text>
+              <Text dimColor>Your usage report is still available. Press b to go back, r to retry, or 1–5 for a shorter period.</Text>
+            </Panel>
         : view === 'optimize' && optimizeResult
           ? <OptimizeView findings={optimizeResult.findings} costRate={optimizeResult.costRate} projects={projects} label={PERIOD_LABELS[period]} width={dashWidth} healthScore={optimizeResult.healthScore} healthGrade={optimizeResult.healthGrade} />
           : view === 'optimize'
