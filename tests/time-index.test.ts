@@ -3,6 +3,7 @@ import { mkdtemp, mkdir, writeFile, appendFile, readFile, rm, rename } from 'nod
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createRequire } from 'node:module'
+import { gzipSync } from 'node:zlib'
 import { refreshTimeIndex, readTimeIndex } from '../src/time-index.js'
 import { summarizeTime } from '../src/time-tracking.js'
 import type { SessionSource } from '../src/providers/types.js'
@@ -37,6 +38,17 @@ it('persists completed files on resource exhaustion and recovers on a later proc
   const next = await refreshTimeIndex({ sources, history: true })
   expect(duration(next)).toBe(120_000)
   expect(summarizeTime(next, range).pendingFiles).toBe(0)
+})
+
+it('advances a manual large-file pass in small blocks while automatic work stays small', async () => {
+  const body = (JSON.stringify({ type: 'padding', content: 'x'.repeat(100_000) }) + '\n').repeat(24) + event(60, 'task_complete', { duration_ms: 60_000 })
+  const manual = join(dir, 'manual.jsonl'), automatic = join(dir, 'automatic.jsonl')
+  await writeFile(manual, body); await writeFile(automatic, body)
+  const recovered = await refreshTimeIndex({ sources: [source(manual)], history: true })
+  expect(duration(recovered)).toBe(60_000)
+  expect(summarizeTime(recovered, range).pendingFiles).toBe(0)
+  const small = await refreshTimeIndex({ sources: [source(automatic)] })
+  expect(summarizeTime(small, range).pendingFiles).toBe(1)
 })
 
 it('waits for a partial final record and keeps timings when a source is later removed', async () => {
@@ -129,6 +141,27 @@ it('recovers Cursor interaction gaps from saved user clocks without loading text
   db.close()
   const index = await refreshTimeIndex({ sources: [source(path, 'cursor')], history: true })
   expect(summarizeTime(index, range).userActiveMs).toBe(60_000)
+})
+
+it('does not count OpenCode bulk closure weeks later as continuous AI work', async () => {
+  const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite')
+  const path = join(dir, 'opencode.db'), db = new DatabaseSync(path)
+  db.exec('CREATE TABLE session (id TEXT, directory TEXT, parent_id TEXT); CREATE TABLE message (id TEXT, session_id TEXT, time_created INTEGER, data TEXT); CREATE TABLE part (message_id TEXT, time_created INTEGER)')
+  db.prepare('INSERT INTO session VALUES (?,?,?)').run('main', '/fixture', null)
+  db.prepare('INSERT INTO message VALUES (?,?,?,?)').run('reply', 'main', start, JSON.stringify({ role: 'assistant', time: { created: start, completed: start + 14 * 86400_000 } }))
+  db.prepare('INSERT INTO part VALUES (?,?)').run('reply', start + 15_000)
+  db.prepare('INSERT INTO part VALUES (?,?)').run('reply', start + 14 * 86400_000)
+  db.close()
+  const index = await refreshTimeIndex({ sources: [source(path + ':main', 'opencode')], history: true })
+  const report = summarizeTime(index, { start: new Date(start), end: new Date(start + 15 * 86400_000) })
+  expect(report.aiRunningMs).toBe(15_000)
+  expect(report.estimatedAiMs).toBe(15_000)
+  expect(report.notes.some(note => note.includes('unverified gaps'))).toBe(true)
+  const old = Object.values(index.files)[0]!
+  old.adapterVersion = 1
+  Object.values(old.state.children!)[0]!.ai = [[start, start + 14 * 86400_000, 0, 'reply']]
+  await writeFile(join(dir, 'cache', 'time-index-v1.json.gz'), gzipSync(JSON.stringify(index)))
+  expect(duration(await refreshTimeIndex({ sources: [source(path + ':main', 'opencode')], history: true }))).toBe(15_000)
 })
 
 it('cancellation preserves previously recovered time and does not change cost history', async () => {

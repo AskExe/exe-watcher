@@ -19,6 +19,7 @@ export type TimeState = {
 export type TimeFile = {
   provider: string; project: string; identity: string; size: number; mtime: number; ctime: number
   offset: number; anchor: string; dbOffset?: number; discarding?: boolean; unavailable?: boolean; state: TimeState
+  adapterVersion?: number
 }
 export type TimeIndex = { version: 1; files: Record<string, TimeFile>; updatedAt: string; warnings: string[] }
 export type TimeReport = {
@@ -235,7 +236,7 @@ export function summarizeTime(index: TimeIndex, range: DateRange, provider = 'al
       'Your time is an estimate of reply-to-next-prompt gaps up to 5 minutes, merged across chats. Longer idle gaps and subagents are excluded; unidentified automation may be included. It does not measure attention.',
       ...(estimated.length ? ['Some AI time is inferred from prompt/response timestamps, limited to spans up to 30 minutes. Longer unmeasured gaps stay unknown.'] : []),
       ...(pendingFiles ? ['Timing recovery is incomplete. Saved progress will resume on later updates; usage costs are unaffected.'] : []),
-      ...(files.some(f => f.state.dropped) ? ['Some malformed or oversized timing records could not be recovered; their time is unknown.'] : []),
+      ...(files.some(f => [f.state, ...Object.values(f.state.children ?? {})].some(s => s.dropped)) ? ['Some timing records were incomplete, oversized or had unverified gaps; their missing time is unknown.'] : []),
       ...index.warnings,
     ],
   }

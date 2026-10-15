@@ -137,7 +137,7 @@ Timing recovery starts July 1, 2025 and uses retained local evidence. **Partial 
 | Cursor IDE | Saved conversation message start/end clocks, when retained |
 | Cursor Agent | Timestamped CLI result durations; ordinary text transcripts lack clocks |
 | Copilot | Saved assistant turn start/end pairs |
-| OpenCode | Completed assistant message clocks, including archived sessions and subagents |
+| OpenCode | Completed message clocks, including archived sessions and subagents; late/missing completions use short inferred spans from saved parts |
 | Kimi Code | Native saved step boundaries, including separate agents |
 | Pi / OMP | Inferred prompt-to-final-reply spans |
 

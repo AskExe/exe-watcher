@@ -12,10 +12,10 @@ function stateFor(file: TimeFile, agent: string): TimeState {
   })
   return children[agent]!
 }
-function interval(state: TimeState, startValue: unknown, endValue: unknown, id: string): void {
+function interval(state: TimeState, startValue: unknown, endValue: unknown, id: string, estimated: 0 | 1 = 0): void {
   const start = timestamp(startValue), end = timestamp(endValue)
   state.observed++
-  if (start !== undefined && end !== undefined && end > start && end - start <= 31 * 86_400_000) state.ai.push([start, end, 0, id])
+  if (start !== undefined && end !== undefined && end > start && end - start <= 31 * 86_400_000) state.ai.push([start, end, estimated, id])
   if (end !== undefined) state.lastEnd = end
 }
 
@@ -42,10 +42,15 @@ export async function scanTimeDatabase(source: SessionSource, file: TimeFile): P
         else interval(state, row.started, row.completed, `${String(row.key).split(':').at(-1)}:${String(row.started)}`)
       }
     } else {
+      // Old messages can be closed in bulk weeks later. Their completion clocks
+      // cannot prove continuous work. Retain only a short observed prefix then.
+      const hasParts = db.query("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'part'").length > 0
+      const evidence = hasParts ? `(SELECT MAX(part.time_created) FROM part WHERE part.message_id = message.id
+        AND part.time_created >= message.time_created AND part.time_created <= message.time_created + 1800000)` : 'NULL'
       rows = db.query(`SELECT message.id, session.parent_id AS parent,
         json_extract(data, '$.role') AS role,
         COALESCE(json_extract(data, '$.time.created'), message.time_created) AS started,
-        json_extract(data, '$.time.completed') AS completed
+        json_extract(message.data, '$.time.completed') AS completed, ${evidence} AS observed_end
         FROM message JOIN session ON message.session_id = session.id
         WHERE message.session_id = ? ORDER BY message.time_created, message.id LIMIT ? OFFSET ?`, [source.path.slice(separator + 1), PAGE, file.dbOffset ?? 0])
       const state = stateFor(file, `opencode:${source.path.slice(separator + 1)}`)
@@ -53,7 +58,14 @@ export async function scanTimeDatabase(source: SessionSource, file: TimeFile): P
         chargeRecord()
         state.child = !!row.parent
         if (row.role === 'user') observeTime('opencode', state, { type: 'user', timestamp: row.started })
-        else if (row.role === 'assistant') interval(state, row.started, row.completed, String(row.id))
+        else if (row.role === 'assistant') {
+          const started = timestamp(row.started), completed = timestamp(row.completed)
+          if (started !== undefined && (completed === undefined || completed < started || completed - started > 30 * 60_000)) {
+            state.dropped++
+            const observed = timestamp(row.observed_end)
+            if (observed !== undefined && observed - started <= 30 * 60_000) interval(state, started, observed, String(row.id), 1)
+          } else interval(state, row.started, row.completed, String(row.id))
+        }
       }
     }
     file.dbOffset = (file.dbOffset ?? 0) + rows.length

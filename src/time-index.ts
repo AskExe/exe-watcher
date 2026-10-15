@@ -15,6 +15,7 @@ import { getOpenCodeDbPaths } from './providers/opencode.js'
 const compress = promisify(gzip), decompress = promisify(gunzip)
 const MAX_INDEX = 32 * 1024 ** 2, MAX_DISK = 16 * 1024 ** 2, MAX_FILES = 20_000
 const BLOCK = 2 * 1024 ** 2
+const adapterVersion = (provider: string) => provider === 'opencode' ? 2 : 1
 const indexPath = () => join(getCacheDir(), 'time-index-v1.json.gz')
 const empty = (): TimeIndex => ({ version: 1, files: Object.create(null), updatedAt: new Date().toISOString(), warnings: [] })
 
@@ -103,7 +104,7 @@ function fresh(source: SessionSource, identity: string, size: number, mtime: num
   const agent = source.provider === 'copilot' ? basename(dirname(source.path))
     : source.provider === 'kimi' ? `${kimiSession}/${basename(dirname(source.path))}`
     : `${child ? basename(dirname(dirname(source.path))) + '/' : ''}${basename(source.path, '.jsonl')}`
-  return { provider: source.provider, project: source.project, identity, size, mtime, ctime, offset: 0, anchor: '',
+  return { provider: source.provider, project: source.project, identity, size, mtime, ctime, offset: 0, anchor: '', adapterVersion: adapterVersion(source.provider),
     state: { agent: `${source.provider}:${agent}`, child, ai: [], user: [], observed: 0, dropped: 0 } }
 }
 
@@ -197,7 +198,7 @@ export async function refreshTimeIndex(options: TimeRefreshOptions = {}): Promis
         if (!current.files[key] && fileCount < MAX_FILES) {
           current.files[key] = fresh(source, `${s.dev}:${s.ino}:${wal?.size ?? 0}:${wal?.mtimeMs ?? 0}`, s.size, s.mtimeMs, s.ctimeMs)
           changed = true; fileCount++
-        } else if (current.files[key] && (current.files[key]!.identity !== `${s.dev}:${s.ino}:${wal?.size ?? 0}:${wal?.mtimeMs ?? 0}` || current.files[key]!.size !== s.size || current.files[key]!.mtime !== s.mtimeMs || current.files[key]!.ctime !== s.ctimeMs)) {
+        } else if (current.files[key] && ((current.files[key]!.adapterVersion ?? 1) !== adapterVersion(source.provider) || current.files[key]!.identity !== `${s.dev}:${s.ino}:${wal?.size ?? 0}:${wal?.mtimeMs ?? 0}` || current.files[key]!.size !== s.size || current.files[key]!.mtime !== s.mtimeMs || current.files[key]!.ctime !== s.ctimeMs)) {
           current.files[key]!.unavailable = true; changed = true
         }
       }
@@ -206,14 +207,15 @@ export async function refreshTimeIndex(options: TimeRefreshOptions = {}): Promis
         const key = createHash('sha256').update(`${source.provider}:${source.path}`).digest('hex')
         const identity = `${s.dev}:${s.ino}:${wal?.size ?? 0}:${wal?.mtimeMs ?? 0}`
         let row = current.files[key]
-        if (row && !row.unavailable && row.identity === identity && row.size === s.size && row.mtime === s.mtimeMs && row.ctime === s.ctimeMs && row.offset >= row.size) continue
+        const sameAdapter = (row?.adapterVersion ?? 1) === adapterVersion(source.provider)
+        if (row && sameAdapter && !row.unavailable && row.identity === identity && row.size === s.size && row.mtime === s.mtimeMs && row.ctime === s.ctimeMs && row.offset >= row.size) continue
         if (Date.now() >= deadline) break
         if (!row && fileCount >= MAX_FILES) { current.warnings.push('Timing file limit reached; additional files remain unknown.'); break }
         // A shrink, replacement, or rewrite invalidates timings from that snapshot.
         // Appends must preserve both the header and the prior cursor boundary.
-        const appended = row && row.identity === identity && s.size > row.size && row.offset > 0
+        const appended = row && sameAdapter && row.identity === identity && s.size > row.size && row.offset > 0
           && row.anchor === await anchor(source.path, row.offset)
-        const unchangedPartial = row && row.identity === identity && s.size === row.size && row.mtime === s.mtimeMs && row.ctime === s.ctimeMs
+        const unchangedPartial = row && sameAdapter && row.identity === identity && s.size === row.size && row.mtime === s.mtimeMs && row.ctime === s.ctimeMs
         if (!row) fileCount++
         if (!row || (!appended && !unchangedPartial)) row = fresh(source, identity, s.size, s.mtimeMs, s.ctimeMs)
         row.size = s.size; row.mtime = s.mtimeMs; row.ctime = s.ctimeMs
@@ -223,7 +225,14 @@ export async function refreshTimeIndex(options: TimeRefreshOptions = {}): Promis
           else if (source.provider === 'cursor-agent' && !source.path.endsWith('.jsonl')) {
             // Saved Cursor Agent text transcripts have neither turn clocks nor durations.
             row.offset = row.size
-          } else await scanBlock(source, row)
+          } else {
+            const startedAt = row.offset
+            do {
+              const before = row.offset
+              await scanBlock(source, row)
+              if (row.offset === before) break // Incomplete final record waits for an append.
+            } while (options.history && row.offset < row.size && row.offset - startedAt < 16 * 1024 ** 2 && Date.now() < deadline)
+          }
           // Keep run IDs: forks can copy the same run into a different session.
           // Per-agent overlap merging is performed only when summarizing a view.
           row.state.user = unionIntervals(row.state.user)
