@@ -5,13 +5,14 @@ export type PeriodData = {
   label: string
   cost: number
   calls: number
+  callsIncomplete?: boolean
   sessions: number
   inputTokens: number
   outputTokens: number
   cacheReadTokens: number
   cacheWriteTokens: number
   categories: Array<{ name: string; cost: number; turns: number; editTurns: number; oneShotTurns: number }>
-  models: Array<{ name: string; cost: number; calls: number }>
+  models: Array<{ name: string; cost: number; calls: number; callsIncomplete?: boolean }>
 }
 
 export type ProviderCost = {
@@ -40,9 +41,9 @@ function getCliVersion(): string {
 
 /**
  * Minimum menubar app version required for this CLI's JSON schema.
- * Bump when MenubarPayload shape changes in a breaking way.
+ * Bump when older apps would misinterpret the payload, including call coverage.
  */
-const MIN_APP_VERSION = '0.2.40'
+const MIN_APP_VERSION = '0.2.59'
 
 const TOP_ACTIVITIES_LIMIT = 20
 const TOP_MODELS_LIMIT = 20
@@ -83,6 +84,7 @@ export type MenubarPayload = {
     label: string
     cost: number
     calls: number
+    callsIncomplete: boolean
     sessions: number
     oneShotRate: number | null
     inputTokens: number
@@ -98,6 +100,7 @@ export type MenubarPayload = {
       name: string
       cost: number
       calls: number
+      callsIncomplete: boolean
     }>
     providers: Record<string, number>
   }
@@ -357,11 +360,19 @@ function buildTopActivities(categories: PeriodData['categories']): MenubarPayloa
 }
 
 function buildTopModels(models: PeriodData['models']): MenubarPayload['current']['topModels'] {
-  return models
-    .filter(m => m.name !== SYNTHETIC_MODEL_NAME)
+  const merged = new Map<string, MenubarPayload['current']['topModels'][number]>()
+  for (const model of models) {
+    if (model.name === SYNTHETIC_MODEL_NAME) continue
+    const name = getShortModelName(model.name)
+    const row = merged.get(name) ?? { name, cost: 0, calls: 0, callsIncomplete: false }
+    row.cost += model.cost
+    row.calls += model.calls
+    row.callsIncomplete ||= model.callsIncomplete === true
+    merged.set(name, row)
+  }
+  return [...merged.values()]
     .sort((a, b) => b.cost - a.cost)
     .slice(0, TOP_MODELS_LIMIT)
-    .map(m => ({ name: getShortModelName(m.name), cost: m.cost, calls: m.calls }))
 }
 
 function buildOptimize(optimize: OptimizeResult | null): MenubarPayload['optimize'] {
@@ -417,6 +428,7 @@ export function buildMenubarPayload(
       label: current.label,
       cost: current.cost,
       calls: current.calls,
+      callsIncomplete: current.callsIncomplete === true,
       sessions: current.sessions,
       oneShotRate: aggregateOneShotRate(current.categories),
       inputTokens: current.inputTokens,

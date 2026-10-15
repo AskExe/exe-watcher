@@ -15,6 +15,21 @@ struct MenubarPayload: Codable, Sendable {
     let statsFileAge: Double?
     let projectSpend: [ProjectSpendEntry]?
     var periodSnapshots: [String: PeriodSnapshot]? = nil
+
+    // Old same-day snapshots have no coverage fields. Their recovery warning
+    // still prevents an unknown count from appearing as an exact zero or total.
+    var hasIncompleteCallCounts: Bool {
+        current.callsIncomplete ?? (diagnostics?.hasRecoveredUsage == true || (current.calls == 0 && current.cost > 0))
+    }
+
+    var callCount: CallCount {
+        CallCount(recorded: current.calls, isIncomplete: hasIncompleteCallCounts)
+    }
+
+    func callCount(for model: ModelEntry) -> CallCount {
+        CallCount(recorded: model.calls, isIncomplete: model.callsIncomplete
+            ?? (hasIncompleteCallCounts || (model.calls == 0 && model.cost > 0)))
+    }
 }
 
 struct PeriodSnapshot: Codable, Sendable {
@@ -31,6 +46,10 @@ struct DiagnosticsBlock: Codable, Sendable {
 
     var hasUnpricedUsage: Bool {
         warnings.contains { $0.hasPrefix("No API pricing for model") || $0.contains("no token counts; its API-equivalent cost cannot be calculated") }
+    }
+
+    var hasRecoveredUsage: Bool {
+        warnings.contains { $0.contains("historical Claude token counters") }
     }
 
     var discoveryWarning: String? {
@@ -164,6 +183,7 @@ struct CurrentBlock: Codable, Sendable {
     let topActivities: [ActivityEntry]
     let topModels: [ModelEntry]
     let providers: [String: Double]
+    var callsIncomplete: Bool? = nil
 }
 
 struct ActivityEntry: Codable, Sendable {
@@ -177,6 +197,24 @@ struct ModelEntry: Codable, Sendable {
     let name: String
     let cost: Double
     let calls: Int
+    var callsIncomplete: Bool? = nil
+}
+
+struct CallCount {
+    let recorded: Int
+    let isIncomplete: Bool
+
+    var displayValue: String {
+        if isIncomplete && recorded == 0 { return "—" }
+        return recorded.asThousandsSeparated() + (isIncomplete ? "+" : "")
+    }
+
+    var explanation: String {
+        if isIncomplete {
+            return "\(recorded.asThousandsSeparated()) calls are recorded in retained logs. Recovered historical token totals have no call counts, so the full count is unknown."
+        }
+        return "\(recorded.asThousandsSeparated()) calls recorded in local usage logs."
+    }
 }
 
 struct OptimizeBlock: Codable, Sendable {

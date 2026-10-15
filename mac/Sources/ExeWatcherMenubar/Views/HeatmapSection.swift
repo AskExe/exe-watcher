@@ -737,7 +737,7 @@ private struct StatsInsight: View {
 
                 VStack(alignment: .leading, spacing: 8) {
                     StatRow(label: periodMetricLabel("Sessions", for: period), value: "\(payload.current.sessions)")
-                    StatRow(label: periodMetricLabel("Calls", for: period), value: payload.current.calls.asThousandsSeparated())
+                    StatRow(label: periodMetricLabel("Calls", for: period), value: payload.callCount.displayValue)
                     StatRow(label: "Current streak", value: stats.currentStreak)
                     StatRow(label: "Longest streak", value: stats.longestStreak)
                 }

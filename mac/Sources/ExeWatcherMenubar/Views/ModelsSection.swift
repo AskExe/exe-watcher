@@ -12,6 +12,7 @@ struct ModelsSection: View {
                 HStack(spacing: 8) {
                     Text("Cost").frame(minWidth: 54, alignment: .trailing)
                     Text("Calls").frame(minWidth: 52, alignment: .trailing)
+                        .help("Calls recorded in local logs. + is a recorded minimum; — means the count is unavailable.")
                 }
                 .font(.system(size: 10, weight: .medium))
                 .foregroundStyle(.tertiary)
@@ -21,7 +22,13 @@ struct ModelsSection: View {
             VStack(alignment: .leading, spacing: 7) {
                 let maxCost = store.payload.current.topModels.map(\.cost).max() ?? 1
                 ForEach(store.payload.current.topModels, id: \.name) { model in
-                    ModelRow(model: model, maxCost: maxCost)
+                    ModelRow(model: model, maxCost: maxCost, callCount: store.payload.callCount(for: model))
+                }
+
+                if store.payload.hasIncompleteCallCounts {
+                    Text("Calls: + recorded minimum · — unavailable")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
                 }
 
                 TokensLine()
@@ -34,6 +41,7 @@ struct ModelsSection: View {
 private struct ModelRow: View {
     let model: ModelEntry
     let maxCost: Double
+    let callCount: CallCount
 
     var body: some View {
         HStack(spacing: 8) {
@@ -49,11 +57,13 @@ private struct ModelRow: View {
                 .tracking(-0.2)
                 .frame(minWidth: 54, alignment: .trailing)
 
-            Text("\(model.calls)")
+            Text(callCount.displayValue)
                 .font(.system(size: 11))
                 .monospacedDigit()
                 .foregroundStyle(.secondary)
                 .frame(minWidth: 52, alignment: .trailing)
+                .help(callCount.explanation)
+                .accessibilityLabel(callCount.explanation)
         }
         .padding(.horizontal, 2)
         .padding(.vertical, 1)

@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { calculateCost, getShortModelName } from './models.js'
 import { parseHistoryStartDate } from './history-start.js'
 import type { DailyEntry } from './daily-cache.js'
+import type { PeriodData } from './menubar-json.js'
 
 export type RecoveryTokens = { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number }
 export type ClaudeUsageSnapshot = {
@@ -22,6 +23,24 @@ export type HistoricalRecovery = RecoveryTokens & {
 }
 const fields = ['inputTokens', 'outputTokens', 'cacheReadTokens', 'cacheWriteTokens'] as const
 const emptyTokens = (): RecoveryTokens => ({ inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 })
+
+/** Recovery has token totals, not request records. Keep the recorded count as a
+ * lower bound and mark every affected model, including models with no logs. */
+export function applyClaudeRecovery(data: PeriodData, recovery: HistoricalRecovery): void {
+  data.cost += recovery.costUSD
+  for (const field of fields) data[field] += recovery[field]
+  data.callsIncomplete = true
+  for (const recovered of recovery.models) {
+    const name = getShortModelName(recovered.model)
+    const existing = data.models.find(model => getShortModelName(model.name) === name)
+    if (existing) {
+      existing.cost += recovered.costUSD
+      existing.callsIncomplete = true
+    } else {
+      data.models.push({ name, cost: recovered.costUSD, calls: 0, callsIncomplete: true })
+    }
+  }
+}
 
 /** Claude retains cumulative model counters after deleting old transcripts. Keep
  * them separate from dated usage: no fabricated calls, projects, or activity days. */

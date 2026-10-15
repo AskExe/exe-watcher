@@ -57,6 +57,8 @@ From 0.2.56, each daily refresh also updates every period whose history is fully
 
 From 0.2.57, Watcher also reads native Kimi Code `sessions/**/wire.jsonl` files under `~/.kimi-code` (or `KIMI_CODE_HOME`), including subagents. GLM and Kimi models used through Claude/OpenCode remain attributed to those clients. Recorded token usage is counted even when a model alias has no verified API rate; its cost is excluded with a warning.
 
+From 0.2.59, historical token recovery marks missing call counts explicitly: `—` means unavailable and `18+` means at least 18 calls are recorded. Costs recovered from cumulative token counters no longer appear to have an exact zero or partial call count. The aggregate call count uses the same notation; counts backed by request logs remain unchanged.
+
 ## Project layout
 
 ```

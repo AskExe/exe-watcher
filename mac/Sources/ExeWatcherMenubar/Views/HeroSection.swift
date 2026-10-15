@@ -8,10 +8,11 @@ struct HeroSection: View {
         HStack {
             SectionCaption(text: caption)
             Spacer()
-            Text("\(store.payload.current.calls.asThousandsSeparated()) calls")
+            Text("\(store.payload.callCount.displayValue) calls")
                 .font(.system(size: 11))
                 .monospacedDigit()
                 .foregroundStyle(.secondary)
+                .help(store.payload.callCount.explanation)
             Text("·")
                 .font(.system(size: 11))
                 .foregroundStyle(.tertiary)
@@ -37,14 +38,14 @@ struct HeroSection: View {
                 .foregroundStyle(.secondary)
                 .help(warning)
         }
-        if !store.payload.generated.isEmpty && store.selectedProvider == .all && store.payload.current.calls == 0 {
+        if !store.payload.generated.isEmpty && store.selectedProvider == .all && store.payload.current.calls == 0 && store.payload.current.cost == 0 && !store.payload.hasIncompleteCallCounts {
             Text("No recorded usage in this period · supported tools are found automatically")
                 .font(.system(size: 10))
                 .foregroundStyle(.secondary)
         }
         if store.selectedPeriod == .all {
             if let warning = store.payload.diagnostics?.warnings.first(where: { $0.contains("historical Claude token counters") }) {
-                Text("Includes recovered history estimates")
+                Text("Recovered history · call counts incomplete")
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
                     .help(warning)

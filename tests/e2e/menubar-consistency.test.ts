@@ -44,6 +44,15 @@ const beginning = new Date()
 beginning.setDate(beginning.getDate() - 400)
 writeFileSync(join(fixtureHome, '.config/exe-watcher/config.json'),
   JSON.stringify({ historyStartDate: localDateKey(beginning) }))
+const checkpoint = new Date()
+checkpoint.setDate(checkpoint.getDate() - 1)
+writeFileSync(join(fixtureHome, '.claude/stats-cache.json'), JSON.stringify({
+  firstSessionDate: beginning.toISOString(), lastComputedDate: localDateKey(checkpoint),
+  modelUsage: {
+    'claude-sonnet-4-6': { inputTokens: 10000, outputTokens: 10000 },
+    'claude-opus-4-8': { outputTokens: 100 },
+  },
+}))
 writeFileSync(join(fixtureCache, 'litellm-pricing.json'), JSON.stringify({
   schemaVersion: 2, timestamp: Date.now(), warnings: [], data: {
     'claude-sonnet-4-6': { inputCostPerToken: 3e-6, outputCostPerToken: 15e-6,
@@ -121,6 +130,17 @@ const allPeriodResults = Object.fromEntries(
 // ---------------------------------------------------------------------------
 
 describe('CLI menubar-json E2E', { timeout: 60_000 }, () => {
+  it('retains real calls and exposes missing historical call coverage through the actual CLI', async () => {
+    const all = (await allPeriodResults.all).data.current as {
+      calls: number; callsIncomplete: boolean;
+      topModels: Array<{ name: string; calls: number; callsIncomplete: boolean }>
+    }
+    expect(all.calls).toBe(4)
+    expect(all.callsIncomplete).toBe(true)
+    expect(all.topModels.find(m => m.name === 'Sonnet 4.6')).toMatchObject({ calls: 4, callsIncomplete: true })
+    expect(all.topModels.find(m => m.name === 'Opus 4.8')).toMatchObject({ calls: 0, callsIncomplete: true })
+    expect((await allPeriodResults.today).data.current).toMatchObject({ calls: 1, callsIncomplete: false })
+  })
   it('one complete history response includes rollups equivalent to every direct period', async () => {
     const { data } = await allPeriodResults.all
     const snapshots = data.periodSnapshots as Record<string, { current: unknown; projectSpend: unknown }>

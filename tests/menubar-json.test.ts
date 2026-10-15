@@ -138,11 +138,26 @@ describe('buildMenubarPayload', () => {
   it('includes recovered models appended after the retained model list in cost order', () => {
     const period = emptyPeriod('All Time')
     period.models = Array.from({ length: 20 }, (_, i) => ({ name: `Model${i}`, cost: 1, calls: 1 }))
-    period.models.push({ name: 'claude-opus-4-6', cost: 34000, calls: 0 })
+    period.models.push({ name: 'claude-opus-4-6', cost: 34000, calls: 0, callsIncomplete: true })
     const payload = buildMenubarPayload(period, [], null)
-    expect(payload.current.topModels[0]).toEqual({ name: 'Opus 4.6', cost: 34000, calls: 0 })
+    expect(payload.current.topModels[0]).toEqual({ name: 'Opus 4.6', cost: 34000, calls: 0, callsIncomplete: true })
     expect(payload.current.topModels).toHaveLength(20)
     expect(period.models[0].name).toBe('Model0')
+  })
+
+  it('merges request counts and recovery coverage for raw and display names of the same model', () => {
+    const period = emptyPeriod('All Time')
+    period.models = [
+      { name: 'Opus 4.6', cost: 10, calls: 18 },
+      { name: 'claude-opus-4-6', cost: 34000, calls: 0, callsIncomplete: true },
+      { name: 'gpt-5.4', cost: 2, calls: 3 },
+    ]
+    const models = buildMenubarPayload(period, [], null).current.topModels
+    expect(models).toEqual([
+      { name: 'Opus 4.6', cost: 34010, calls: 18, callsIncomplete: true },
+      { name: 'GPT-5.4', cost: 2, calls: 3, callsIncomplete: false },
+    ])
+    expect(period.models).toHaveLength(3)
   })
 
   it('caps topActivities at 20 so all task categories can surface', () => {

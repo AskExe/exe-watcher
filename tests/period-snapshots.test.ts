@@ -69,7 +69,30 @@ describe('period snapshots', () => {
     expect(snapshots.all!.current.cost).toBe(24)
     expect(snapshots.all!.current.providers.claude).toBe(24)
     expect(snapshots.all!.current.calls).toBe(build(fixture()).all!.current.calls)
+    expect(snapshots.all!.current.callsIncomplete).toBe(true)
+    expect(snapshots.all!.current.topModels.find(m => m.name === 'sonnet')).toMatchObject({ calls: 0, callsIncomplete: true })
     expect(snapshots.month!.current.cost).toBe(19)
+    expect(snapshots.month!.current.callsIncomplete).toBe(false)
     expect(snapshots.all!.diagnostics!.warnings).toEqual([recovery.note])
+  })
+
+  it('keeps recovery coverage in cached All Time and Claude snapshots, excluding other providers', () => {
+    const tokens = { inputTokens: 100, outputTokens: 50, cacheReadTokens: 0, cacheWriteTokens: 0 }
+    const recovery = { ...tokens, source: 'claude-stats-cache' as const, throughDate: '2026-10-01', costUSD: 5,
+      models: [{ ...tokens, name: 'Opus 4.6', model: 'claude-opus-4-6', costUSD: 5 }], note: 'Recovered retained usage' }
+    const cache = fixture()
+    const day = cache.days.at(-1)!
+    day.models['Opus 4.6'] = { ...tokens, calls: 18, cost: 1 }
+    day.providers.claude!.models = structuredClone(day.models)
+    for (const provider of ['all', 'claude', 'codex']) {
+      const snapshots = buildPeriodSnapshots(cache, [live(2)], '2026-10-14', windows, provider,
+        new Map([['claude', 'Claude']]), recovery, 1, [])
+      const persisted = JSON.parse(JSON.stringify(snapshots)) as typeof snapshots
+      expect(persisted.all!.current.callsIncomplete).toBe(provider !== 'codex')
+      if (provider !== 'codex') {
+        expect(persisted.all!.current.topModels).toEqual([{ name: 'Opus 4.6', cost: 6, calls: 18, callsIncomplete: true }])
+      }
+      expect(persisted.today!.current.callsIncomplete).toBe(false)
+    }
   })
 })
