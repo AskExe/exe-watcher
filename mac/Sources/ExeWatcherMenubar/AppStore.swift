@@ -161,7 +161,8 @@ final class AppStore {
                 generated: fresh.generated, cliVersion: fresh.cliVersion, minAppVersion: fresh.minAppVersion,
                 current: snapshot.current, optimize: MenubarPayload.empty.optimize, history: fresh.history,
                 diagnostics: snapshot.diagnostics, agentStats: fresh.agentStats,
-                exeOsDetected: fresh.exeOsDetected, statsFileAge: fresh.statsFileAge, projectSpend: snapshot.projectSpend
+                exeOsDetected: fresh.exeOsDetected, statsFileAge: fresh.statsFileAge, projectSpend: snapshot.projectSpend,
+                time: snapshot.time
             )
             cache[target] = CachedPayload(payload: payload, fetchedAt: now(),
                 historicalValidatedAt: Date(timeIntervalSince1970: snapshot.historyValidatedAt / 1000))

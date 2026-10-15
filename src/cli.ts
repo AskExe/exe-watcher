@@ -33,6 +33,8 @@ import { completeHistoryBuild } from './history-build.js'
 import { createInterface } from 'node:readline'
 import { createRequire } from 'node:module'
 import { watchMenubarParent } from './menubar-lifecycle.js'
+import { getTimeReport, refreshTimeIndex } from './time-index.js'
+import { formatDuration, summarizeTime, type TimeReport } from './time-tracking.js'
 
 const require = createRequire(import.meta.url)
 const { version } = require('../package.json')
@@ -135,6 +137,7 @@ async function runJsonReport(period: Period, provider: string, project: string[]
   const { range, label } = getDateRange(period)
   const projects = filterProjectsByName(await parseAllSessions(range, provider, true), project, exclude)
   const report: ReturnType<typeof buildJsonReport> & { plan?: JsonPlanSummary } = buildJsonReport(projects, label, period)
+  report.time = await getTimeReport(range, provider, project, exclude)
   if (period === 'all' && (provider === 'all' || provider === 'claude') && !project.length && !exclude.length) {
     const recovery = await getClaudeRecoveryForRange(range)
       if (recovery) {
@@ -297,6 +300,7 @@ function buildJsonReport(projects: ProjectSummary[], period: string, periodKey: 
     generated: new Date().toISOString(),
     currency: code,
     costBasis: 'api-equivalent',
+    time: undefined as TimeReport | undefined,
     warnings: [...getDiscoveryWarnings(), ...getPricingWarnings(), ...getParseWarnings()],
     period,
     periodKey,
@@ -355,7 +359,9 @@ program
           opts.project,
           opts.exclude,
         )
-        console.log(JSON.stringify(buildJsonReport(projects, label, 'custom'), null, 2))
+        const report = buildJsonReport(projects, label, 'custom')
+        report.time = await getTimeReport(customRange, opts.provider, opts.project, opts.exclude)
+        console.log(JSON.stringify(report, null, 2))
       } else {
         await runJsonReport(period, opts.provider, opts.project, opts.exclude)
       }
@@ -838,7 +844,12 @@ program
           return { key, label, start: toDateString(key === 'all' ? historyStart : range.start) }
         }), pf, displayNameByName, historicalRecovery, parseTimeMs, warnings,
       ) : undefined
-      const json = JSON.stringify({ ...payload, periodSnapshots, costBasis: 'api-equivalent', pricing: getPricingMetadata(), historicalRecovery: opts.period === 'all' ? historicalRecovery : null })
+      const timeIndex = await refreshTimeIndex()
+      const time = summarizeTime(timeIndex, getDateRange(opts.period, now).range, pf, opts.project, opts.exclude)
+      if (periodSnapshots) for (const [key, snapshot] of Object.entries(periodSnapshots)) {
+        snapshot.time = summarizeTime(timeIndex, getDateRange(key, now).range, pf, opts.project, opts.exclude)
+      }
+      const json = JSON.stringify({ ...payload, time, periodSnapshots, costBasis: 'api-equivalent', pricing: getPricingMetadata(), historicalRecovery: opts.period === 'all' ? historicalRecovery : null })
       console.log(json)
       return
     }
@@ -1180,6 +1191,31 @@ program
     console.log(`  Provider: ${preset.provider}`)
     console.log(`  Reset day: ${resetDay}`)
     console.log(`  Config saved to ${getConfigFilePath()}\n`)
+  })
+
+program
+  .command('time')
+  .description('AI running time, elapsed busy time and estimated interaction time since July 1, 2025')
+  .option('-p, --period <period>', 'today, week, 30days, month, all', 'all')
+  .option('--provider <provider>', 'Filter by coding client', 'all')
+  .option('--project <names...>', 'Include projects by name')
+  .option('--exclude <names...>', 'Exclude projects by name')
+  .option('--recover', 'Advance one bounded historical recovery pass; safe to resume')
+  .option('--format <format>', 'text or json', 'text')
+  .action(async opts => {
+    const index = await refreshTimeIndex({ history: opts.recover === true })
+    const time = summarizeTime(index, getDateRange(opts.period).range, opts.provider, opts.project, opts.exclude)
+    if (opts.format === 'json') console.log(JSON.stringify(time))
+    else {
+      console.log(`\n  AI time · ${getDateRange(opts.period).label}`)
+      console.log(`  AI running:   ${formatDuration(time.aiRunningMs)} (added across agents)`)
+      console.log(`  Elapsed busy: ${formatDuration(time.elapsedBusyMs)} (overlap counted once)`)
+      console.log(`  Your time:    ${formatDuration(time.userActiveMs)} (estimate)`)
+      console.log(`  Partial history · ${time.indexedFiles} files · ${time.pendingFiles} awaiting recovery`)
+      for (const row of time.providers) console.log(`  ${row.name}: ${formatDuration(row.aiRunningMs)} · ${row.timedFiles}/${row.files} files with timing in this period`)
+      for (const note of time.notes) console.log(`  ${note}`)
+      console.log('')
+    }
   })
 
 program

@@ -18,6 +18,8 @@ import { getPlanUsageOrNull, type PlanUsage } from './plan-usage.js'
 import { planDisplayName } from './plans.js'
 import { owlFrame } from './owl-art.js'
 import { join } from 'path'
+import { getTimeReport } from './time-index.js'
+import { formatDuration, type TimeReport } from './time-tracking.js'
 
 type Period = 'today' | 'week' | '30days' | 'month' | 'all'
 type View = 'dashboard' | 'optimize' | 'compare'
@@ -623,7 +625,17 @@ function Row({ wide, width, children }: { wide: boolean; width: number; children
   return <>{children}</>
 }
 
-function DashboardContent({ projects, period, columns, activeProvider, budgets, planUsage, recovery }: { projects: ProjectSummary[]; period: Period; columns?: number; activeProvider?: string; budgets?: Map<string, ContextBudget>; planUsage?: PlanUsage; recovery?: HistoricalRecovery | null }) {
+function TimePanel({ time, width }: { time?: TimeReport; width: number }) {
+  return <Panel title="AI time" color={GOLD} width={width}>
+    <Text><Text bold>AI running </Text>{formatDuration(time?.aiRunningMs ?? null)}<Text dimColor> · added across agents</Text></Text>
+    <Text><Text bold>Elapsed busy </Text>{formatDuration(time?.elapsedBusyMs ?? null)}<Text dimColor> · overlapping time counted once</Text></Text>
+    <Text><Text bold>Your time ≈ </Text>{formatDuration(time?.userActiveMs ?? null)}<Text dimColor> · interaction-gap estimate, not attention</Text></Text>
+    <Text color={ORANGE}>{time?.aiRunningMs != null ? 'Partial history' : 'Timing unknown'}{time?.pendingFiles ? ` · ${time.pendingFiles} files awaiting recovery` : ''}{time?.estimatedAiMs ? ' · some AI time inferred' : ''}</Text>
+    {time && <Text dimColor>Providers without timed records: {time.providers.filter(p => p.aiRunningMs === null).map(p => p.name).join(', ') || 'none detected'}. Missing time is unknown, not zero.</Text>}
+  </Panel>
+}
+
+function DashboardContent({ projects, period, columns, activeProvider, budgets, planUsage, recovery, time }: { projects: ProjectSummary[]; period: Period; columns?: number; activeProvider?: string; budgets?: Map<string, ContextBudget>; planUsage?: PlanUsage; recovery?: HistoricalRecovery | null; time?: TimeReport }) {
   const { dashWidth, wide, halfWidth, barWidth } = getLayout(columns)
   const isCursor = activeProvider === 'cursor'
   if (projects.length === 0) return <Panel title="Exe Watcher" color={ORANGE} width={dashWidth}><Text dimColor>No usage data found for {PERIOD_LABELS[period]}.</Text></Panel>
@@ -632,6 +644,7 @@ function DashboardContent({ projects, period, columns, activeProvider, budgets, 
   return (
     <Box flexDirection="column" width={dashWidth}>
       <Overview projects={projects} label={PERIOD_LABELS[period]} width={dashWidth} planUsage={planUsage} recovery={recovery} />
+      <TimePanel time={time} width={dashWidth} />
       <Row wide={wide} width={dashWidth}><DailyActivity projects={projects} days={days} pw={pw} bw={barWidth} /><ProjectBreakdown projects={projects} pw={pw} bw={barWidth} budgets={budgets} /></Row>
       <TopSessions projects={projects} pw={dashWidth} bw={barWidth} />
       <Row wide={wide} width={dashWidth}><ActivityBreakdown projects={projects} pw={pw} bw={barWidth} /><ModelBreakdown projects={projects} pw={pw} bw={barWidth} /></Row>
@@ -655,6 +668,7 @@ export function InteractiveDashboard({ initialPeriod, initialProvider, refreshSe
   const [period, setPeriod] = useState<Period>(initialPeriod)
   const [projects, setProjects] = useState<ProjectSummary[]>([])
   const [recovery, setRecovery] = useState<HistoricalRecovery | null>(null)
+  const [time, setTime] = useState<TimeReport | undefined>()
   const [initialLoading, setInitialLoading] = useState(true)
   const [loading, setLoading] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -746,11 +760,13 @@ export function InteractiveDashboard({ initialPeriod, initialProvider, refreshSe
         if (signal.aborted) return undefined
         const recovery = p === 'all' && (prov === 'all' || prov === 'claude') && !projectFilter?.length && !excludeFilter?.length
           ? await getClaudeRecoveryForRange(getDateRange(p), signal) : null
-        return { recovery, projects: filterProjectsByName(data, projectFilter, excludeFilter), usage: await getPlanUsageOrNull(), providers: getDiscoveredProviderNames() }
+        const time = await getTimeReport(getDateRange(p), prov, projectFilter, excludeFilter, signal)
+        return { recovery, time, projects: filterProjectsByName(data, projectFilter, excludeFilter), usage: await getPlanUsageOrNull(), providers: getDiscoveredProviderNames() }
       })
       if (!result || reloadGenerationRef.current !== generation) return
       setProjects(result.projects)
       setRecovery(result.recovery)
+      setTime(result.time)
       setDetectedProviders(result.providers)
       setPlanUsage(result.usage ?? undefined)
       failures.current = 0
@@ -861,19 +877,19 @@ export function InteractiveDashboard({ initialPeriod, initialProvider, refreshSe
           ? <OptimizeView findings={optimizeResult.findings} costRate={optimizeResult.costRate} projects={projects} label={PERIOD_LABELS[period]} width={dashWidth} healthScore={optimizeResult.healthScore} healthGrade={optimizeResult.healthGrade} />
           : view === 'optimize'
             ? <Panel title="Optimization" color={ORANGE} width={dashWidth}><Text>Scanning…</Text></Panel>
-            : <DashboardContent projects={projects} period={period} columns={columns} activeProvider={activeProvider} budgets={projectBudgets} planUsage={planUsage} recovery={recovery} />}
+            : <DashboardContent projects={projects} period={period} columns={columns} activeProvider={activeProvider} budgets={projectBudgets} planUsage={planUsage} recovery={recovery} time={time} />}
       {view !== 'compare' && <StatusBar width={dashWidth} showProvider={multipleProviders} view={view} findingCount={findingCount} optimizeAvailable={optimizeAvailable} compareAvailable={compareAvailable} />}
     </Box>
   )
 }
 
-function StaticDashboard({ projects, period, activeProvider, planUsage, recovery }: { projects: ProjectSummary[]; period: Period; activeProvider?: string; planUsage?: PlanUsage; recovery?: HistoricalRecovery | null }) {
+function StaticDashboard({ projects, period, activeProvider, planUsage, recovery, time }: { projects: ProjectSummary[]; period: Period; activeProvider?: string; planUsage?: PlanUsage; recovery?: HistoricalRecovery | null; time?: TimeReport }) {
   const { columns } = useWindowSize()
   const { dashWidth } = getLayout(columns)
   return (
     <Box flexDirection="column" width={dashWidth}>
       <PeriodTabs active={period} />
-      <DashboardContent projects={projects} period={period} columns={columns} activeProvider={activeProvider} planUsage={planUsage} recovery={recovery} />
+      <DashboardContent projects={projects} period={period} columns={columns} activeProvider={activeProvider} planUsage={planUsage} recovery={recovery} time={time} />
     </Box>
   )
 }
@@ -895,7 +911,8 @@ export async function renderDashboard(period: Period = 'week', provider: string 
     const recovery = period === 'all' && (provider === 'all' || provider === 'claude') && !projectFilter?.length && !excludeFilter?.length && !customRange
       ? await getClaudeRecoveryForRange(range) : null
     const planUsage = await getPlanUsageOrNull()
-    const { unmount } = render(<StaticDashboard projects={filteredProjects} period={period} activeProvider={provider} planUsage={planUsage ?? undefined} recovery={recovery} />, { patchConsole: false })
+    const time = await getTimeReport(range, provider, projectFilter, excludeFilter)
+    const { unmount } = render(<StaticDashboard projects={filteredProjects} period={period} activeProvider={provider} planUsage={planUsage ?? undefined} recovery={recovery} time={time} />, { patchConsole: false })
     unmount()
   }
 }

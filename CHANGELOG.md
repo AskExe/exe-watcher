@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.62 (unreleased)
+
+- Add AI running time, elapsed busy time, and estimated interaction time below spend in the menu bar and terminal dashboards, following each period and provider selection.
+- Recover retained timing evidence since July 1, 2025 across supported clients, including parallel sessions and subagents. Merge overlaps for elapsed time and interaction estimates; never infer attention from an open terminal.
+- Keep missing history and formats without usable clocks explicitly unknown. Label inferred AI durations and personal-time estimates, with provider coverage details.
+- Save a bounded, resumable timing index independently of cost history. Tail appended records on existing file-change refreshes; use `exe-watcher time --recover` for a bounded historical pass.
+
 ## 0.2.61 (unreleased)
 
 - Open the full report in one Terminal window when Terminal starts; keep existing shells untouched.
