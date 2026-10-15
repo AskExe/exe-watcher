@@ -12,6 +12,17 @@ export type PeriodSnapshot = {
 }
 export type SnapshotWindow = { key: string; start: string; label: string }
 
+/** A staged provider scan is not a complete replacement for committed history. */
+export function assertHistoryComplete(cache: DailyCache, start: string, today: string): void {
+  if (start >= today) return
+  const required = Math.round((Date.parse(today) - Date.parse(start)) / 86_400_000)
+  const dates = new Set(cache.days.filter(d => d.date >= start && d.date < today).map(d => d.date))
+  if (cache.needsRepricing || cache.historyBuild || cache.missingProviders?.length ||
+      cache.partialDates?.some(d => d >= start && d < today) || dates.size !== required) {
+    throw new Error('Historical usage is incomplete. The history rebuild has saved its progress; keeping the last successful total. Refresh again to resume.')
+  }
+}
+
 /** Roll up cached closed days and replace today's bucket with its fresh parse.
  * Missing/partial dates never become apparently complete historical totals.
  */
@@ -32,7 +43,7 @@ export function buildPeriodSnapshots(
   for (const window of windows) {
     const required = Math.max(0, Math.round((Date.parse(today) - Date.parse(window.start)) / 86_400_000))
     const covered = [...dates].filter(d => d >= window.start && !partial.has(d)).length
-    if (window.key !== 'today' && (cache.needsRepricing || cache.missingProviders?.length || covered !== required)) continue
+    if (window.key !== 'today' && (cache.needsRepricing || cache.historyBuild || cache.missingProviders?.length || covered !== required)) continue
     const selected = periodDays(window.start)
     const scoped = provider === 'all' ? selected : filterDaysToProvider(selected, provider)
     const data = buildPeriodDataFromDays(scoped, window.label)

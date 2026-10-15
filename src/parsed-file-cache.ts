@@ -7,13 +7,14 @@ import { getCacheDir } from './cache-dir.js'
 import { getPricingFingerprint } from './models.js'
 import { chargeRead, ResourceBudgetError } from './resource-budget.js'
 import { acquireFileLock } from './file-lock.js'
+import { readDiscoveryFact, rememberDiscoveryFact } from './discovery-cache.js'
+import type { DateRange } from './types.js'
 
 const VERSION = 3
 const compress = promisify(gzip)
 const decompress = promisify(gunzip)
 const MAX_ENTRY = 16 * 1024 * 1024
 const MAX_DISK = 256 * 1024 * 1024
-let maintainedDir = ''
 
 async function fingerprint(path: string): Promise<string | null> {
   try {
@@ -26,12 +27,32 @@ async function fingerprint(path: string): Promise<string | null> {
 /** Durable, versioned per-file parsed results. Date filtering and cross-file dedup
  * happen after replay. Changed/truncated/replaced files are reparsed from a fixed snapshot.
  */
-export async function cachedFileParse<T>(path: string, kind: string, parse: () => Promise<T[]>, warnings?: string[]): Promise<T[]> {
+export async function cachedFileParse<T>(path: string, kind: string, parse: () => Promise<T[]>, warnings?: string[], range?: DateRange): Promise<T[]> {
   const dir = join(getCacheDir(), 'parsed-files')
   const key = createHash('sha256').update(`${VERSION}:${kind}:${path}:${getPricingFingerprint()}`).digest('hex')
   const cachePath = join(dir, `v${VERSION}-${key}.json.gz`)
   const fingerprintPath = kind === 'opencode' ? path.slice(0, path.lastIndexOf(':')) : path
   const before = await fingerprint(fingerprintPath)
+  const rangeKind = `usage-range:${VERSION}:${kind}`
+  const bounds = range && before
+    ? await readDiscoveryFact<{ first: number; last: number; warnings?: string[] }>(rangeKind, path, before) : undefined
+  if (range && bounds && (bounds.last < range.start.getTime() || bounds.first > range.end.getTime())) {
+    if (Array.isArray(bounds.warnings)) warnings?.push(...bounds.warnings)
+    return []
+  }
+  const rememberRange = async (data: T[]) => {
+    if (!range || !before || bounds || await fingerprint(fingerprintPath) !== before) return
+    let first = Infinity, last = -Infinity
+    for (const row of data) {
+      const timestamp = (row as { timestamp?: unknown } | null)?.timestamp
+      const value = typeof timestamp === 'string' ? Date.parse(timestamp) : NaN
+      // Unknown timestamps cannot prove that the entire file is outside a window.
+      if (!Number.isFinite(value)) return
+      first = Math.min(first, value); last = Math.max(last, value)
+    }
+    // Empty files have no billable records in any window. JSON cannot store Infinity.
+    await rememberDiscoveryFact(rangeKind, path, before, { first: data.length ? first : 0, last: data.length ? last : -1, warnings })
+  }
   if (before) {
     try {
       const s = await stat(cachePath)
@@ -40,6 +61,7 @@ export async function cachedFileParse<T>(path: string, kind: string, parse: () =
         const saved = JSON.parse((await decompress(await readFile(cachePath), { maxOutputLength: MAX_ENTRY })).toString('utf8'))
         if (saved.v === VERSION && saved.fingerprint === before && Array.isArray(saved.data)) {
           if (Array.isArray(saved.warnings)) warnings?.push(...saved.warnings.filter((w: unknown) => typeof w === 'string'))
+          await rememberRange(saved.data)
           return saved.data as T[]
         }
       }
@@ -47,6 +69,7 @@ export async function cachedFileParse<T>(path: string, kind: string, parse: () =
   }
   const data = await parse()
   if (!before || await fingerprint(fingerprintPath) !== before) return data
+  await rememberRange(data)
   // No cache can describe a moving snapshot as current. Stable files only; appends
   // invalidate by size/mtime/ctime and preserve incomplete final lines for reparse.
   const payload = JSON.stringify({ v: VERSION, fingerprint: before, data, warnings })
@@ -56,7 +79,19 @@ export async function cachedFileParse<T>(path: string, kind: string, parse: () =
   const release = await acquireFileLock(join(dir, 'writes.lock'))
   try {
     const quotaPath = join(dir, 'quota')
-    if (maintainedDir !== dir) {
+    // Writers reserve quota under this lock before publishing each entry. Reuse
+    // that ledger across CLI launches instead of stat'ing every cached file on
+    // the first changed session of every scan (tens of thousands on large homes).
+    const quota = await readFile(quotaPath, 'utf8').catch(() => '')
+    let total = /^\d+$/.test(quota) ? Number(quota) : NaN
+    const writeQuota = async (bytes: number) => {
+      const tmp = `${quotaPath}.${randomUUID()}.tmp`
+      try {
+        await writeFile(tmp, String(bytes), { mode: 0o600 })
+        await rename(tmp, quotaPath)
+      } finally { await unlink(tmp).catch(() => {}) }
+    }
+    if (!Number.isSafeInteger(total) || total < 0 || total > MAX_DISK) {
       const files = await readdir(dir)
       const rows = []
       for (const name of files) {
@@ -66,20 +101,20 @@ export async function cachedFileParse<T>(path: string, kind: string, parse: () =
         const p = join(dir, name), s = await stat(p).catch(() => null)
         if (s) rows.push({ path: p, size: s.size, mtime: s.mtimeMs })
       }
-      let total = rows.reduce((n, r) => n + r.size, 0)
+      total = rows.reduce((n, r) => n + r.size, 0)
       for (const row of rows.sort((a, b) => a.mtime - b.mtime)) {
         if (total <= MAX_DISK) break
         await unlink(row.path).catch(() => {})
         total -= row.size
       }
-      await writeFile(quotaPath, String(total), { mode: 0o600 })
-      maintainedDir = dir
+      await writeQuota(total)
     }
     // Concurrent readers/writers never see partial JSON; identical results incur no rewrite.
     if (!(await readFile(cachePath).catch(() => Buffer.alloc(0))).equals(encoded)) {
-      const total = Number(await readFile(quotaPath, 'utf8').catch(() => String(MAX_DISK)))
       const oldSize = (await stat(cachePath).catch(() => null))?.size ?? 0
-      let nextSize = total - oldSize + encoded.length
+      // Reserve both the existing entry and its replacement until rename succeeds.
+      // A crash while a smaller replacement is pending must never under-count disk use.
+      let nextSize = total + encoded.length
       if (!Number.isFinite(nextSize)) return data
       if (nextSize > MAX_DISK) {
         // Make room in batches so reaching the cap never disables future caching.
@@ -101,8 +136,9 @@ export async function cachedFileParse<T>(path: string, kind: string, parse: () =
       const tmp = `${cachePath}.${randomUUID()}.tmp`
       try {
         // Reserve before writing: a crash can over-count disk use, never under-count it.
-        await writeFile(quotaPath, String(nextSize), { mode: 0o600 })
+        await writeQuota(nextSize)
         await writeFile(tmp, encoded, { mode: 0o600 }); await rename(tmp, cachePath)
+        if (oldSize) await writeQuota(nextSize - oldSize)
       }
       finally { await unlink(tmp).catch(() => {}) }
     }

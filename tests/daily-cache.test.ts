@@ -72,12 +72,17 @@ describe('loadDailyCache', () => {
     expect(cache.needsRepricing).toBe(true)
     expect(cache.previousHistoryStart).toBe('2026-04-01')
   })
-  it('invalidates stored history when effective model pricing changes', async () => {
+  it('preserves committed history as stale until repricing finishes', async () => {
     await saveDailyCache({ version: DAILY_CACHE_VERSION, scopeKey: DEFAULT_DAILY_CACHE_SCOPE,
       lastComputedDate: '2026-04-10', days: [emptyDay('2026-04-10', 10)] })
     expect((await loadDailyCache()).days).toHaveLength(1)
     setModelAliases({ 'custom-model': 'gpt-6-astra' })
-    expect((await loadDailyCache()).days).toEqual([])
+    const stale = await loadDailyCache()
+    expect(stale.days).toHaveLength(1)
+    expect(stale.days[0]!.cost).toBe(10)
+    expect(stale.needsRepricing).toBe(true)
+    await saveDailyCache(stale)
+    expect((await loadDailyCache()).needsRepricing).toBe(true)
   })
   it('returns an empty cache when the file does not exist', async () => {
     const cache = await loadDailyCache()

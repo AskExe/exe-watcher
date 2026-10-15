@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildPeriodSnapshots } from '../src/period-snapshots.js'
+import { assertHistoryComplete, buildPeriodSnapshots } from '../src/period-snapshots.js'
 import { DAILY_CACHE_VERSION, type DailyCache, type DailyEntry } from '../src/daily-cache.js'
 import { fillMissingDays } from '../src/day-aggregator.js'
 
@@ -49,6 +49,22 @@ describe('period snapshots', () => {
     expect(Object.keys(build(repricing))).toEqual(['today'])
     const missingProvider = fixture(); missingProvider.missingProviders = ['kimi']
     expect(Object.keys(build(missingProvider))).toEqual(['today'])
+  })
+  it('rejects incomplete selected history while allowing Today and complete windows', () => {
+    const cache = fixture()
+    expect(() => assertHistoryComplete(cache, '2026-07-01', '2026-10-14')).not.toThrow()
+    for (const incomplete of [
+      { ...cache, needsRepricing: true },
+      { ...cache, days: [] },
+      { ...cache, partialDates: ['2026-10-13'] },
+      { ...cache, missingProviders: ['kimi'] },
+      { ...cache, historyBuild: { start: '2026-07-01', end: '2026-10-13', completedProviders: ['claude'], days: [] } },
+    ]) {
+      expect(() => assertHistoryComplete(incomplete, '2026-07-01', '2026-10-14')).toThrow('Historical usage is incomplete')
+      expect(() => assertHistoryComplete(incomplete, '2026-10-14', '2026-10-14')).not.toThrow()
+      expect(build(incomplete).all).toBeUndefined()
+    }
+    expect(() => assertHistoryComplete({ ...cache, partialDates: ['2026-07-01'] }, '2026-10-01', '2026-10-14')).not.toThrow()
   })
   it('uses the same provider buckets for aggregates and filtered views', () => {
     const cache = fixture()
