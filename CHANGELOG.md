@@ -2,6 +2,9 @@
 
 ## 0.2.61 (unreleased)
 
+- Open the full report in one Terminal window when Terminal starts; keep existing shells untouched.
+- Scope Optimize to the report's selected sessions, reuse bounded caches of compact detector inputs, and retain usage totals if an analysis reaches a resource limit. Keep standalone and menu bar optimization within the same scan limits.
+- Explain in Optimize that its Claude Code recommendations require the user to apply any changes.
 - Keep incomplete history rebuilds from replacing ALL totals with just today’s spend, including saved results from older CLIs. Preserve the last committed history during repricing.
 - Resume oversized provider rebuilds without marking skipped dates complete; rebuild legacy partial stages safely.
 - Cache verified per-file usage dates independently of prices, so historical scans skip unrelated files without dropping changed sessions.

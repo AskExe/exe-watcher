@@ -61,11 +61,14 @@ enum TerminalLauncher {
                 return
             }
         }
+        // `activate` first asks a cold Terminal to create its default window; a
+        // subsequent untargeted `do script` creates a second one. Open our report
+        // before activating, without reusing a user's existing shell.
         let script = """
         on run argv
         tell application "Terminal"
-            activate
             do script (item 1 of argv)
+            activate
         end tell
         end run
         """

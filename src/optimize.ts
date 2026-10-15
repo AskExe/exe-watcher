@@ -5,6 +5,9 @@ import { basename, join } from 'path'
 import { homedir } from 'os'
 
 import { readSessionLines, readSessionFileSync } from './fs-utils.js'
+import { cachedFileParse } from './parsed-file-cache.js'
+import { flushDiscoveryCache } from './discovery-cache.js'
+import { chargeRead, chargeRecord, withScanBudget } from './resource-budget.js'
 import { discoverAllSessions } from './providers/index.js'
 import type { DateRange, ProjectSummary } from './types.js'
 import { formatCost } from './currency.js'
@@ -155,7 +158,6 @@ type ScanData = {
 // ============================================================================
 
 const FILE_READ_CONCURRENCY = 1
-const RESULT_CACHE_TTL_MS = 60_000
 const RECENT_WINDOW_HOURS = 48
 const RECENT_WINDOW_MS = RECENT_WINDOW_HOURS * 60 * 60 * 1000
 const DEFAULT_TREND_PERIOD_DAYS = 30
@@ -207,6 +209,62 @@ type ScanFileResult = {
   userMessages: string[]
 }
 
+// Persist only detector inputs, never full prompts, generated files, or shell output.
+// Timestamps let the same bounded per-file cache serve every report period.
+type ScanRecord = {
+  timestamp: string
+  cwd?: string
+  calls: Array<Pick<ToolCall, 'name' | 'input'>>
+  cacheCreationTokens: number
+  version: string
+  commands: string[]
+}
+
+function commandReferences(text: string): string[] {
+  COMMAND_PATTERN.lastIndex = 0
+  return [...text.matchAll(COMMAND_PATTERN)].map(m => `/${(m[1] || m[2] || '').trim()}`)
+}
+
+async function readScanRecords(filePath: string): Promise<ScanRecord[]> {
+  const records: ScanRecord[] = []
+  let version = ''
+  for await (const line of readSessionLines(filePath)) {
+    chargeRecord()
+    if (!line.trim()) continue
+    let entry: Record<string, unknown>
+    try { entry = JSON.parse(line) } catch { continue }
+    if (!entry || typeof entry !== 'object') continue
+    if (typeof entry.version === 'string') version = entry.version
+    const record: ScanRecord = {
+      timestamp: typeof entry.timestamp === 'string' ? entry.timestamp : '',
+      cwd: typeof entry.cwd === 'string' ? entry.cwd : undefined,
+      calls: [], cacheCreationTokens: 0, version, commands: [],
+    }
+    const msg = entry.message as Record<string, unknown> | undefined
+    const content = msg?.content
+    if (entry.type === 'user') {
+      if (typeof content === 'string') record.commands.push(...commandReferences(content))
+      else if (Array.isArray(content)) for (const block of content) {
+        if (block?.type === 'text' && typeof block.text === 'string') record.commands.push(...commandReferences(block.text))
+      }
+    } else if (entry.type === 'assistant') {
+      const usage = msg?.usage as Record<string, unknown> | undefined
+      if (typeof usage?.cache_creation_input_tokens === 'number') record.cacheCreationTokens = usage.cache_creation_input_tokens
+      if (Array.isArray(content)) for (const block of content) {
+        if (block?.type !== 'tool_use' || typeof block.name !== 'string') continue
+        chargeRecord()
+        const input: Record<string, unknown> = {}
+        for (const key of ['file_path', 'subagent_type', 'skill', 'name']) {
+          if (typeof block.input?.[key] === 'string') input[key] = block.input[key]
+        }
+        record.calls.push({ name: block.name, input })
+      }
+    }
+    if (record.cwd || record.calls.length || record.cacheCreationTokens > 0 || record.commands.length) records.push(record)
+  }
+  return records
+}
+
 function inRange(timestamp: string | undefined, range: DateRange | undefined): boolean {
   if (!range) return true
   if (!timestamp) return false
@@ -230,67 +288,28 @@ export async function scanJsonlFile(
   const apiCalls: ApiCallMeta[] = []
   const userMessages: string[] = []
   const sessionId = basename(filePath, '.jsonl')
-  let lastVersion = ''
-
-  for await (const line of readSessionLines(filePath)) {
-    if (!line.trim()) continue
-    let entry: Record<string, unknown>
-    try { entry = JSON.parse(line) } catch { continue }
-
-    if (entry.version && typeof entry.version === 'string') lastVersion = entry.version
-
-    const ts = typeof entry.timestamp === 'string' ? entry.timestamp : undefined
-    const withinRange = inRange(ts, dateRange)
-    const recent = isRecent(ts, recentCutoffMs)
-
-    if (entry.cwd && typeof entry.cwd === 'string' && withinRange) cwds.push(entry.cwd)
-
-    if (entry.type === 'user') {
-      if (!withinRange) continue
-      const msg = entry.message as Record<string, unknown> | undefined
-      const msgContent = msg?.content
-      if (typeof msgContent === 'string') {
-        userMessages.push(msgContent)
-      } else if (Array.isArray(msgContent)) {
-        for (const block of msgContent) {
-          if (block && typeof block === 'object' && block.type === 'text' && typeof block.text === 'string') {
-            userMessages.push(block.text)
-          }
-        }
-      }
-      continue
-    }
-
-    if (entry.type !== 'assistant') continue
-    if (!withinRange) continue
-
-    const msg = entry.message as Record<string, unknown> | undefined
-    const usage = msg?.usage as Record<string, unknown> | undefined
-    if (usage) {
-      const cacheCreate = (usage.cache_creation_input_tokens as number) ?? 0
-      if (cacheCreate > 0) apiCalls.push({ cacheCreationTokens: cacheCreate, version: lastVersion, recent })
-    }
-
-    const blocks = msg?.content
-    if (!Array.isArray(blocks)) continue
-
-    for (const block of blocks) {
-      if (block.type !== 'tool_use') continue
-      calls.push({
-        name: block.name as string,
-        input: (block.input as Record<string, unknown>) ?? {},
-        sessionId,
-        project,
-        recent,
-      })
-    }
+  const records = await cachedFileParse(filePath, 'optimize-v1', () => readScanRecords(filePath), undefined, dateRange)
+  for (const record of records) {
+    chargeRecord()
+    if (!inRange(record.timestamp, dateRange)) continue
+    const recent = isRecent(record.timestamp, recentCutoffMs)
+    if (record.cwd) cwds.push(record.cwd)
+    userMessages.push(...record.commands)
+    if (record.cacheCreationTokens > 0) apiCalls.push({ cacheCreationTokens: record.cacheCreationTokens, version: record.version, recent })
+    for (const call of record.calls) { chargeRecord(); calls.push({ ...call, sessionId, project, recent }) }
   }
 
   return { calls, cwds, apiCalls, userMessages }
 }
 
-async function scanSessions(dateRange?: DateRange): Promise<ScanData> {
+async function scanSessions(projects: ProjectSummary[], dateRange?: DateRange): Promise<ScanData> {
   const sources = await discoverAllSessions('claude')
+  const selected = new Map<string, Set<string>>()
+  for (const project of projects) {
+    const ids = selected.get(project.project) ?? new Set<string>()
+    for (const session of project.sessions) ids.add(session.sessionId)
+    selected.set(project.project, ids)
+  }
   const allCalls: ToolCall[] = []
   const allCwds = new Set<string>()
   const allApiCalls: ApiCallMeta[] = []
@@ -298,8 +317,13 @@ async function scanSessions(dateRange?: DateRange): Promise<ScanData> {
 
   const tasks: Array<{ file: string; project: string }> = []
   for (const source of sources) {
+    chargeRead(0)
+    const sessionIds = selected.get(source.project)
+    if (!sessionIds) continue
     const files = await collectJsonlFiles(source.path)
     for (const file of files) {
+      // mtimes alone cannot exclude old sessions that were copied or restored.
+      if (!sessionIds.has(basename(file, '.jsonl'))) continue
       if (await isFileStaleForRange(file, dateRange)) continue
       tasks.push({ file, project: source.project })
     }
@@ -307,17 +331,13 @@ async function scanSessions(dateRange?: DateRange): Promise<ScanData> {
 
   await runWithConcurrency(tasks, FILE_READ_CONCURRENCY, async ({ file, project }) => {
     const { calls, cwds, apiCalls, userMessages } = await scanJsonlFile(file, project, dateRange)
-    allCalls.push(...calls)
+    for (const call of calls) allCalls.push(call)
     for (const cwd of cwds) allCwds.add(cwd)
-    allApiCalls.push(...apiCalls)
-    allUserMessages.push(...userMessages)
+    for (const call of apiCalls) allApiCalls.push(call)
+    for (const message of userMessages) allUserMessages.push(message)
   })
 
   return { toolCalls: allCalls, projectCwds: allCwds, apiCalls: allApiCalls, userMessages: allUserMessages }
-}
-
-export function prewarmOptimizeScan(dateRange?: DateRange): Promise<ScanData> {
-  return scanSessions(dateRange)
 }
 
 // ============================================================================
@@ -947,32 +967,28 @@ function computeInputCostRate(projects: ProjectSummary[]): number {
 // Main entry points
 // ============================================================================
 
-type CacheEntry = { data: OptimizeResult; ts: number }
-const resultCache = new Map<string, CacheEntry>()
-
-function cacheKey(projects: ProjectSummary[], dateRange: DateRange | undefined): string {
-  const dr = dateRange ? `${dateRange.start.getTime()}-${dateRange.end.getTime()}` : 'all'
-  const fingerprint = projects.length + ':' + projects.reduce((s, p) => s + p.totalApiCalls, 0)
-  return `${dr}:${fingerprint}`
-}
-
 export async function scanAndDetect(
   projects: ProjectSummary[],
   dateRange?: DateRange,
   preScanned?: ScanData | Promise<ScanData>,
 ): Promise<OptimizeResult> {
+  // Every caller, including the standalone CLI and menu bar, shares these caps.
+  try {
+    return await withScanBudget(() => scanAndDetectWithinBudget(projects, dateRange, preScanned))
+  } finally { await flushDiscoveryCache() }
+}
+
+async function scanAndDetectWithinBudget(
+  projects: ProjectSummary[], dateRange?: DateRange, preScanned?: ScanData | Promise<ScanData>,
+): Promise<OptimizeResult> {
   if (projects.length === 0) {
     return { findings: [], costRate: 0, healthScore: 100, healthGrade: 'A' }
   }
 
-  const key = cacheKey(projects, dateRange)
-  const cached = resultCache.get(key)
-  if (cached && Date.now() - cached.ts < RESULT_CACHE_TTL_MS) return cached.data
-
   const costRate = computeInputCostRate(projects)
   const { toolCalls, projectCwds, apiCalls, userMessages } = preScanned
     ? await preScanned
-    : await scanSessions(dateRange)
+    : await scanSessions(projects, dateRange)
 
   const findings: WasteFinding[] = []
   const syncDetectors: Array<() => WasteFinding | null> = [
@@ -999,7 +1015,6 @@ export async function scanAndDetect(
   findings.sort((a, b) => urgencyScore(b) - urgencyScore(a))
   const { score, grade } = computeHealth(findings)
   const result: OptimizeResult = { findings, costRate, healthScore: score, healthGrade: grade }
-  resultCache.set(key, { data: result, ts: Date.now() })
   return result
 }
 
@@ -1077,6 +1092,7 @@ function renderOptimize(
   const lines: string[] = []
   lines.push('')
   lines.push(`  ${chalk.bold.hex(ORANGE)('Exe Watcher config health')}${chalk.dim('  ' + periodLabel)}`)
+  lines.push(chalk.dim('  Claude Code recommendations. Changes are yours to apply.'))
   lines.push(chalk.hex(DIM)('  ' + SEP.repeat(PANEL_WIDTH)))
 
   const issueSuffix = findings.length > 0 ? `, ${findings.length} issue${findings.length > 1 ? 's' : ''}` : ''
