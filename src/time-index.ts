@@ -162,11 +162,15 @@ export type TimeRefreshOptions = { history?: boolean; signal?: AbortSignal; sour
  * No timer or daemon: callers already react to client usage-file changes.
  */
 export async function refreshTimeIndex(options: TimeRefreshOptions = {}): Promise<TimeIndex> {
-  let current = await readTimeIndex()
+  let current: TimeIndex
   let release: (() => Promise<void>) | undefined
   try {
     release = await acquireFileLock(join(getCacheDir(), 'time-index.lock'), 100)
-  } catch { current.warnings.push('Another timing update is running; showing the saved timing snapshot.'); return current }
+  } catch {
+    current = await readTimeIndex()
+    current.warnings.push('Another timing update is running; showing the saved timing snapshot.')
+    return current
+  }
   // Re-read under the lease so concurrent manual recovery cannot be overwritten.
   current = await readTimeIndex()
   current.warnings = []
