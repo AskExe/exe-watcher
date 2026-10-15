@@ -1,7 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.2.60 (2026-10-15)
 
+- Fix menu bar updates that macOS rejected as "damaged and can't be opened": the updater now unpacks the release with `ditto`, so the app's signature survives (it used `unzip`, which wrote `._` metadata files into the bundle). Apps on 0.2.59 or earlier still update with the old unpacker once; install this release from the DMG or with an updated `exe-watcher menubar --force`.
 - Bring the owl to life. When the popover opens, the header owl looks left and right, blinks, tilts its head and settles, then keeps glancing and blinking for as long as the popover stays open. Clicking the menu bar owl plays a short glance and blink before returning to the static gold mark. With Reduce Motion the owl only blinks. Nothing animates or is scheduled while the popover is closed.
 - Redraw the terminal loading-screen owl from the 01A logo itself (half-block pixel art in Exe Gold) instead of the old cartoon; it looks left, right and blinks while sessions are scanned.
 
