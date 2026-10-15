@@ -172,8 +172,7 @@ private struct BurnLoadingOverlay: View {
                 .fill(.ultraThinMaterial)
 
             VStack(spacing: 14) {
-                OwlIcon(size: iconSize)
-                    .foregroundStyle(.white)
+                AnimatedOwl(size: iconSize, color: .white)
                     .opacity(0.82)
                     .frame(width: iconSize, height: iconSize)
 
@@ -230,8 +229,7 @@ private struct Header: View {
     var body: some View {
         HStack {
             HStack(alignment: .center, spacing: 8) {
-                OwlIcon(size: 28)
-                    .foregroundStyle(Theme.brandAccent)
+                AnimatedOwl(size: 28, color: Theme.brandAccent)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("WATCHER")
                     .foregroundStyle(Color(red: 0xD4/255.0, green: 0x61/255.0, blue: 0x9C/255.0))

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.59 (unreleased)
+
+- Bring the owl to life. When the popover opens, the header owl looks left and right, blinks, tilts its head and settles, then keeps glancing and blinking for as long as the popover stays open. Clicking the menu bar owl plays a short glance and blink before returning to the static gold mark. With Reduce Motion the owl only blinks. Nothing animates or is scheduled while the popover is closed.
+
 ## 0.2.58 (unreleased)
 
 - Discover a supported client's first usage even when its data folder is created after Watcher starts. Include Copilot, custom Claude configuration roots and symlinked profiles in live monitoring, while ignoring unrelated home-folder events.
