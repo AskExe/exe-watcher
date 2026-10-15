@@ -1,5 +1,5 @@
 import type { DailyCache, DailyEntry } from './daily-cache.js'
-import type { HistoricalRecovery } from './claude-recovery.js'
+import { applyClaudeRecovery, type HistoricalRecovery } from './claude-recovery.js'
 import { buildPeriodDataFromDays, filterDaysToProvider } from './day-aggregator.js'
 import { buildMenubarPayload, buildProjectSpendFromDays, type MenubarPayload } from './menubar-json.js'
 import { getModelCosts } from './models.js'
@@ -47,17 +47,8 @@ export function buildPeriodSnapshots(
       if (!notes.includes(note)) notes.push(note)
     }
     if (window.key === 'all' && recovery && (provider === 'all' || provider === 'claude')) {
-      data.cost += recovery.costUSD
-      data.inputTokens += recovery.inputTokens
-      data.outputTokens += recovery.outputTokens
-      data.cacheReadTokens += recovery.cacheReadTokens
-      data.cacheWriteTokens += recovery.cacheWriteTokens
+      applyClaudeRecovery(data, recovery)
       totals.claude = (totals.claude ?? 0) + recovery.costUSD
-      for (const row of recovery.models) {
-        const model = data.models.find(m => m.name === row.model)
-        if (model) model.cost += row.costUSD
-        else data.models.push({ name: row.model, calls: 0, cost: row.costUSD })
-      }
       if (!notes.includes(recovery.note)) notes.push(recovery.note)
     }
     const providers = provider === 'all'

@@ -225,7 +225,7 @@ function Overview({ projects, label, width, planUsage, recovery }: { projects: P
       <Text wrap="truncate-end">
         <Text bold color={GOLD}>{formatCost(totalCost)}</Text>
         <Text dimColor> cost   </Text>
-        <Text bold>{totalCalls.toLocaleString()}</Text>
+        <Text bold>{recovery ? (totalCalls ? `${totalCalls.toLocaleString()}+` : 'unknown') : totalCalls.toLocaleString()}</Text>
         <Text dimColor> calls   </Text>
         <Text bold>{String(totalSessions)}</Text>
         <Text dimColor> sessions   </Text>

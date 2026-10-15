@@ -27,7 +27,7 @@ import { clampResetDay, getPlanUsageOrNull, type PlanUsage } from './plan-usage.
 import { getPresetPlan, isPlanId, isPlanProvider, planDisplayName } from './plans.js'
 import { MAX_BLOCKED_CHUNK_ATTEMPTS, computeProgressiveBackfillStart, nextBackfillCursor, planBackfillChunks, resolveColdStartHistoryDays, shouldSkipBlockedChunk } from './progressive-backfill.js'
 import { parseHistoryStartDate, resolveHistoryStart } from './history-start.js'
-import { readClaudeUsageSnapshot, recoverClaudeUsage, sumClaudeModelTokens, getClaudeRecoveryForRange } from './claude-recovery.js'
+import { applyClaudeRecovery, readClaudeUsageSnapshot, recoverClaudeUsage, sumClaudeModelTokens, getClaudeRecoveryForRange } from './claude-recovery.js'
 import { buildPeriodSnapshots } from './period-snapshots.js'
 import { completeHistoryBuild } from './history-build.js'
 import { createInterface } from 'node:readline'
@@ -140,6 +140,7 @@ async function runJsonReport(period: Period, provider: string, project: string[]
       if (recovery) {
         const detail = report as typeof report & { historicalRecovery?: typeof recovery }
         detail.historicalRecovery = recovery
+        report.overview.callsIncomplete = true
         report.overview.cost += convertCost(recovery.costUSD)
         report.overview.tokens.input += recovery.inputTokens
         report.overview.tokens.output += recovery.outputTokens
@@ -149,10 +150,11 @@ async function runJsonReport(period: Period, provider: string, project: string[]
         for (const row of recovery.models) {
           const existing = report.models.find(m => m.name === row.name)
           if (existing) {
+            existing.callsIncomplete = true
             existing.cost += convertCost(row.costUSD)
             existing.inputTokens += row.inputTokens; existing.outputTokens += row.outputTokens
             existing.cacheReadTokens += row.cacheReadTokens; existing.cacheWriteTokens += row.cacheWriteTokens
-          } else report.models.push({ name: row.name, calls: 0, cost: convertCost(row.costUSD), inputTokens: row.inputTokens, outputTokens: row.outputTokens, cacheReadTokens: row.cacheReadTokens, cacheWriteTokens: row.cacheWriteTokens })
+          } else report.models.push({ name: row.name, calls: 0, callsIncomplete: true, cost: convertCost(row.costUSD), inputTokens: row.inputTokens, outputTokens: row.outputTokens, cacheReadTokens: row.cacheReadTokens, cacheWriteTokens: row.cacheWriteTokens })
         }
         report.models.sort((a, b) => b.cost - a.cost)
         report.warnings = [...new Set([...report.warnings, ...getPricingWarnings()])]
@@ -245,7 +247,7 @@ function buildJsonReport(projects: ProjectSummary[], period: string, periodKey: 
   }
   const models = Object.entries(modelMap)
     .sort(([, a], [, b]) => b.cost - a.cost)
-    .map(([name, { cost, ...rest }]) => ({ name, ...rest, cost: convertCost(cost) }))
+    .map(([name, { cost, ...rest }]) => ({ name, ...rest, callsIncomplete: false, cost: convertCost(cost) }))
 
   const catMap: Record<string, { turns: number; cost: number; editTurns: number; oneShotTurns: number }> = {}
   for (const sess of sessions) {
@@ -301,6 +303,7 @@ function buildJsonReport(projects: ProjectSummary[], period: string, periodKey: 
     overview: {
       cost: convertCost(totalCostUSD),
       calls: totalCalls,
+      callsIncomplete: false,
       sessions: totalSessions,
       cacheHitPercent,
       tokens: {
@@ -684,19 +687,10 @@ program
         const snapshot = await readClaudeUsageSnapshot()
         historicalRecovery = recoverClaudeUsage(snapshot, sumClaudeModelTokens([...cache.days, ...todayDays], snapshot?.lastComputedDate ?? ''), historyStart)
         if (historicalRecovery && opts.period === 'all') {
-          currentData.cost += historicalRecovery.costUSD
-          currentData.inputTokens += historicalRecovery.inputTokens
-          currentData.outputTokens += historicalRecovery.outputTokens
-          currentData.cacheReadTokens += historicalRecovery.cacheReadTokens
-          currentData.cacheWriteTokens += historicalRecovery.cacheWriteTokens
+          applyClaudeRecovery(currentData, historicalRecovery)
           const claudeProvider = providers.find(p => p.name.toLowerCase() === 'claude')
           if (claudeProvider) claudeProvider.cost += historicalRecovery.costUSD
           else providers.push({ name: 'Claude', cost: historicalRecovery.costUSD })
-          for (const row of historicalRecovery.models) {
-            const existing = currentData.models.find(m => m.name === row.model)
-            if (existing) existing.cost += row.costUSD
-            else currentData.models.push({ name: row.model, calls: 0, cost: row.costUSD })
-          }
           warnings.push(historicalRecovery.note)
         }
       }
