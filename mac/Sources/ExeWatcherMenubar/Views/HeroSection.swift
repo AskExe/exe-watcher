@@ -20,6 +20,28 @@ struct HeroSection: View {
                 .monospacedDigit()
                 .foregroundStyle(.secondary)
         }
+        if store.selectedPeriod == .today {
+            Text("API equivalent at current model rates")
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+        }
+        if store.payload.diagnostics?.hasUnpricedUsage == true {
+            Text("Cost is incomplete · some usage has no known API price")
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+                .help("Recorded tokens are included. Usage without a known model price is excluded from cost totals.")
+        }
+        if let warning = store.payload.diagnostics?.discoveryWarning {
+            Text("Some local usage could not be read")
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+                .help(warning)
+        }
+        if !store.payload.generated.isEmpty && store.selectedProvider == .all && store.payload.current.calls == 0 {
+            Text("No recorded usage in this period · supported tools are found automatically")
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+        }
         if store.selectedPeriod == .all {
             if let warning = store.payload.diagnostics?.warnings.first(where: { $0.contains("historical Claude token counters") }) {
                 Text("Includes recovered history estimates")
