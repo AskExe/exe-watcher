@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.57 (unreleased)
+
+- Include native Kimi Code wire logs for main agents and subagents, with separate uncached input, output and cache token counts. Ignore context-size measurements and deduplicate copied records.
+- Add a Kimi provider tab and usage-file refresh notifications. Providers with free or unpriced models remain visible when their tokens are recorded.
+- Add the missing Kimi contribution to valid historical caches without rescanning other clients. Value explicit K3 variants at K3 API rates; retain tokens and warnings for rotating coding aliases whose underlying API model is unknown.
+
 ## 0.2.56 (unreleased)
 
 - Update all covered period summaries from one fresh daily scan. Switching between Today, Week, Month and All Time reuses the same historical daily totals.

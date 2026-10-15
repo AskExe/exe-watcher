@@ -241,6 +241,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             claudeRoot + "/stats-cache.json",
             "\(home)/.pi/agent/sessions",
             "\(home)/.omp/agent/sessions",
+            (environment["KIMI_CODE_HOME"] ?? "\(home)/.kimi-code") + "/sessions",
             "\(home)/.cursor/projects",
             "\(home)/Library/Application Support/Cursor/User/globalStorage",
         ]

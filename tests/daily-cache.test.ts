@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { readFile, rm } from 'fs/promises'
+import { readFile, writeFile, rm, mkdir } from 'fs/promises'
 import { existsSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
@@ -51,6 +51,16 @@ afterEach(async () => {
 })
 
 describe('loadDailyCache', () => {
+  it('retains valid v8 history while indexing only the missing Kimi provider', async () => {
+    await mkdir(TMP_CACHE_ROOT, { recursive: true })
+    await writeFile(join(TMP_CACHE_ROOT, 'daily-cache.json'), JSON.stringify({ version: 8,
+      scopeKey: DEFAULT_DAILY_CACHE_SCOPE, pricingFingerprint: getPricingFingerprint(),
+      lastComputedDate: '2026-04-10', days: [emptyDay('2026-04-01', 10)] }))
+    const cache = await loadDailyCache()
+    expect(cache.version).toBe(DAILY_CACHE_VERSION); expect(cache.days).toHaveLength(1)
+    expect(cache.days[0]!.cost).toBe(10); expect(cache.needsRepricing).toBeUndefined()
+    expect(cache.missingProviders).toEqual(['kimi'])
+  })
   it('invalidates uncommitted repricing progress when prices change again', async () => {
     await saveDailyCache({ version: DAILY_CACHE_VERSION, scopeKey: DEFAULT_DAILY_CACHE_SCOPE,
       lastComputedDate: null, days: [], needsRepricing: true,

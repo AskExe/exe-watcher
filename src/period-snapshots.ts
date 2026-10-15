@@ -2,6 +2,7 @@ import type { DailyCache, DailyEntry } from './daily-cache.js'
 import type { HistoricalRecovery } from './claude-recovery.js'
 import { buildPeriodDataFromDays, filterDaysToProvider } from './day-aggregator.js'
 import { buildMenubarPayload, buildProjectSpendFromDays, type MenubarPayload } from './menubar-json.js'
+import { getModelCosts } from './models.js'
 
 export type PeriodSnapshot = {
   current: MenubarPayload['current']
@@ -31,7 +32,7 @@ export function buildPeriodSnapshots(
   for (const window of windows) {
     const required = Math.max(0, Math.round((Date.parse(today) - Date.parse(window.start)) / 86_400_000))
     const covered = [...dates].filter(d => d >= window.start && !partial.has(d)).length
-    if (window.key !== 'today' && (cache.needsRepricing || covered !== required)) continue
+    if (window.key !== 'today' && (cache.needsRepricing || cache.missingProviders?.length || covered !== required)) continue
     const selected = periodDays(window.start)
     const scoped = provider === 'all' ? selected : filterDaysToProvider(selected, provider)
     const data = buildPeriodDataFromDays(scoped, window.label)
@@ -40,6 +41,11 @@ export function buildPeriodSnapshots(
       totals[name] = (totals[name] ?? 0) + usage.cost
     }
     const notes = [...warnings]
+    for (const model of data.models) {
+      if (getModelCosts(model.name)) continue
+      const note = `No API pricing for model "${model.name}"; its tokens are counted but its cost is excluded. Configure a model alias only when the underlying API model is known.`
+      if (!notes.includes(note)) notes.push(note)
+    }
     if (window.key === 'all' && recovery && (provider === 'all' || provider === 'claude')) {
       data.cost += recovery.costUSD
       data.inputTokens += recovery.inputTokens

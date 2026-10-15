@@ -1,3 +1,4 @@
+import { DAILY_CACHE_VERSION } from '../src/daily-cache.js'
 import { execSync } from 'child_process'
 import { join } from 'path'
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync } from 'fs'
@@ -66,7 +67,7 @@ describe('exe-watcher status', () => {
   it('badge refresh leaves historical cache untouched', { timeout: 15_000 }, () => {
     const cachePath = join(testHome, '.cache/exe-watcher/daily-cache.json')
     mkdirSync(join(testHome, '.cache/exe-watcher'), { recursive: true })
-    const old = JSON.stringify({ version: 8, scopeKey: 'global', lastComputedDate: '2025-07-01', days: [], revalidatedAt: 0 })
+    const old = JSON.stringify({ version: DAILY_CACHE_VERSION, scopeKey: 'global', lastComputedDate: '2025-07-01', days: [], revalidatedAt: 0 })
     writeFileSync(cachePath, old)
     const result = run('status --format menubar-json --period today --no-optimize')
     expect(result.status).toBe(0)
@@ -80,7 +81,7 @@ describe('exe-watcher status', () => {
     writeFileSync(join(testHome, '.claude/projects/fixture/older.jsonl'), JSON.stringify({ type: 'assistant', timestamp: yesterday.toISOString(), message: { id: 'older', model: 'claude-sonnet-4-6', content: [], usage: { input_tokens: 100, output_tokens: 50 } } }) + '\n')
     const cacheDir = join(testHome, '.cache/exe-watcher')
     mkdirSync(cacheDir, { recursive: true })
-    writeFileSync(join(cacheDir, 'daily-cache.json'), JSON.stringify({ version: 8, scopeKey: 'global',
+    writeFileSync(join(cacheDir, 'daily-cache.json'), JSON.stringify({ version: DAILY_CACHE_VERSION, scopeKey: 'global',
       lastComputedDate: null, days: [], backfill: { blockedDate: yesterday.toISOString().slice(0, 10), attempts: 1 } }))
     const result = run('status --format menubar-json --period all --no-optimize')
     expect(result.status).toBe(0)

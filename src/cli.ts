@@ -7,7 +7,7 @@ import { homedir } from 'os'
 import { Command } from 'commander'
 import { installMenubarApp } from './menubar-installer.js'
 import { exportCsv, exportJson, type PeriodExport } from './export.js'
-import { loadPricing, setModelAliases, getPricingWarnings, getPricingMetadata } from './models.js'
+import { loadPricing, setModelAliases, getPricingWarnings, getPricingMetadata, getModelCosts } from './models.js'
 import { parseAllSessions, filterProjectsByName, getParseWarnings } from './parser.js'
 import { convertCost } from './currency.js'
 import { renderStatusBar } from './format.js'
@@ -231,7 +231,7 @@ function buildJsonReport(projects: ProjectSummary[], period: string, periodKey: 
     sessions: p.sessions.length,
   }))
 
-  const modelMap: Record<string, { calls: number; cost: number; inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number }> = {}
+  const modelMap: Record<string, { calls: number; cost: number; inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number }> = Object.create(null)
   for (const sess of sessions) {
     for (const [model, d] of Object.entries(sess.modelBreakdown)) {
       if (!modelMap[model]) { modelMap[model] = { calls: 0, cost: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 } }
@@ -327,7 +327,7 @@ program
   .option('-p, --period <period>', 'Starting period: today, week, 30days, month, all', 'week')
   .option('--from <date>', 'Start date (YYYY-MM-DD). Overrides --period when set')
   .option('--to <date>', 'End date (YYYY-MM-DD). Overrides --period when set')
-  .option('--provider <provider>', 'Filter by provider: all, claude, codex, cursor', 'all')
+  .option('--provider <provider>', 'Filter by provider: all, claude, codex, cursor, cursor-agent, copilot, opencode, kimi, pi, omp', 'all')
   .option('--format <format>', 'Output format: tui, json', 'tui')
   .option('--project <name>', 'Show only projects matching name (repeatable)', collect, [])
   .option('--exclude <name>', 'Exclude projects matching name (repeatable)', collect, [])
@@ -364,7 +364,7 @@ program
 function buildPeriodData(label: string, projects: ProjectSummary[]): PeriodData {
   const sessions = projects.flatMap(p => p.sessions)
   const catTotals: Record<string, { turns: number; cost: number; editTurns: number; oneShotTurns: number }> = {}
-  const modelTotals: Record<string, { calls: number; cost: number }> = {}
+  const modelTotals: Record<string, { calls: number; cost: number }> = Object.create(null)
   let inputTokens = 0, outputTokens = 0, cacheReadTokens = 0, cacheWriteTokens = 0
 
   for (const sess of sessions) {
@@ -405,7 +405,7 @@ program
   .command('status')
   .description('Compact status output (today + week + month)')
   .option('--format <format>', 'Output format: terminal, menubar-json, json', 'terminal')
-  .option('--provider <provider>', 'Filter by provider: all, claude, codex, cursor', 'all')
+  .option('--provider <provider>', 'Filter by provider: all, claude, codex, cursor, cursor-agent, copilot, opencode, kimi, pi, omp', 'all')
   .option('--project <name>', 'Show only projects matching name (repeatable)', collect, [])
   .option('--exclude <name>', 'Exclude projects matching name (repeatable)', collect, [])
   .option('--period <period>', 'Primary period for menubar-json: today, week, 30days, month, all', 'today')
@@ -490,11 +490,11 @@ program
       }
 
       const providerNames = (await getAllProviders()).map(p => p.name)
-      const buildHistory = (c: DailyCache, start: Date, end: Date) => completeHistoryBuild(
-        c, start, end, providerNames,
+      const buildHistory = (c: DailyCache, start: Date, end: Date, scanProviders = providerNames, mergeExisting = false) => completeHistoryBuild(
+        c, start, end, scanProviders,
         async (provider, from, through) => aggregateProjectsIntoDays(filterProjectsByName(
           await parseAllSessions({ start: from, end: through }, provider, true), opts.project, opts.exclude,
-        )), saveDailyCache,
+        )), saveDailyCache, { mergeExisting },
       )
       const pausedHistory = (c: DailyCache) => {
         if (!c.historyBuild) return false
@@ -508,6 +508,16 @@ program
         // The always-visible badge must not rebuild or revalidate history on every
         // filesystem event. Historical views maintain the cache when requested.
         if (opts.period === 'today' && opts.optimize === false) return c
+
+        // New provider support adds only its missing contribution to verified
+        // closed days. New-day gaps still scan every provider below.
+        if (c.missingProviders?.length && c.days.length && !c.needsRepricing) {
+          const from = parseHistoryStartDate(c.days[0]!.date)!
+          const through = parseHistoryStartDate(c.days[c.days.length - 1]!.date)!
+          through.setHours(23, 59, 59, 999)
+          c = await buildHistory(c, from, through, c.missingProviders, true)
+          if (pausedHistory(c)) return c
+        }
 
         // Resume the exact saved range before calculating new gaps (including day rollover).
         if (c.historyBuild) {
@@ -819,6 +829,11 @@ program
 
       // Collect provider discovery + pricing staleness + parse format warnings
       warnings.push(...getDiscoveryWarnings(), ...getPricingWarnings(), ...getParseWarnings())
+      for (const model of currentData.models) {
+        if (getModelCosts(model.name)) continue
+        const warning = `No API pricing for model "${model.name}"; its tokens are counted but its cost is excluded. Configure a model alias only when the underlying API model is known.`
+        if (!warnings.includes(warning)) warnings.push(warning)
+      }
       const diagnostics: DiagnosticsBlock = { daysCount, parseTimeMs, warnings }
       const payload = buildMenubarPayload(currentData, providers, optimize, dailyHistory, agentStats, projectSpend, exeOsDetected, statsFileAge, diagnostics)
       const periodSnapshots = opts.optimize === false ? buildPeriodSnapshots(
@@ -862,7 +877,7 @@ program
 program
   .command('today')
   .description('Today\'s usage dashboard')
-  .option('--provider <provider>', 'Filter by provider: all, claude, codex, cursor', 'all')
+  .option('--provider <provider>', 'Filter by provider: all, claude, codex, cursor, cursor-agent, copilot, opencode, kimi, pi, omp', 'all')
   .option('--format <format>', 'Output format: tui, json', 'tui')
   .option('--project <name>', 'Show only projects matching name (repeatable)', collect, [])
   .option('--exclude <name>', 'Exclude projects matching name (repeatable)', collect, [])
@@ -878,7 +893,7 @@ program
 program
   .command('month')
   .description('This month\'s usage dashboard')
-  .option('--provider <provider>', 'Filter by provider: all, claude, codex, cursor', 'all')
+  .option('--provider <provider>', 'Filter by provider: all, claude, codex, cursor, cursor-agent, copilot, opencode, kimi, pi, omp', 'all')
   .option('--format <format>', 'Output format: tui, json', 'tui')
   .option('--project <name>', 'Show only projects matching name (repeatable)', collect, [])
   .option('--exclude <name>', 'Exclude projects matching name (repeatable)', collect, [])
@@ -896,7 +911,7 @@ program
   .description('Export usage data to CSV or JSON (includes 1 day, 7 days, 30 days)')
   .option('-f, --format <format>', 'Export format: csv, json', 'csv')
   .option('-o, --output <path>', 'Output file path')
-  .option('--provider <provider>', 'Filter by provider: all, claude, codex, cursor', 'all')
+  .option('--provider <provider>', 'Filter by provider: all, claude, codex, cursor, cursor-agent, copilot, opencode, kimi, pi, omp', 'all')
   .option('--project <name>', 'Show only projects matching name (repeatable)', collect, [])
   .option('--exclude <name>', 'Exclude projects matching name (repeatable)', collect, [])
   .action(async (opts) => {
@@ -1176,7 +1191,7 @@ program
   .command('optimize')
   .description('Find token waste and get exact fixes')
   .option('-p, --period <period>', 'Analysis period: today, week, 30days, month, all', 'week')
-  .option('--provider <provider>', 'Filter by provider: all, claude, codex, cursor', 'all')
+  .option('--provider <provider>', 'Filter by provider: all, claude, codex, cursor, cursor-agent, copilot, opencode, kimi, pi, omp', 'all')
   .action(async (opts) => {
     await loadPricing()
     const { range, label } = getDateRange(opts.period)
@@ -1189,7 +1204,7 @@ program
   .command('compare')
   .description('Compare two AI models side-by-side')
   .option('-p, --period <period>', 'Analysis period: today, week, 30days, month, all', 'all')
-  .option('--provider <provider>', 'Filter by provider: all, claude, codex, cursor', 'all')
+  .option('--provider <provider>', 'Filter by provider: all, claude, codex, cursor, cursor-agent, copilot, opencode, kimi, pi, omp', 'all')
   .action(async (opts) => {
     await loadPricing()
     const { range } = getDateRange(opts.period)

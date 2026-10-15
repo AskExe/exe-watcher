@@ -41,3 +41,18 @@ it('commits changed days by replacement rather than adding them twice', async ()
   expect(complete.days[0]!.cost).toBe(4)
   expect(cache.days[0]!.cost).toBe(99)
 })
+it('adds a missing provider without rescanning or replacing verified client totals', async () => {
+  const cache: DailyCache = { version: DAILY_CACHE_VERSION, scopeKey: 'global',
+    days: [row(first, 99, 'claude'), row(last, 20, 'codex')], lastComputedDate: '2026-10-02',
+    missingProviders: ['kimi'], partialDates: ['2026-10-01'], backfill: { blockedDate: '2026-10-01', attempts: 1 } }
+  const scanned: string[] = []
+  const result = await completeHistoryBuild(cache, first, last, ['kimi'], async provider => {
+    scanned.push(provider); return [row(first, 4, 'kimi')]
+  }, async () => {}, { mergeExisting: true })
+  expect(scanned).toEqual(['kimi']); expect(result.days.map(d => d.cost)).toEqual([103, 20])
+  expect(result.days[0]!.providers.claude!.cost).toBe(99)
+  expect(result.days[0]!.providers.kimi!.cost).toBe(4)
+  expect(result.missingProviders).toEqual([]); expect(result.partialDates).toEqual(['2026-10-01'])
+  expect(result.backfill).toEqual(cache.backfill); expect(result.lastComputedDate).toBe('2026-10-02')
+  expect(cache.days[0]!.cost).toBe(99)
+})

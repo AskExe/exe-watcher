@@ -601,6 +601,7 @@ function sourceContextCacheKey(providerFilter?: string): string {
     claudeConfigDir: process.env['CLAUDE_CONFIG_DIR'] ?? '',
     codexHome: process.env['CODEX_HOME'] ?? '',
     xdgDataHome: process.env['XDG_DATA_HOME'] ?? '',
+    kimiCodeHome: process.env['KIMI_CODE_HOME'] ?? '',
     home: process.env['HOME'] ?? '',
   })
 }

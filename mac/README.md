@@ -55,6 +55,8 @@ Override the binary via the `EXE_WATCHER_BIN` environment variable (default: `ex
 
 From 0.2.56, each daily refresh also updates every period whose history is fully cached. Closed days are reused and today's bucket is replaced with fresh usage, so switching periods needs no separate scan. These summaries survive same-day restarts. Historical validation still runs when needed to catch late usage; a large repricing job saves completed provider scans and resumes after a timeout.
 
+From 0.2.57, Watcher also reads native Kimi Code `sessions/**/wire.jsonl` files under `~/.kimi-code` (or `KIMI_CODE_HOME`), including subagents. GLM and Kimi models used through Claude/OpenCode remain attributed to those clients. Recorded token usage is counted even when a model alias has no verified API rate; its cost is excluded with a warning.
+
 ## Project layout
 
 ```
