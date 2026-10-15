@@ -69,6 +69,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private let store = AppStore(badgeCacheURL: FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent(".cache/exe-watcher/native-badge.json"))
     let updateChecker = UpdateChecker()
+    /// Drives the popover owl: animated only between popoverWillShow and popoverDidClose.
+    private let owlPresence = OwlPresence()
+    /// One-shot glance-and-blink of the menu bar owl on click.
+    private let owlReaction = MenuBarOwlReaction()
 
     private var usageLogWatcher: UsageLogWatcher?
     private var usageLogDebounceWork: DispatchWorkItem?
@@ -347,10 +351,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         guard let button = statusItem.button else { return }
 
         let font = NSFont.monospacedDigitSystemFont(ofSize: menubarTitleFontSize, weight: .medium)
-        let iconH: CGFloat = menubarTitleFontSize + 3
 
         // Draw the owl programmatically — PDF/SVG template images are unreliable at menubar size.
-        let owlImage: NSImage = OwlIcon.cachedImage(size: iconH, menuBar: true)
+        // A click reaction in progress keeps its current frame.
+        let owlImage: NSImage = owlReaction.currentFrame ?? staticMenuBarOwl
 
         button.image = owlImage
         button.imagePosition = .imageLeading
@@ -382,6 +386,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         button.display()
     }
 
+    private var menuBarOwlSize: CGFloat { menubarTitleFontSize + 3 }
+
+    private var staticMenuBarOwl: NSImage {
+        OwlIcon.cachedImage(size: menuBarOwlSize, menuBar: true)
+    }
+
+    /// Quick glance and blink when the menu bar owl is clicked (a blink only with Reduce
+    /// Motion). Frames use the same gold, non-template drawing as the static image.
+    private func playMenuBarOwlReaction() {
+        owlReaction.play(
+            size: menuBarOwlSize,
+            color: NSColor(Theme.brandAccent),
+            reduceMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        ) { [weak self] frame in
+            guard let self, let button = self.statusItem.button else { return }
+            button.image = frame ?? self.staticMenuBarOwl
+            button.needsDisplay = true
+            button.display()
+        }
+    }
+
     // MARK: - Popover
 
     private func setupPopover() {
@@ -394,6 +419,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         let content = MenuBarContent()
             .environment(store)
             .environment(updateChecker)
+            .environment(owlPresence)
             .frame(width: popoverWidth)
             .preferredColorScheme(.dark)
 
@@ -403,6 +429,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
     @objc private func handleButtonClick(_ sender: AnyObject?) {
         guard let button = statusItem.button else { return }
+        playMenuBarOwlReaction()
         if popover.isShown {
             popover.performClose(sender)
         } else {
@@ -420,6 +447,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
     func popoverWillShow(_ notification: Notification) {
         RefreshTracer.shared.instant(name: "popover_open", category: "lifecycle", tid: .lifecycle)
+        owlPresence.popoverWillShow()
         Task {
             await store.refreshTodayBadge()
             await store.refreshVisibleSelection()
@@ -433,6 +461,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
     func popoverDidClose(_ notification: Notification) {
         RefreshTracer.shared.instant(name: "popover_close", category: "lifecycle", tid: .lifecycle)
+        owlPresence.popoverDidClose()
     }
 
     // MARK: - Font Registration
