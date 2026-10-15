@@ -56,3 +56,32 @@ it('adds a missing provider without rescanning or replacing verified client tota
   expect(result.backfill).toEqual(cache.backfill); expect(result.lastComputedDate).toBe('2026-10-02')
   expect(cache.days[0]!.cost).toBe(99)
 })
+
+it('does not mark repeatedly blocked provider days complete or skip their usage', async () => {
+  const original: DailyCache = { version: DAILY_CACHE_VERSION, scopeKey: 'global', days: [], lastComputedDate: null }
+  const blocked = async () => { throw new ResourceBudgetError('fixture') }
+  let saved = await completeHistoryBuild(original, first, last, ['codex'], blocked, async () => {})
+  saved = await completeHistoryBuild(saved, first, last, ['codex'], blocked, async () => {})
+  saved = await completeHistoryBuild(saved, first, last, ['codex'], blocked, async () => {})
+  expect(saved.days).toEqual([])
+  expect(saved.historyBuild!.completedProviders).toEqual([])
+  expect(saved.historyBuild!.chunked!.nextDate).toBe('2026-10-01')
+  expect(saved.historyBuild!.partialDates ?? []).toEqual([])
+  const complete = await completeHistoryBuild(saved, first, last, ['codex'], async (provider, from) => [row(from, 2, provider)], async () => {})
+  expect(complete.days.map(d => d.cost)).toEqual([2, 2])
+  expect(complete.historyBuild).toBeUndefined()
+})
+
+it('rebuilds legacy skipped provider stages rather than accepting partial or duplicated usage', async () => {
+  const cache: DailyCache = { version: DAILY_CACHE_VERSION, scopeKey: 'global', days: [], lastComputedDate: null,
+    historyBuild: { start: '2026-10-01', end: '2026-10-02', providers: ['claude', 'codex'],
+      completedProviders: ['claude'], days: [row(first, 99, 'claude')], partialDates: ['2026-10-01'],
+      chunked: { provider: 'codex', nextDate: '2026-10-02' } } }
+  const calls: string[] = []
+  const complete = await completeHistoryBuild(cache, first, last, ['claude', 'codex'], async provider => {
+    calls.push(provider); return [row(first, 2, provider)]
+  }, async () => {})
+  expect(calls).toEqual(['claude', 'codex'])
+  expect(complete.days.map(d => d.cost)).toEqual([4, 0])
+  expect(complete.partialDates).toEqual([])
+})

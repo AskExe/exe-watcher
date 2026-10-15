@@ -109,7 +109,11 @@ struct DataClient {
     /// failed usage scan and substituted zero. Pricing warnings alone are allowed.
     static func validate(_ payload: MenubarPayload) throws {
         if let warning = payload.diagnostics?.warnings.first(where: {
-            $0.hasPrefix("parseAllSessions failed:")
+            $0.hasPrefix("parseAllSessions failed:") ||
+            $0.hasPrefix("History rebuild paused at ") ||
+            $0.hasPrefix("History repricing will resume ") ||
+            $0.hasPrefix("history backfill paused at ") ||
+            ($0.hasPrefix("history for ") && $0.contains("recorded as incomplete"))
         }) { throw DataClientError.incompleteScan(warning) }
     }
 

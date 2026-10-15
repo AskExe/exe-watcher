@@ -3,7 +3,7 @@ import { addNewDays } from './daily-cache.js'
 import { fillMissingDays } from './day-aggregator.js'
 import { mergeCounters } from './report-summary.js'
 import { ResourceBudgetError } from './resource-budget.js'
-import { nextBackfillCursor, shouldSkipBlockedChunk } from './progressive-backfill.js'
+import { nextBackfillCursor } from './progressive-backfill.js'
 
 const key = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 const date = (s: string) => new Date(`${s}T00:00:00`)
@@ -18,9 +18,14 @@ export async function completeHistoryBuild(
   save: (cache: DailyCache) => Promise<void>,
   options: { mergeExisting?: boolean } = {},
 ): Promise<DailyCache> {
-  const stage: NonNullable<DailyCache['historyBuild']> = cache.historyBuild ? structuredClone(cache.historyBuild) : {
-    start: key(start), end: key(end), completedProviders: [], days: [], providers,
-    mergeExisting: options.mergeExisting, previousBackfill: cache.backfill,
+  const previous = cache.historyBuild
+  // Older builds could skip failed dates across several providers. Their partial
+  // stage cannot safely be repaired by attributing every skipped day to one provider.
+  const stage: NonNullable<DailyCache['historyBuild']> = previous && !previous.partialDates?.length ? structuredClone(previous) : {
+    start: previous?.start ?? key(start), end: previous?.end ?? key(end),
+    completedProviders: [], days: [], providers: previous?.providers ?? providers,
+    mergeExisting: previous?.mergeExisting ?? options.mergeExisting,
+    previousBackfill: previous?.previousBackfill ?? cache.backfill,
   }
   const scanProviders = stage.providers ?? providers
   let current: DailyCache = { ...cache, historyBuild: stage }
@@ -56,18 +61,14 @@ export async function completeHistoryBuild(
       const next = new Date(day); next.setDate(next.getDate() + 1)
       const dayEnd = new Date(next.getTime() - 1)
       const dayKey = key(day)
-      if (shouldSkipBlockedChunk(current.backfill, dayKey)) {
-        stage.partialDates = [...new Set([...(stage.partialDates ?? []), dayKey])]
-      } else {
-        try {
-          const incoming = await scan(provider, day, dayEnd)
-          merge(incoming.filter(row => row.date === dayKey))
-        } catch (err) {
-          if (!(err instanceof ResourceBudgetError)) throw err
-          current.backfill = nextBackfillCursor(current.backfill, dayKey)
-          await save(current)
-          return current
-        }
+      try {
+        const incoming = await scan(provider, day, dayEnd)
+        merge(incoming.filter(row => row.date === dayKey))
+      } catch (err) {
+        if (!(err instanceof ResourceBudgetError)) throw err
+        current.backfill = nextBackfillCursor(current.backfill, dayKey)
+        await save(current)
+        return current
       }
       current.backfill = null
       stage.chunked.nextDate = key(next)

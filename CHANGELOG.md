@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.61 (unreleased)
+
+- Keep incomplete history rebuilds from replacing ALL totals with just today’s spend, including saved results from older CLIs. Preserve the last committed history during repricing.
+- Resume oversized provider rebuilds without marking skipped dates complete; rebuild legacy partial stages safely.
+- Cache verified per-file usage dates independently of prices, so historical scans skip unrelated files without dropping changed sessions.
+- Reuse the bounded parsed-cache quota across launches and reserve it atomically, avoiding repeated full directory inventories.
+
 ## 0.2.60 (2026-10-15)
 
 - Fix menu bar updates that macOS rejected as "damaged and can't be opened": the updater now unpacks the release with `ditto`, so the app's signature survives (it used `unzip`, which wrote `._` metadata files into the bundle). Apps on 0.2.59 or earlier still update with the old unpacker once; install this release from the DMG or with an updated `exe-watcher menubar --force`.

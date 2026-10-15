@@ -146,7 +146,10 @@ export async function loadDailyCache(scopeKey = DEFAULT_DAILY_CACHE_SCOPE): Prom
     if (!isValidCache(parsed)) return emptyCache(scopeKey)
     if (parsed.scopeKey !== scopeKey) return emptyCache(scopeKey)
     if ((parsed.days.length || parsed.historyBuild) && parsed.pricingFingerprint !== getPricingFingerprint()) {
-      return { ...emptyCache(scopeKey), needsRepricing: true, previousHistoryStart: parsed.days[0]?.date ?? parsed.historyBuild?.start }
+      // Keep the committed baseline until its replacement is complete. These rows
+      // are explicitly stale, never advertised as current-price period snapshots.
+      return { ...parsed, version: DAILY_CACHE_VERSION, historyBuild: undefined,
+        needsRepricing: true, previousHistoryStart: parsed.days[0]?.date ?? parsed.historyBuild?.start }
     }
     if (parsed.version !== DAILY_CACHE_VERSION) {
       return { ...parsed, version: DAILY_CACHE_VERSION, historyBuild: undefined,

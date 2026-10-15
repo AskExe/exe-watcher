@@ -30,3 +30,9 @@ Startup, keyboard period/provider changes and refresh timers share a serialized 
 Foreground summary scans allow up to 8 GiB read and two million processed records while retaining the 30-second and heap bounds. Background scans retain their 1 GiB and 200,000-record limits. Explicit reports have a larger input working set without retaining the full history in memory.
 
 Verification: 618 JavaScript tests; exact raw-versus-summary total, activity and comparison assertions; cancellation/coalescing/error-retry tests. A real PTY run switched Week → All Time → Today and exited normally, rendering 295,989 local calls across 674 projects without resource errors. The summary scan retained about 90 MB heap; the interactive process peaked around 475 MB RSS, including transient parsing and runtime memory. V8 old space remained capped at 256 MiB.
+
+## Historical-total correction (0.2.61)
+
+A paused pricing rebuild must not publish today's usage as an apparently complete historical period. Historical requests now fail visibly until all requested closed days are verified; the native app also rejects legacy partial-history payloads. Committed rows remain a stale baseline during repricing, and provider rebuilds retain their cursor without declaring failed days complete.
+
+Verified per-file usage-date bounds survive price changes but invalidate on source or WAL changes. Historical scans can skip unrelated files without replaying their bodies. Parsed-file disk quota is reserved atomically under the existing writer lock and reused across process launches; missing or invalid quota is reconciled before caching. Runtime, heap, output, manifest and disk limits are unchanged.

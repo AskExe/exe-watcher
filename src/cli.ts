@@ -28,7 +28,7 @@ import { getPresetPlan, isPlanId, isPlanProvider, planDisplayName } from './plan
 import { MAX_BLOCKED_CHUNK_ATTEMPTS, computeProgressiveBackfillStart, nextBackfillCursor, planBackfillChunks, resolveColdStartHistoryDays, shouldSkipBlockedChunk } from './progressive-backfill.js'
 import { parseHistoryStartDate, resolveHistoryStart } from './history-start.js'
 import { applyClaudeRecovery, readClaudeUsageSnapshot, recoverClaudeUsage, sumClaudeModelTokens, getClaudeRecoveryForRange } from './claude-recovery.js'
-import { buildPeriodSnapshots } from './period-snapshots.js'
+import { assertHistoryComplete, buildPeriodSnapshots } from './period-snapshots.js'
 import { completeHistoryBuild } from './history-build.js'
 import { createInterface } from 'node:readline'
 import { createRequire } from 'node:module'
@@ -589,6 +589,8 @@ program
 
         return c
       })
+
+      assertHistoryComplete(cache, toDateString(periodInfo.range.start), toDateString(todayStart))
 
       // CURRENT PERIOD DATA
       // - .all provider: assemble from cache + today (fast)

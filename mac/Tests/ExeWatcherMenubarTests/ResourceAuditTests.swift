@@ -54,6 +54,27 @@ struct ResourceAuditTests {
     }
 
     @Test @MainActor
+    func pausedHistoryCannotReplaceTheLastGoodLifetimeTotal() async throws {
+        let good = try payload(cost: 100_000)
+        let bad = try payload(cost: 1_049, warnings: ["History rebuild paused at 2025-07-03; completed scans are saved and will resume on the next historical refresh."])
+        actor Responses {
+            var count = 0
+            func next(_ good: MenubarPayload, _ bad: MenubarPayload) -> MenubarPayload {
+                count += 1
+                return count == 1 ? good : bad
+            }
+        }
+        let responses = Responses()
+        let store = AppStore(fetchPayload: { _, _, _ in await responses.next(good, bad) })
+        store.selectedPeriod = .all
+        await store.refresh(includeOptimize: false)
+        #expect(store.payload.current.cost == 100_000)
+        await store.refresh(includeOptimize: false)
+        #expect(store.payload.current.cost == 100_000)
+        #expect(store.lastError != nil)
+    }
+
+    @Test @MainActor
     func lastGoodBadgeSurvivesRestartButDoesNotLeakAcrossMidnight() async throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: dir) }

@@ -13,8 +13,7 @@ import { describe, expect, it } from 'vitest'
  *
  * These tests drive the real CLI against an isolated corpus with the scan budget tightened
  * (EXE_WATCHER_MAX_SCAN_BYTES) so that one oversized transcript is unscannable at any budget.
- * Against the pre-fix single-shot backfill the first assertion already fails: exit 1, no
- * payload, and daily-cache.json never advances past its seeded date.
+ * Failed refreshes must preserve checkpoints without publishing partial totals as complete.
  */
 
 const CLI = join(process.cwd(), 'src', 'cli.ts')
@@ -131,14 +130,13 @@ function readCache(env: Env): CacheShape {
 }
 
 describe('backfill survives a resource-budget abort', { timeout: 300_000 }, () => {
-  it('emits a payload and parks a cursor instead of discarding the run', () => {
+  it('rejects incomplete totals and parks a cursor without discarding progress', () => {
     const env = makeCorpus()
     const run = runStatus(env)
 
-    // Pre-fix: exit 1 with empty stdout — the menubar's "no data" state.
-    expect(run.status).toBe(0)
-    const payload = JSON.parse(run.stdout.trim())
-    expect(payload.current).toBeTruthy()
+    expect(run.status).not.toBe(0)
+    expect(run.stdout).toBe('')
+    expect(run.stderr).toContain('Historical usage is incomplete')
 
     const after = readCache(env)
     expect(after.backfill?.blockedDate).toBe(dateKey(midday(3)))
@@ -152,7 +150,9 @@ describe('backfill survives a resource-budget abort', { timeout: 300_000 }, () =
 
     let previousDays = 0
     for (let i = 0; i < 4; i++) {
-      expect(runStatus(env).status).toBe(0)
+      const result = runStatus(env)
+      expect(result.status).not.toBe(0)
+      expect(result.stderr).toContain('Historical usage is incomplete')
       const c = readCache(env)
       // Days already resolved are never dropped by a later abort.
       expect(c.dates.length).toBeGreaterThanOrEqual(previousDays)

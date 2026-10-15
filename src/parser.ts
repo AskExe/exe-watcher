@@ -24,7 +24,7 @@ import type {
 } from './types.js'
 import { classifyTurn, compactUserMessage, BASH_TOOLS } from './classifier.js'
 import { loadSessionIndex, saveSessionIndex, checkSessionFile, recordParseResult, pruneIndex, clearSessionIndex } from './session-index.js'
-import { clearDiscoveryCache } from './discovery-cache.js'
+import { clearDiscoveryCache, flushDiscoveryCache } from './discovery-cache.js'
 import { extractBashCommands } from './bash-utils.js'
 
 let _parseWarnings: string[] = []
@@ -515,7 +515,7 @@ async function parseProviderSources(
       for await (const call of parser.parse()) { chargeRecord(); result.push({ ...call, ...compactUserMessage(call.userMessage, call.userMessageSignals) }) }
       if (parser.warnings?.length) warnings.push(...parser.warnings)
       return result
-    }, warnings)
+    }, warnings, dateRange)
     _parseWarnings.push(...warnings)
     const touched = new Set<string>()
     for (const call of calls) {
@@ -727,7 +727,10 @@ export async function parseAllSessions(dateRange?: DateRange, providerFilter?: s
     }
     return [...merged.values()].sort((a, b) => b.totalCostUSD - a.totalCostUSD)
   }
-  return reportMode.run(summaryOnly, () => withScanBudget(() => parseAllSessionsWithinBudget(dateRange, providerFilter), summaryOnly ? 2_000_000 : 200_000, signal, (summaryOnly ? 8 : 1) * 1024 ** 3))
+  return reportMode.run(summaryOnly, () => withScanBudget(async () => {
+    try { return await parseAllSessionsWithinBudget(dateRange, providerFilter) }
+    finally { await flushDiscoveryCache() }
+  }, summaryOnly ? 2_000_000 : 200_000, signal, (summaryOnly ? 8 : 1) * 1024 ** 3))
 }
 
 async function parseAllSessionsWithinBudget(dateRange?: DateRange, providerFilter?: string): Promise<ProjectSummary[]> {
