@@ -11,6 +11,7 @@ import { parseAllSessions, filterProjectsByName, getDiscoveredProviderNames } fr
 import { loadPricing } from './models.js'
 import { getAllProviders } from './providers/index.js'
 import { scanAndDetect, type WasteFinding, type WasteAction, type OptimizeResult, type OptimizeCoverage } from './optimize.js'
+import { copyOptimizeMarkdown, formatOptimizeMarkdown, saveOptimizeMarkdown } from './optimize-share.js'
 import { estimateContextBudget, discoverProjectCwd, type ContextBudget } from './context-budget.js'
 import { dateKey } from './day-aggregator.js'
 import { CompareView } from './compare.js'
@@ -569,7 +570,9 @@ function FindingPanel({ index, finding, costRate, width }: { index: number; find
 
 const GRADE_COLORS: Record<string, string> = { A: '#16A34A', B: '#16A34A', C: GOLD, D: ORANGE, F: '#DC2626' }
 
-function OptimizeView({ findings, costRate, projects, label, width, healthScore, healthGrade, coverage }: { findings: WasteFinding[]; costRate: number; projects: ProjectSummary[]; label: string; width: number; healthScore: number; healthGrade: string; coverage?: OptimizeCoverage }) {
+type ShareStatus = { text: string; error?: boolean }
+
+function OptimizeView({ findings, costRate, projects, label, width, healthScore, healthGrade, coverage, shareStatus }: { findings: WasteFinding[]; costRate: number; projects: ProjectSummary[]; label: string; width: number; healthScore: number; healthGrade: string; coverage?: OptimizeCoverage; shareStatus: ShareStatus | null }) {
   const periodCost = projects.reduce((s, p) => s + p.totalCostUSD, 0)
   const totalTokens = findings.reduce((s, f) => s + f.tokensSaved, 0)
   const totalCost = totalTokens * costRate
@@ -585,6 +588,8 @@ function OptimizeView({ findings, costRate, projects, label, width, healthScore,
           {coverage?.partial ? <Text color={ORANGE}>Partial check</Text> : <Text>Setup: <Text bold color={gradeColor}>{healthGrade}</Text><Text dimColor> ({healthScore}/100)</Text></Text>}
         </Text>
         <Text dimColor>Claude Code recommendations. Changes are yours to apply.</Text>
+        <Text><Text bold color={ORANGE}>c</Text><Text> copy all   </Text><Text bold color={ORANGE}>e</Text><Text> save .md</Text></Text>
+        {shareStatus && <Text color={shareStatus.error ? ORANGE : '#16A34A'}>{shareStatus.text}</Text>}
         {coverage?.partial && <Text color={ORANGE}>Partial analysis: {coverage.completedFiles}/{coverage.totalFiles} logs fully checked; some records remain unchecked.</Text>}
         {coverage?.partial && <Text dimColor>Cleanup suggestions requiring complete history are omitted.</Text>}
         <Text color="#16A34A" wrap="truncate-end">Savings: ~{formatTokens(totalTokens)} tokens (~{formatCost(totalCost)}, ~{pct}% of spend)</Text>
@@ -682,6 +687,9 @@ export function InteractiveDashboard({ initialPeriod, initialProvider, refreshSe
   const [optimizeResult, setOptimizeResult] = useState<OptimizeResult | null>(null)
   const [optimizeError, setOptimizeError] = useState<string | null>(null)
   const [optimizeAttempt, setOptimizeAttempt] = useState(0)
+  const [shareStatus, setShareStatus] = useState<ShareStatus | null>(null)
+  const sharing = useRef(false)
+  const shareGeneration = useRef(0)
   const [projectBudgets, setProjectBudgets] = useState<Map<string, ContextBudget>>(new Map())
   const [planUsage, setPlanUsage] = useState<PlanUsage | undefined>(undefined)
   const [loadingDots, setLoadingDots] = useState(1)
@@ -697,6 +705,30 @@ export function InteractiveDashboard({ initialPeriod, initialProvider, refreshSe
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const reloadGenerationRef = useRef(0)
   const findingCount = optimizeResult?.findings.length ?? 0
+
+  useEffect(() => {
+    shareGeneration.current++
+    setShareStatus(null)
+    return () => { shareGeneration.current++ }
+  }, [optimizeResult, period, view])
+
+  async function shareOptimize(action: 'c' | 'e') {
+    if (!optimizeResult || loading || loadError || optimizeError || sharing.current) return
+    sharing.current = true
+    const generation = shareGeneration.current
+    setShareStatus({ text: action === 'c' ? 'Copying…' : 'Saving…' })
+    try {
+      const markdown = formatOptimizeMarkdown(optimizeResult, { periodLabel: PERIOD_LABELS[period], projectFilter, excludeFilter })
+      const text = action === 'c'
+        ? (await copyOptimizeMarkdown(markdown), 'Copied all recommendations. Paste into Claude Code.')
+        : `Saved: ${await saveOptimizeMarkdown(markdown)}`
+      if (generation === shareGeneration.current) setShareStatus({ text })
+    } catch (error) {
+      if (generation === shareGeneration.current) setShareStatus({ text: action === 'c'
+        ? 'Could not copy. Press e to save a Markdown file instead.'
+        : `Could not save: ${error instanceof Error ? error.message : String(error)}`, error: true })
+    } finally { sharing.current = false }
+  }
 
   // Animate loading dots
   useEffect(() => {
@@ -814,6 +846,7 @@ export function InteractiveDashboard({ initialPeriod, initialProvider, refreshSe
       return
     }
     if (input === 'o' && view === 'dashboard' && optimizeAvailable) { setView('optimize'); return }
+    if ((input === 'c' || input === 'e') && view === 'optimize') { void shareOptimize(input); return }
     if ((input === 'b' || key.escape) && view === 'optimize') { setOptimizeError(null); setView('dashboard'); return }
     if (input === 'c' && compareAvailable && view === 'dashboard') { setView('compare'); return }
     if (input === 'p' && multipleProviders && view !== 'compare') {
@@ -875,7 +908,7 @@ export function InteractiveDashboard({ initialPeriod, initialProvider, refreshSe
               <Text dimColor>Your usage report is still available. Press b to go back, r to retry, or 1–5 for a shorter period.</Text>
             </Panel>
         : view === 'optimize' && optimizeResult
-          ? <OptimizeView findings={optimizeResult.findings} costRate={optimizeResult.costRate} projects={projects} label={PERIOD_LABELS[period]} width={dashWidth} healthScore={optimizeResult.healthScore} healthGrade={optimizeResult.healthGrade} coverage={optimizeResult.coverage} />
+          ? <OptimizeView findings={optimizeResult.findings} costRate={optimizeResult.costRate} projects={projects} label={PERIOD_LABELS[period]} width={dashWidth} healthScore={optimizeResult.healthScore} healthGrade={optimizeResult.healthGrade} coverage={optimizeResult.coverage} shareStatus={shareStatus} />
           : view === 'optimize'
             ? <Panel title="Optimization" color={ORANGE} width={dashWidth}><Text>Scanning…</Text></Panel>
             : <DashboardContent projects={projects} period={period} columns={columns} activeProvider={activeProvider} budgets={projectBudgets} planUsage={planUsage} recovery={recovery} time={time} />}
