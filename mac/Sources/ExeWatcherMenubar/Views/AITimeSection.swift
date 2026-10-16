@@ -2,11 +2,25 @@ import SwiftUI
 
 struct AITimeSection: View {
     @Environment(AppStore.self) private var store
-    var body: some View { AITimeContent(time: store.payload.time) }
+    var body: some View {
+        VStack(spacing: 0) {
+            AITimeContent(time: store.payload.time, recoveryPaused: store.timeRecoveryMessage != nil)
+            if let message = store.timeRecoveryMessage {
+                HStack {
+                    Text(message).foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Retry") { store.retryTimeRecovery() }
+                }
+                .font(.system(size: 10))
+                .padding(.horizontal, 14).padding(.bottom, 12)
+            }
+        }
+    }
 }
 
 struct AITimeContent: View {
     let time: TimeBlock?
+    var recoveryPaused = false
     @State private var showDetails = false
 
     var body: some View {
@@ -43,7 +57,7 @@ struct AITimeContent: View {
                             Text(provider.name)
                             Spacer()
                             Text(TimeBlock.duration(provider.aiRunningMs))
-                            Text("\(provider.timedFiles)/\(provider.files) files")
+                            Text("\(provider.timedFiles)/\(provider.files) timed in view")
                                 .foregroundStyle(.secondary)
                         }
                         .font(.system(size: 10))
@@ -75,7 +89,14 @@ struct AITimeContent: View {
 
     private func coverage(_ time: TimeBlock?) -> String {
         guard let time else { return "Missing records · about these times" }
-        if time.pendingFiles > 0 { return "\(time.pendingFiles) files awaiting recovery · details" }
+        if let recovery = time.recovery, recovery.runnableFiles > 0 {
+            if recoveryPaused { return "Timing update paused · details" }
+            return "Updating \(recovery.runnableFiles) logs · details"
+        }
+        if let recovery = time.recovery, recovery.waitingFiles > 0 {
+            return "\(recovery.waitingFiles) logs have incomplete end data · details"
+        }
+        if time.pendingFiles > 0 { return "\(time.pendingFiles) logs need timing updates · details" }
         if time.estimatedAiMs > 0 { return "Includes inferred AI time · missing records · details" }
         if let recorded = time.firstRecordedAt {
             let formatter = ISO8601DateFormatter()

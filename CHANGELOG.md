@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.63 (unreleased)
+
+- Continue queued timing recovery automatically in small timing-only steps, so quiet logs finish without waiting for another usage event. Share one child-process slot, rest between steps, and stop when work is drained, blocked or cancelled.
+- Use the existing automatic read/time limits across small blocks and leave incomplete final records asleep until an append arrives. Do not rescan costs or refresh their timestamps during timing catch-up.
+- Keep newer timing results when a cost or Optimize response arrives, and clarify that provider file counts describe the selected view.
+
 ## 0.2.62 (unreleased)
 
 - Add AI running time, elapsed busy time, and estimated interaction time below spend in the menu bar and terminal dashboards, following each period and provider selection.

@@ -5,6 +5,8 @@ private let todayCacheTTLSeconds: TimeInterval = 30
 private let historicalCacheTTLSeconds: TimeInterval = 5 * 60
 typealias MenubarPayloadFetcher = @Sendable (Period, ProviderFilter, Bool) async throws -> MenubarPayload
 typealias AppStoreDateProvider = @Sendable () -> Date
+typealias TimeSnapshotsFetcher = @Sendable (ProviderFilter) async throws -> TimeRecoverySnapshots
+typealias TimeRecoveryRest = @Sendable (TimeInterval) async throws -> Void
 
 private struct BadgeSnapshot: Codable {
     let dateAnchor: String
@@ -64,6 +66,7 @@ final class AppStore {
     var selectedInsight: InsightMode = .trend
     var currency: String = "USD"
     var isLoading: Bool = false
+    private(set) var timeRecoveryMessage: String?
     var subscription: SubscriptionUsage?
     var subscriptionError: String?
     var subscriptionLoadState: SubscriptionLoadState = .idle
@@ -81,6 +84,10 @@ final class AppStore {
     var healthMonitor: HealthMonitor?
 
     private let fetchPayload: MenubarPayloadFetcher
+    private let fetchTimeSnapshots: TimeSnapshotsFetcher
+    private let restForTimeRecovery: TimeRecoveryRest
+    @ObservationIgnored private var timeRecoveryTask: Task<Void, Never>?
+    @ObservationIgnored private var timeRecoveryPacer = TimeRecoveryPacer()
     private let now: AppStoreDateProvider
     private let badgeCacheURL: URL?
     private var periodCacheURL: URL? {
@@ -103,9 +110,13 @@ final class AppStore {
     init(
         fetchPayload: @escaping MenubarPayloadFetcher = DataClient.fetch,
         now: @escaping AppStoreDateProvider = Date.init,
-        badgeCacheURL: URL? = nil
+        badgeCacheURL: URL? = nil,
+        fetchTimeSnapshots: @escaping TimeSnapshotsFetcher = { try await DataClient.fetchTimeSnapshots(provider: $0) },
+        restForTimeRecovery: @escaping TimeRecoveryRest = { try await Task.sleep(for: .seconds($0)) }
     ) {
         self.fetchPayload = fetchPayload
+        self.fetchTimeSnapshots = fetchTimeSnapshots
+        self.restForTimeRecovery = restForTimeRecovery
         self.now = now
         self.badgeCacheURL = badgeCacheURL
         let todayKey = PayloadCacheKey(period: .today, provider: .all, now: now())
@@ -151,6 +162,96 @@ final class AppStore {
         }
     }
 
+    private func persistBadge() {
+        let target = key(period: .today, provider: .all, includeOptimize: false)
+        guard let url = badgeCacheURL, let saved = cache[target],
+              let data = try? JSONEncoder().encode(BadgeSnapshot(dateAnchor: target.dateAnchor,
+                  fetchedAt: saved.fetchedAt, payload: saved.payload)), data.count <= 2 * 1024 * 1024 else { return }
+        try? SafeFile.write(data, to: url.path)
+    }
+
+    private static func newerTime(_ existing: TimeBlock?, _ incoming: TimeBlock?) -> TimeBlock? {
+        guard let incoming else { return existing }
+        guard let existing else { return incoming }
+        guard let newDate = incoming.indexedAt else { return existing.indexedAt == nil ? incoming : existing }
+        guard let oldDate = existing.indexedAt else { return incoming }
+        return newDate >= oldDate ? incoming : existing
+    }
+
+    /// Update timing without making an old cost result look newly fetched/validated.
+    func applyTimeSnapshots(_ fresh: TimeRecoverySnapshots, dateAnchor: String) {
+        guard dateAnchor == key(period: .today, provider: .all, includeOptimize: false).dateAnchor,
+              let provider = ProviderFilter.allCases.first(where: { $0.cliArg == fresh.provider }) else { return }
+        var slices = [(provider, fresh.periods)]
+        if let all = fresh.allPeriods { slices.append((.all, all)) }
+        for (scope, periods) in slices {
+            for period in Period.allCases {
+                let target = key(period: period, provider: scope, includeOptimize: false)
+                guard let time = periods[period.cliArg], let saved = cache[target] else { continue }
+                var payload = saved.payload
+                payload.time = Self.newerTime(payload.time, time)
+                cache[target] = CachedPayload(payload: payload, fetchedAt: saved.fetchedAt,
+                    historicalValidatedAt: saved.historicalValidatedAt)
+            }
+        }
+        // Source progress is already durable per step. Avoid rewriting full financial
+        // snapshots every chunk; persist the display once the known queue is drained.
+        if fresh.recovery.runnableFiles == 0 {
+            timeRecoveryMessage = nil
+            persistPeriods(); persistBadge()
+        }
+    }
+
+    private func scheduleTimeRecovery(_ progress: TimeRecoveryProgress?) {
+        if progress?.runnableFiles == 0 { timeRecoveryMessage = nil }
+        guard timeRecoveryTask == nil, let progress, timeRecoveryPacer.begin(progress) else { return }
+        timeRecoveryMessage = nil
+        let generation = refreshGeneration
+        let anchor = key(period: .today, provider: .all, includeOptimize: false).dateAnchor
+        timeRecoveryTask = Task(priority: .utility) { [weak self] in
+            guard let self else { return }
+            defer { self.timeRecoveryTask = nil }
+            var previous = progress
+            do {
+                while !Task.isCancelled {
+                    try await self.restForTimeRecovery(self.timeRecoveryPacer.delay)
+                    try Task.checkCancellation()
+                    let started = ProcessInfo.processInfo.systemUptime
+                    let result = try await self.fetchTimeSnapshots(self.selectedProvider)
+                    try Task.checkCancellation()
+                    guard generation == self.refreshGeneration,
+                          anchor == self.key(period: .today, provider: .all, includeOptimize: false).dateAnchor else { return }
+                    self.applyTimeSnapshots(result, dateAnchor: anchor)
+                    let again = self.timeRecoveryPacer.completed(previous: previous.token,
+                        progress: result.recovery, elapsed: ProcessInfo.processInfo.systemUptime - started)
+                    previous = result.recovery
+                    if !again {
+                        if result.recovery.runnableFiles > 0 { self.timeRecoveryMessage = "Timing update paused after no progress." }
+                        break
+                    }
+                }
+            } catch is CancellationError {
+                // Ownership is retained until the cancelled CLI has exited/reaped.
+            } catch {
+                guard !Task.isCancelled, generation == self.refreshGeneration else { return }
+                self.timeRecoveryPacer.pause(previous.token)
+                self.timeRecoveryMessage = "Timing update paused. You can retry it."
+                NSLog("Exe Watcher: timing recovery paused: %@", error.localizedDescription)
+            }
+        }
+    }
+
+    func cancelTimeRecovery() {
+        timeRecoveryTask?.cancel()
+        timeRecoveryPacer.reset()
+        timeRecoveryMessage = nil
+    }
+
+    func retryTimeRecovery() {
+        timeRecoveryPacer.reset()
+        scheduleTimeRecovery(todayPayload?.time?.recovery ?? payload.time?.recovery)
+    }
+
     private func ingestPeriods(from fresh: MenubarPayload, provider: ProviderFilter, dateAnchor: String) {
         guard dateAnchor == key(period: .today, provider: provider, includeOptimize: false).dateAnchor,
               let snapshots = fresh.periodSnapshots else { return }
@@ -162,7 +263,7 @@ final class AppStore {
                 current: snapshot.current, optimize: MenubarPayload.empty.optimize, history: fresh.history,
                 diagnostics: snapshot.diagnostics, agentStats: fresh.agentStats,
                 exeOsDetected: fresh.exeOsDetected, statsFileAge: fresh.statsFileAge, projectSpend: snapshot.projectSpend,
-                time: snapshot.time
+                time: Self.newerTime(cache[target]?.payload.time, snapshot.time)
             )
             cache[target] = CachedPayload(payload: payload, fetchedAt: now(),
                 historicalValidatedAt: Date(timeIntervalSince1970: snapshot.historyValidatedAt / 1000))
@@ -208,7 +309,8 @@ final class AppStore {
                 agentStats: body.agentStats,
                 exeOsDetected: body.exeOsDetected,
                 statsFileAge: body.statsFileAge,
-                projectSpend: body.projectSpend
+                projectSpend: body.projectSpend,
+                time: Self.newerTime(basePayload.payload.time, optimizedPayload.payload.time)
             )
         }
     }
@@ -314,6 +416,7 @@ final class AppStore {
     /// Treat unlock/wake as a new refresh generation: clear stale in-flight guards, cancel
     /// outstanding work, and ignore any old fetch that eventually returns.
     func recoverFromSystemResume() {
+        cancelTimeRecovery()
         RefreshTracer.shared.instant(
             name: "system_resume_recovery", category: "lifecycle", tid: .lifecycle,
             args: [
@@ -418,7 +521,7 @@ final class AppStore {
             }
         }
         do {
-            let fresh = try await withTaskCancellationHandler {
+            var fresh = try await withTaskCancellationHandler {
                 try await task.value
             } onCancel: { task.cancel() }
             guard generation == refreshGeneration else {
@@ -426,6 +529,7 @@ final class AppStore {
                 return false
             }
             try DataClient.validate(fresh)
+            fresh.time = Self.newerTime(cache[key]?.payload.time, fresh.time)
             failureCounts.removeValue(forKey: key)
             retryAfter.removeValue(forKey: key)
             cache[key] = CachedPayload(payload: fresh, fetchedAt: now())
@@ -433,16 +537,11 @@ final class AppStore {
                 ingestPeriods(from: fresh, provider: key.provider, dateAnchor: key.dateAnchor)
                 persistPeriods()
             }
-            if isBadge, let url = badgeCacheURL,
-               let data = try? JSONEncoder().encode(BadgeSnapshot(dateAnchor: key.dateAnchor, fetchedAt: now(), payload: fresh)),
-               data.count <= 2 * 1024 * 1024 {
-                try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-                try? data.write(to: url, options: .atomic)
-                try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
-            }
+            if isBadge { persistBadge() }
             errorsByKey[key] = nil
             RefreshTracer.shared.endSpan(spanId, args: ["result": .string("success")])
             healthMonitor?.recordFetchResult(success: true)
+            if !includeOptimize { scheduleTimeRecovery(fresh.time?.recovery) }
             return true
         } catch {
             if error is CancellationError {

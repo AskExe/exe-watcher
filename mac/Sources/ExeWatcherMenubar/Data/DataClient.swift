@@ -62,6 +62,17 @@ extension DataClientError: LocalizedError {
 /// Runs the CLI via argv (no shell interpretation). See `ExeWatcherCLI` for why we never route
 /// commands through `/bin/zsh -c` anymore.
 struct DataClient {
+    static func fetchTimeSnapshots(provider: ProviderFilter) async throws -> TimeRecoverySnapshots {
+        // Same process permit, niceness, output bounds, parent watcher and cancellation
+        // as a normal fetch. This command never reparses financial usage.
+        let result = try await runCLI(subcommand: ["time", "--snapshots", "--format", "json", "--provider", provider.cliArg])
+        guard result.exitCode == 0 else {
+            throw DataClientError.nonZeroExit(code: result.exitCode, stderr: result.stderr)
+        }
+        do { return try JSONDecoder().decode(TimeRecoverySnapshots.self, from: result.stdout) }
+        catch { throw DataClientError.decode(error) }
+    }
+
     static func fetch(period: Period, provider: ProviderFilter, includeOptimize: Bool) async throws -> MenubarPayload {
         let timeout = (period == .today && provider == .all && !includeOptimize)
             ? badgeTimeoutSeconds

@@ -145,6 +145,8 @@ Inferred spans are capped at 30 minutes; longer unmeasured gaps remain unknown. 
 
 Timing uses a separate private index and leaves financial history intact. Existing usage-file events trigger small bounded updates; no extra polling service is installed. Historical recovery advances saved byte cursors in bounded passes, without rereading unchanged transcripts:
 
+The menu bar continues known unfinished timing work in separate timing-only steps, without waiting for another file change or rerunning cost scans. Only one CLI child runs at a time; each step rests for at least nine times its elapsed runtime. Catch-up stops when the queue clears, an incomplete final record needs more data, a step fails, or two steps make no progress. Cost freshness timestamps stay unchanged. Provider file counts mean files with timing **in the selected view**, out of all discovered files.
+
 ```bash
 exe-watcher time --period all                  # saved/recent timing and coverage
 exe-watcher time --period week --format json

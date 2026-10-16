@@ -35,6 +35,7 @@ import { createRequire } from 'node:module'
 import { watchMenubarParent } from './menubar-lifecycle.js'
 import { getTimeReport, refreshTimeIndex } from './time-index.js'
 import { formatDuration, summarizeTime, type TimeReport } from './time-tracking.js'
+import { buildTimeSnapshots } from './time-snapshots.js'
 
 const require = createRequire(import.meta.url)
 const { version } = require('../package.json')
@@ -1201,9 +1202,16 @@ program
   .option('--project <names...>', 'Include projects by name')
   .option('--exclude <names...>', 'Exclude projects by name')
   .option('--recover', 'Advance one bounded historical recovery pass; safe to resume')
+  .option('--snapshots', 'Return timing-only period snapshots for the menu bar')
   .option('--format <format>', 'text or json', 'text')
   .action(async opts => {
     const index = await refreshTimeIndex({ history: opts.recover === true })
+    if (opts.snapshots) {
+      const now = new Date()
+      const ranges = Object.fromEntries(['today', 'week', '30days', 'month', 'all'].map(key => [key, getDateRange(key, now).range]))
+      console.log(JSON.stringify(buildTimeSnapshots(index, ranges, opts.provider, opts.project, opts.exclude)))
+      return
+    }
     const time = summarizeTime(index, getDateRange(opts.period).range, opts.provider, opts.project, opts.exclude)
     if (opts.format === 'json') console.log(JSON.stringify(time))
     else {
