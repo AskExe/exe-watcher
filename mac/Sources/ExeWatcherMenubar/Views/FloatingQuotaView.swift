@@ -19,40 +19,47 @@ struct FloatingQuotaRail: View {
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 30)) { clock in
-            let quota = FloatingQuota(usage: store.subscription, state: store.subscriptionLoadState)
-            let window = quota.primary(preferences.horizon)
-            let expired = window?.expired(at: clock.date) == true
             let horizontal = preferences.position.edge?.horizontal ?? preferences.position.horizontal
-            Group {
+            VStack(spacing: 9) {
+                HStack(spacing: 5) {
+                    OwlIcon(size: 14).foregroundStyle(Theme.brandAccent)
+                    Text(preview ? "PREVIEW" : "WATCHER").font(.system(size: 8, weight: .bold)).tracking(1)
+                        .foregroundStyle(.secondary)
+                    if interaction.isPinned { Image(systemName: "pin.fill").font(.system(size: 8)).foregroundStyle(Theme.brandAccent) }
+                    Spacer(minLength: 0)
+                    FloatingProviderMenu(preferences: preferences)
+                }
                 if horizontal {
                     HStack(spacing: 12) {
-                        VStack(spacing: 5) { caption(window); ring(quota, window: window, expired: expired, now: clock.date) }
-                        Rectangle().fill(.white.opacity(0.1)).frame(width: 1, height: 58)
-                        timeSummary
-                    }.padding(.horizontal, 16).padding(.bottom, 5)
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 8) { ForEach(preferences.orderedProviders) { tile($0, now: clock.date) } }
+                        }.frame(minWidth: 0)
+                        Rectangle().fill(.white.opacity(0.1)).frame(width: 1, height: 62)
+                        timeSummary.frame(width: 162)
+                    }
                 } else {
-                    VStack(spacing: 9) {
-                        HStack(spacing: 14) { caption(window); ring(quota, window: window, expired: expired, now: clock.date) }
-                        Rectangle().fill(.white.opacity(0.1)).frame(height: 1)
-                        timeSummary
-                    }.padding(13).padding(.bottom, 7)
+                    ScrollView(.vertical, showsIndicators: false) {
+                        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 9) {
+                            ForEach(preferences.orderedProviders) { tile($0, now: clock.date) }
+                        }
+                    }.frame(maxHeight: CGFloat(((preferences.shownProviders.count + 1) / 2) * 82))
+                    Rectangle().fill(.white.opacity(0.1)).frame(height: 1)
+                    timeSummary
                 }
             }
+            .padding(.horizontal, 13).padding(.top, 12).padding(.bottom, 22)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Theme.warmSurfaceDark.gradient)
             .overlay(RoundedRectangle(cornerRadius: 22).strokeBorder(Theme.brandAccent.opacity(0.3), lineWidth: 1))
             .clipShape(RoundedRectangle(cornerRadius: 22))
-            .contentShape(RoundedRectangle(cornerRadius: 22))
             .overlay(alignment: .bottom) {
-                FloatingQuotaDragHandle(onDrag: drag)
-                    .frame(width: 64, height: 18)
+                FloatingQuotaDragHandle(onDrag: drag).frame(width: 64, height: 18)
                     .accessibilityLabel("Move floating usage display")
             }
             .onHover(perform: hover)
             .accessibilityElement(children: .contain)
-            .help("Click the usage ring to pin details. Drag the handle to move.")
-        }
-        .preferredColorScheme(.dark)
+            .help("Choose a provider ring to pin its details. Drag the bottom handle to move.")
+        }.preferredColorScheme(.dark)
     }
 
     private var timeSummary: some View {
@@ -61,49 +68,67 @@ struct FloatingQuotaRail: View {
                 Picker("Time period", selection: Binding(get: { preferences.timePeriod }, set: { preferences.timePeriod = $0 })) {
                     ForEach(FloatingTimePeriod.allCases, id: \.self) { Text($0.label).tag($0) }
                 }
-            } label: {
-                HStack(spacing: 4) {
-                    Text(preferences.timePeriod.label).font(.system(size: 10, weight: .semibold))
-                }.foregroundStyle(Theme.brandAccent)
-            }.menuStyle(.borderlessButton).fixedSize().accessibilityLabel("Choose time period")
+            } label: { Text(preferences.timePeriod.label).font(.system(size: 10, weight: .semibold)) }
+            .menuStyle(.borderlessButton).fixedSize().accessibilityLabel("Choose time period")
             FloatingTimeReadout(time: store.floatingTime(for: preferences.timePeriod.period), compact: true)
         }
     }
 
-    private func caption(_ window: FloatingQuota.Window?) -> some View {
-        VStack(spacing: 3) {
-            HStack(spacing: 4) {
-                OwlIcon(size: 14)
-                if interaction.isPinned { Image(systemName: "pin.fill").font(.system(size: 8)) }
-            }.foregroundStyle(Theme.brandAccent)
-            Text(preview ? "PREVIEW" : (window?.id == "fiveHour" ? "5-HOUR" : window?.id == "weekly" ? "WEEKLY" : "CLAUDE"))
-                .font(.system(size: 8, weight: .bold)).tracking(1)
-                .foregroundStyle(.secondary)
-        }
-    }
-    private func ring(_ quota: FloatingQuota, window: FloatingQuota.Window?, expired: Bool, now: Date) -> some View {
+    private func tile(_ provider: QuotaProviderID, now: Date) -> some View {
+        let quota = store.floatingQuota(for: provider)
+        let window = quota.primary(preferences.horizon)
+        let expired = window?.expired(at: now) == true
         let value = expired ? nil : window?.percent
         let stale = quota.isStale(at: now)
-        return Button(action: togglePin) { ZStack {
-            Circle().stroke(.white.opacity(0.09), lineWidth: 4)
-            if let value {
-                Circle().trim(from: 0, to: value / 100)
-                    .stroke(quotaColor(value), style: StrokeStyle(lineWidth: 4, lineCap: .round))
-                    .rotationEffect(.degrees(-90)).opacity(stale ? 0.4 : 1)
+        return Button {
+            if preferences.activeProvider != provider {
+                preferences.selectedProvider = provider
+                if !interaction.isPinned { togglePin() }
+            } else { togglePin() }
+        } label: {
+            VStack(spacing: 3) {
+                Text(provider.name).font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(preferences.activeProvider == provider ? Theme.brandAccent : .secondary)
+                ZStack {
+                    Circle().stroke(.white.opacity(0.09), lineWidth: 4)
+                    if let value {
+                        Circle().trim(from: 0, to: value / 100)
+                            .stroke(quotaColor(value), style: StrokeStyle(lineWidth: 4, lineCap: .round))
+                            .rotationEffect(.degrees(-90)).opacity(stale ? 0.4 : 1)
+                    }
+                    VStack(spacing: 0) {
+                        Text(value.map { "\(Int($0.rounded()))" } ?? "—")
+                            .font(.system(size: 17, weight: .semibold, design: .rounded)).monospacedDigit()
+                        Text(value == nil ? (quota.isLoading ? "loading" : "usage") : "% used")
+                            .font(.system(size: 7, weight: .medium)).foregroundStyle(.secondary)
+                    }
+                    if stale || expired {
+                        Circle().fill(Theme.semanticWarning).frame(width: 6, height: 6).offset(x: 18, y: -18)
+                    }
+                }.frame(width: 46, height: 46)
+                Text(window?.label ?? quota.status(at: now)).font(.system(size: 7))
+                    .lineLimit(1).foregroundStyle(.secondary)
+            }.frame(width: 56).padding(.vertical, 2).contentShape(Rectangle())
+        }.buttonStyle(.plain).noFocusRing()
+            .accessibilityLabel("\(preview ? "Preview. " : "")\(quota.provider) \(window?.label ?? "capacity"). \(expired ? "Reset pending" : value.map { "\(Int($0.rounded())) percent used" } ?? quota.status(at: now))")
+            .help("Show \(provider.name) usage")
+    }
+}
+
+struct FloatingProviderMenu: View {
+    let preferences: FloatingQuotaPreferences
+    var body: some View {
+        Menu {
+            ForEach(QuotaProviderID.allCases) { provider in
+                Toggle(provider.name, isOn: Binding(get: { preferences.shownProviders.contains(provider) },
+                    set: { preferences.showProvider(provider, visible: $0) }))
+                    .disabled(preferences.shownProviders.count == 1 && preferences.shownProviders.contains(provider))
             }
-            VStack(spacing: 0) {
-                Text(value.map { "\(Int($0.rounded()))" } ?? "—")
-                    .font(.system(size: 18, weight: .semibold, design: .rounded)).monospacedDigit()
-                Text(value == nil ? (quota.isLoading ? "loading" : "usage") : "% used")
-                    .font(.system(size: 7, weight: .medium)).foregroundStyle(.secondary)
-            }
-            if stale || expired {
-                Circle().fill(Theme.semanticWarning).frame(width: 6, height: 6).offset(x: 18, y: -18)
-            }
-        }.frame(width: 48, height: 48) }
-        .buttonStyle(.plain)
-        .accessibilityLabel("\(preview ? "Preview. " : "")\(quota.provider) \(window?.label ?? "capacity"). \(expired ? "Reset pending" : value.map { "\(Int($0.rounded())) percent used" } ?? quota.status(at: now))")
-        .accessibilityAction(named: "Pin usage details", togglePin)
+            Divider()
+            Button("Show all providers") { preferences.shownProviders = Set(QuotaProviderID.allCases) }
+        } label: { Image(systemName: "slider.horizontal.3").font(.system(size: 10)) }
+        .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().noFocusRing()
+        .accessibilityLabel("Choose quota providers").help("Choose quota providers")
     }
 }
 
@@ -118,22 +143,34 @@ struct FloatingQuotaDetail: View {
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 30)) { clock in
-            let quota = FloatingQuota(usage: store.subscription, state: store.subscriptionLoadState)
+            let quota = store.floatingQuota(for: preferences.activeProvider)
             let stale = quota.isStale(at: clock.date)
             VStack(alignment: .leading, spacing: 16) {
                 HStack(spacing: 9) {
                     OwlIcon(size: 26)
                         .foregroundStyle(Theme.brandAccent)
                     VStack(alignment: .leading, spacing: 3) {
-                        Text("Claude usage").font(.system(size: 15, weight: .semibold))
+                        Text("\(quota.provider) usage").font(.system(size: 15, weight: .semibold))
                         Text(preview ? "Preview · sample data" : (quota.plan ?? "Subscription capacity"))
                             .font(.system(size: 10)).foregroundStyle(.secondary)
                     }
                     Spacer()
+                    FloatingProviderMenu(preferences: preferences)
                     Button { preferences.isEnabled = false } label: {
                         Image(systemName: "xmark").font(.system(size: 10, weight: .semibold))
                     }.buttonStyle(.plain).foregroundStyle(.secondary).help("Hide floating display")
                         .accessibilityLabel("Hide floating display")
+                }
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: min(3, max(1, preferences.shownProviders.count))), spacing: 6) {
+                    ForEach(preferences.orderedProviders) { provider in
+                        Button(provider.name) { preferences.selectedProvider = provider }
+                            .buttonStyle(.plain).noFocusRing().font(.system(size: 10, weight: .semibold))
+                            .frame(maxWidth: .infinity).padding(.vertical, 5)
+                            .background(preferences.activeProvider == provider ? Theme.brandAccent.opacity(0.18) : .white.opacity(0.05), in: Capsule())
+                            .foregroundStyle(preferences.activeProvider == provider ? Theme.brandAccent : .secondary)
+                            .accessibilityLabel("Show \(provider.name) usage")
+                            .accessibilityAddTraits(preferences.activeProvider == provider ? .isSelected : [])
+                    }
                 }
                 VStack(alignment: .leading, spacing: 9) {
                     Picker("Time period", selection: Binding(get: { preferences.timePeriod }, set: { preferences.timePeriod = $0 })) {
@@ -160,15 +197,22 @@ struct FloatingQuotaDetail: View {
                 }.foregroundStyle(stale || quota.failed ? Theme.semanticWarning : .secondary)
                 if quota.windows.isEmpty {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text(quota.isLoading ? "Checking your capacity…" : "See your limits before the next run.")
+                        Text(quota.isLoading ? "Checking your capacity…" : quota.isConnected ? "This plan reports no percentage." : "See your limits before the next run.")
                             .font(.system(size: 13, weight: .medium))
-                        Text(quota.failed ? "The provider could not be reached or your sign-in needs attention. Try again to reconnect." : "Connect Claude to show your five-hour and weekly usage. macOS may ask for Keychain access when you connect.")
+                        Text(quota.message ?? (quota.isConnected ? "Any additional allowance details reported by the provider appear below." : quota.providerID.signInHelp))
                             .font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                     }.padding(.vertical, 4)
                 } else {
-                    VStack(spacing: 16) {
-                        ForEach(quota.windows) { window in windowRow(window, now: clock.date, stale: stale) }
-                    }
+                    ScrollView(.vertical) {
+                        VStack(spacing: 16) {
+                            ForEach(quota.windows) { window in windowRow(window, now: clock.date, stale: stale) }
+                        }
+                    }.frame(height: CGFloat(min(4, quota.windows.count) * 64 - 16))
+                        .id(preferences.activeProvider)
+                }
+                if !quota.notes.isEmpty {
+                    Text(quota.notes.prefix(2).joined(separator: " · "))
+                        .font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(3)
                 }
                 Spacer(minLength: 0)
                 if stale {
@@ -183,9 +227,9 @@ struct FloatingQuotaDetail: View {
                         .accessibilityLabel(interaction.isPinned ? "Unpin usage details" : "Pin usage details")
                     Spacer()
                     Button(action: refresh) {
-                        Label(quota.isLoading ? "Updating…" : quota.windows.isEmpty ? "Connect Claude" : "Refresh", systemImage: "arrow.clockwise")
+                        Label(quota.isLoading ? "Updating…" : "Refresh", systemImage: "arrow.clockwise")
                     }.buttonStyle(.plain).foregroundStyle(Theme.brandAccent)
-                        .disabled(quota.isLoading || store.subscriptionRateLimitedUntil > clock.date)
+                        .disabled(quota.isLoading || store.quotaRateLimitedUntil(preferences.activeProvider) > clock.date)
                 }.font(.system(size: 11, weight: .medium))
             }
             .padding(16)
@@ -200,7 +244,7 @@ struct FloatingQuotaDetail: View {
         let expired = window.expired(at: now)
         return VStack(alignment: .leading, spacing: 7) {
             HStack {
-                Text(window.label).font(.system(size: 12, weight: .medium))
+                Text(window.label).font(.system(size: 12, weight: .medium)).lineLimit(1).help(window.label)
                 Spacer()
                 Text(expired ? "—" : "\(Int(window.percent.rounded()))%")
                     .font(.system(size: 13, weight: .semibold, design: .rounded)).monospacedDigit()

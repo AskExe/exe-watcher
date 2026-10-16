@@ -82,6 +82,9 @@ final class AppStore {
     @ObservationIgnored private var floatingTimeTask: Task<TimeRecoverySnapshots, Error>?
     @ObservationIgnored private var floatingTimeRetryAt: Date = .distantPast
     private(set) var floatingTimeError: String?
+    var providerQuotaStates: [QuotaProviderID: ProviderQuotaState] = [:]
+    @ObservationIgnored private var providerQuotaTasks: [QuotaProviderID: Task<ProviderQuotaSnapshot, Error>] = [:]
+    private let fetchProviderQuota: ProviderQuotaFetcher
     var capacityEstimates: [String: CapacityEstimate] = [:]
 
     /// Lightweight self-diagnostics for the menubar refresh loop. These make stale-counter bugs
@@ -126,11 +129,13 @@ final class AppStore {
         fetchTimeSnapshots: @escaping TimeSnapshotsFetcher = { try await DataClient.fetchTimeSnapshots(provider: $0) },
         restForTimeRecovery: @escaping TimeRecoveryRest = { try await Task.sleep(for: .seconds($0)) },
         fetchSubscription: @escaping SubscriptionUsageFetcher = { try await SubscriptionClient.fetch(allowKeychainPrompt: $0) },
-        persistSubscriptionSnapshots: Bool = true
+        persistSubscriptionSnapshots: Bool = true,
+        fetchProviderQuota: @escaping ProviderQuotaFetcher = { try await ProviderQuotaClient.fetch($0, allowKeychainPrompt: $1) }
     ) {
         self.fetchPayload = fetchPayload
         self.fetchTimeSnapshots = fetchTimeSnapshots
         self.restForTimeRecovery = restForTimeRecovery
+        self.fetchProviderQuota = fetchProviderQuota
         self.fetchSubscription = fetchSubscription
         self.persistSubscriptionSnapshots = persistSubscriptionSnapshots
         self.now = now
@@ -651,6 +656,77 @@ final class AppStore {
 
     }
 
+    func floatingQuota(for provider: QuotaProviderID) -> FloatingQuota {
+        if provider == .claude { return FloatingQuota(usage: subscription, state: subscriptionLoadState) }
+        return FloatingQuota(provider: provider, state: providerQuotaStates[provider] ?? ProviderQuotaState())
+    }
+
+    func quotaRateLimitedUntil(_ provider: QuotaProviderID) -> Date {
+        provider == .claude ? subscriptionRateLimitedUntil : providerQuotaStates[provider]?.rateLimitedUntil ?? .distantPast
+    }
+
+    func nextQuotaRefresh(for providers: Set<QuotaProviderID>) -> Date {
+        providers.map { $0 == .claude ? subscriptionNextRefreshAt : providerQuotaStates[$0]?.nextRefreshAt ?? .distantPast }.min() ?? .distantFuture
+    }
+
+    func refreshFloatingQuotas(_ providers: Set<QuotaProviderID>) async {
+        await withTaskGroup(of: Void.self) { group in
+            for provider in providers {
+                group.addTask { await self.refreshFloatingQuota(provider, allowKeychainPrompt: false) }
+            }
+        }
+    }
+
+    func refreshFloatingQuota(_ provider: QuotaProviderID, allowKeychainPrompt: Bool = true) async {
+        if provider == .claude { await refreshSubscription(allowKeychainPrompt: allowKeychainPrompt); return }
+        if let task = providerQuotaTasks[provider] { _ = try? await task.value; return }
+        var state = providerQuotaStates[provider] ?? ProviderQuotaState()
+        let current = now()
+        guard current >= state.rateLimitedUntil else { return }
+        if !allowKeychainPrompt { guard current >= state.nextRefreshAt else { return } }
+        else if state.loadState != .noCredentials { guard current.timeIntervalSince(state.lastAttempt) >= 30 else { return } }
+        state.lastAttempt = current
+        state.loadState = .loading
+        providerQuotaStates[provider] = state
+        let fetch = fetchProviderQuota
+        let task = Task { try await fetch(provider, allowKeychainPrompt) }
+        providerQuotaTasks[provider] = task
+        defer { providerQuotaTasks[provider] = nil }
+        do {
+            let snapshot = try await task.value
+            guard snapshot.provider == provider else { throw ProviderQuotaFailure(kind: .invalidResponse) }
+            state.snapshot = snapshot
+            state.loadState = .loaded
+            state.message = nil
+            state.nextRefreshAt = now().addingTimeInterval(5 * 60)
+            state.rateLimitedUntil = .distantPast
+        } catch is CancellationError {
+            state.loadState = state.snapshot == nil ? .idle : .loaded
+        } catch {
+            let failure = error as? ProviderQuotaFailure ?? ProviderQuotaFailure(kind: .unavailable)
+            state.nextRefreshAt = now().addingTimeInterval(15 * 60)
+            state.loadState = .failed
+            state.message = failure.message
+            switch failure.kind {
+            case .missing:
+                state.snapshot = nil; state.loadState = .noCredentials
+            case .signIn, .unsupported:
+                state.snapshot = nil
+                state.message = failure.message ?? provider.signInHelp
+            case .unavailable, .invalidResponse, .rateLimited:
+                if state.snapshot?.identity != failure.identity { state.snapshot = nil }
+                state.message = failure.message ?? "Unable to update this provider. Last known readings, when available, are marked stale."
+                if failure.kind == .rateLimited {
+                    let delay = max(900, failure.retryAfter ?? 900)
+                    state.rateLimitedUntil = now().addingTimeInterval(delay)
+                    state.nextRefreshAt = state.rateLimitedUntil
+                    state.message = "This provider rate-limited the request. Watcher will retry after its cooldown."
+                }
+            }
+        }
+        providerQuotaStates[provider] = state
+    }
+
     /// Fetch Claude subscription usage. Sets subscription = nil on missing creds (API users / unauthenticated).
     /// Shared by Plan and the optional floating display.
     func refreshSubscription(allowKeychainPrompt: Bool = true) async {
@@ -702,7 +778,10 @@ final class AppStore {
         }
     }
 
-    func cancelSubscriptionRefresh() { subscriptionTask?.cancel() }
+    func cancelSubscriptionRefresh() {
+        subscriptionTask?.cancel()
+        for task in providerQuotaTasks.values { task.cancel() }
+    }
 
     /// Persist one snapshot per window so we can answer "what did the prior cycle end at?"
     /// when the current window has just reset and projection from current data isn't meaningful.

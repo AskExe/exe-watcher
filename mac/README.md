@@ -63,16 +63,31 @@ From 0.2.59, historical token recovery marks missing call counts explicitly: `�
 
 Open the menu bar app, choose **Display settings** (the sliders button in the footer), then enable **Floating quota display**. It starts off. Drag the bottom handle to move it; it snaps to any screen edge or stays floating. Position, display, quota window and time period survive relaunches. Hover for details, click the quota ring to pin them, or use the close button to hide the display. Outside clicks dismiss the detail card; Escape does too when macOS already permits the key event.
 
-The ring shows Claude's reported five-hour or weekly utilization and reset timing. The time rows cover **all agents**, independent of the main popover's provider/period filters:
+The rail shows one ring per selected provider. **Claude and Codex** appear by default; use the floating display’s sliders menu to add **Kimi, Cursor, GitHub Copilot or Gemini**, hide a provider, or show all six. Click a ring or a provider tab to open its own usage card. The rail wraps into two columns at a side edge and scrolls when space is constrained. Provider selection and visibility survive relaunches. Each ring uses the selected five-hour/weekly window when the provider reports it, otherwise its first available window (for example, monthly or per-model). The time rows cover **all agents**, independent of the main popover's provider/period filters:
 
 - **You + AI ≈**: your estimated interaction time, inferred from short reply-to-next-prompt gaps. Overlapping interaction intervals count once. It does not measure attention.
 - **AI Time**: recorded runtime added across agents, so simultaneous runs accumulate agent-hours. Inferred durations get an approximation mark.
 
 Time defaults to **Today**; choose **Week** (last seven days), **Month** (calendar month), or **All Time** (retained timing history). Unavailable values show a dash and incomplete coverage is labeled in details.
 
-Quota requests are shared with Plan: passive reads at most every five minutes after success or fifteen after failure, with a fifteen-minute 429 cooldown. Passive refreshes never open Keychain prompts or rotate credentials. Use Connect/Refresh for an explicit connection attempt. This adds no periodic usage-log scan; timing reuses existing snapshots and the bounded timing-only recovery worker. Codex subscription quotas and OS threshold notifications remain future work.
+Claude quota requests are shared with Plan. Each additional provider has an independent request, connection state and cooldown: passive reads at most every five minutes after success or fifteen after failure, with at least a fifteen-minute 429 cooldown (longer provider Retry-After delays are honored). Passive refreshes never open Keychain prompts or rotate credentials. Use Refresh for an explicit connection attempt. This adds no periodic usage-log scan; timing reuses existing snapshots and the bounded timing-only recovery worker. OS threshold notifications remain future work.
 
-For a credential-free visual review, launch a developer build with `--floating-quota-preview`. Add `--quota-preview-card` to review only its expanded card, or `--quota-state=stale|disconnected|loading|expired` for failure states. This uses isolated preferences and sample quota/time data, bypassing normal usage, login-item and updater startup.
+Supported live readers:
+
+| Provider | Existing local sign-in | Reported capacity |
+| --- | --- | --- |
+| Claude | Claude Code credentials or permitted Keychain access | Five-hour, weekly and model windows |
+| Codex | ChatGPT credentials in `CODEX_HOME/auth.json` or the `Codex Auth` Keychain item, following the root `cli_auth_credentials_store` setting | Provider-reported windows, additional model limits and monthly credit allowance when present |
+| Kimi | Kimi Code credentials under `KIMI_CODE_HOME` | Weekly and rate-limit windows |
+| Cursor | One read-only lookup in the Cursor app’s local state database | Monthly, Auto/API and other reported pools |
+| GitHub Copilot | Editor-plugin `hosts.json` / `apps.json` under the XDG config directory | Premium allowance and Chat, when metered; unlimited is labeled explicitly |
+| Gemini | Gemini CLI’s `~/.gemini/oauth_creds.json` | Per-model remaining-quota buckets for eligible accounts |
+
+The five new adapters never refresh or write OAuth tokens, copy credentials to Watcher storage, read browser cookies or change a provider’s login. Codex can request Keychain access only on an explicit refresh. Expired sessions need the provider’s own client to renew them. API-key Codex accounts, custom Codex gateways, encrypted/ephemeral stores and ineligible Gemini tiers can have no readable subscription quota. Missing or unlimited percentages remain dashes, not zero.
+
+Copilot credentials stay bound to their GitHub.com or Enterprise Cloud (`*.ghe.com`) host; unsupported or unidentified hosts fail without a request to GitHub.com. New adapters reject HTTP redirects, use ephemeral sessions without cookie/cache persistence, cap response/credential sizes and suppress response bodies in errors. Endpoints are informed by CodeBurn’s adapters and may change; an unrecognized response is unavailable. Quota support does not add a local spend/time importer for a previously unsupported client.
+
+For a credential-free visual review, launch a developer build with `--floating-quota-preview`. Add `--quota-providers=all` for all six rings, `--quota-provider=codex` to select one, `--quota-preview-card` to review only its expanded card, or `--quota-state=stale|disconnected|loading|expired` for failure states. This uses isolated preferences and sample quota/time data, bypassing normal usage, login-item and updater startup.
 
 ## Project layout
 

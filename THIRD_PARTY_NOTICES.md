@@ -6,6 +6,8 @@ Exe Watcher includes code derived from [CodeBurn](https://github.com/getagentsea
 
 The initial source import on April 24, 2026 matches the 112 corresponding files in upstream revision `d3c4de03759f0ded38052874fa829709d27fe7c6` (package version 0.8.9). Its CLI/TUI, provider integrations, macOS app, subscription tracking, and analysis tools form Watcher's original foundation. Exe AI subsequently developed Watcher's branding, integrations, and other changes. See the repository's `docs/codeburn-upstream-review.md` for the comparison.
 
+The native multi-provider quota adapters and response mapping also adapt the Codex, Kimi, Cursor, Copilot and Gemini readers from CodeBurn revision `9a40cc603fcd194caca9daa8c5134a61ea7e0e2b` (`src/quota/`). Watcher's adaptation uses independent native request admission and read-only credential access; it does not import the upstream OAuth rotation/write-back flows or provider vectors.
+
 CodeBurn's original license is reproduced verbatim below. Exe AI's additional copyright notice appears in the root `LICENSE`.
 
 ```text

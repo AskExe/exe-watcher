@@ -43,7 +43,7 @@ node dist/cli.js report
 
 ## Built for AI employee teams
 
-- **Floating display** — an optional on-screen Claude five-hour/weekly quota widget, with **You + AI ≈** (your estimated interaction time) and **AI Time** (work time added across all agents). Defaults to Today; switch to Week, Month or All Time. Enable it from the menu bar footer’s **Display settings → Floating quota display**. [Details](mac/README.md#floating-display).
+- **Floating display** — an optional on-screen quota display for Claude, Codex, Kimi, Cursor, GitHub Copilot and Gemini, with **You + AI ≈** (your estimated interaction time) and **AI Time** (work time added across all agents). Defaults to Today; switch to Week, Month or All Time. Enable it from the menu bar footer’s **Display settings → Floating quota display**. [Details](mac/README.md#floating-display).
 - **AI running time** — adds recorded work across agents, so parallel work is counted as agent-hours.
 - **Elapsed busy time** — merges overlapping runs to show how long at least one agent was working.
 - **Your time ≈** — estimates interaction from short reply-to-next-prompt gaps, with known subagents excluded. It is not an attention or productivity measurement.
@@ -79,7 +79,7 @@ Comparison checked against [CodeBurn 0.9.27, revision 9a40cc6](https://github.co
 
 Our subsequent work also includes accounting fixes, bounded history recovery, event-driven native refreshes, current API pricing, Kimi support, self-contained packaging, and Watcher's visual identity. These are documented improvements to our imported baseline; some capabilities also exist in today's CodeBurn. [Detailed evidence and adoption backlog](docs/codeburn-upstream-review.md) · [Changelog](CHANGELOG.md)
 
-Watcher’s new floating display takes inspiration from CodeBurn’s **Capacity Dock** and adds our two time totals. This unreleased implementation supports Claude quotas; Codex quotas and OS threshold notifications remain in the [adoption backlog](docs/codeburn-upstream-review.md).
+Watcher’s new floating display takes inspiration from CodeBurn’s **Capacity Dock** and adds our two time totals. This unreleased implementation supports six quota providers, including Claude and Codex. OS threshold notifications and additional adapters remain in the [adoption backlog](docs/codeburn-upstream-review.md).
 
 ---
 

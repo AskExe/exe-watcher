@@ -2,6 +2,9 @@
 
 ## 0.2.64 (unreleased)
 
+- Expand the floating display to six quota providers: Claude, Codex, Kimi, Cursor, GitHub Copilot and Gemini. Show multiple rings at once, switch provider details and save visibility choices, with Claude/Codex as defaults.
+- Add read-only quota adapters with independent request coalescing and cooldowns, account-scoped stale readings, tenant-bound Copilot requests and bounded HTTP responses without redirects. Never rotate or copy credentials in the new adapters; missing/unlimited allowances stay explicit.
+
 - Suppress the blue macOS focus outline on AI-time details and retry controls, matching the other popover controls.
 - Add an optional native floating display, inspired by CodeBurn's Capacity Dock, with Claude five-hour/weekly quota rings, reset timing, hover details, pinning, edge snapping and saved placement.
 - Show estimated You + AI interaction time and total AI work time across agents. Default to Today, with Week, Month and All Time controls independent of the main popover filters.

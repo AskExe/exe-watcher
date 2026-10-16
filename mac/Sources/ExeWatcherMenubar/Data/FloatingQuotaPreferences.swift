@@ -31,8 +31,20 @@ final class FloatingQuotaPreferences {
     static let enabledKey = "exe-watcher.floatingQuota.enabled"
     private static let positionKey = "exe-watcher.floatingQuota.position"
     private static let horizonKey = "exe-watcher.floatingQuota.horizon"
+    private static let providersKey = "exe-watcher.floatingQuota.providers"
+    private static let selectedProviderKey = "exe-watcher.floatingQuota.selectedProvider"
     private static let timePeriodKey = "exe-watcher.floatingQuota.timePeriod"
     private let defaults: UserDefaults
+
+    var shownProviders: Set<QuotaProviderID> { didSet { defaults.set(shownProviders.map(\.rawValue).sorted(), forKey: Self.providersKey) } }
+    var selectedProvider: QuotaProviderID { didSet { defaults.set(selectedProvider.rawValue, forKey: Self.selectedProviderKey) } }
+    var orderedProviders: [QuotaProviderID] { QuotaProviderID.allCases.filter { shownProviders.contains($0) } }
+    var activeProvider: QuotaProviderID { shownProviders.contains(selectedProvider) ? selectedProvider : orderedProviders.first ?? .claude }
+    func showProvider(_ provider: QuotaProviderID, visible: Bool) {
+        if visible { shownProviders.insert(provider) }
+        else if shownProviders.count > 1 { shownProviders.remove(provider) }
+        selectedProvider = activeProvider
+    }
 
     var isEnabled: Bool { didSet { defaults.set(isEnabled, forKey: Self.enabledKey) } }
     var horizon: FloatingQuota.Horizon { didSet { defaults.set(horizon.rawValue, forKey: Self.horizonKey) } }
@@ -46,6 +58,9 @@ final class FloatingQuotaPreferences {
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
+        let savedProviders = Set((defaults.stringArray(forKey: Self.providersKey) ?? []).compactMap(QuotaProviderID.init(rawValue:)))
+        shownProviders = savedProviders.isEmpty ? [.claude, .codex] : savedProviders
+        selectedProvider = defaults.string(forKey: Self.selectedProviderKey).flatMap(QuotaProviderID.init(rawValue:)) ?? .claude
         isEnabled = defaults.bool(forKey: Self.enabledKey)
         horizon = defaults.string(forKey: Self.horizonKey).flatMap(FloatingQuota.Horizon.init(rawValue:)) ?? .fiveHour
         timePeriod = defaults.string(forKey: Self.timePeriodKey).flatMap(FloatingTimePeriod.init(rawValue:)) ?? .today

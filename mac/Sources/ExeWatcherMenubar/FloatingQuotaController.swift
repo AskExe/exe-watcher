@@ -12,6 +12,7 @@ final class FloatingQuotaController {
     private let interaction = FloatingQuotaInteraction()
     private var rail: FloatingQuotaPanel?
     private var detail: FloatingQuotaPanel?
+    private var refreshingProviders: Set<QuotaProviderID> = []
     private var refreshTask: Task<Void, Never>?
     private var hoverWork: DispatchWorkItem?
     private var localMonitor: Any?
@@ -59,6 +60,9 @@ final class FloatingQuotaController {
             _ = preferences.position
             _ = preferences.horizon
             _ = preferences.timePeriod
+            _ = preferences.shownProviders
+            _ = preferences.selectedProvider
+            _ = store.providerQuotaStates
             _ = store.subscription
             _ = store.subscriptionLoadState
         } onChange: { [weak self] in
@@ -86,7 +90,7 @@ final class FloatingQuotaController {
         }
         if !interaction.isDragging { placePanels() }
         rail?.orderFrontRegardless()
-        if refreshTask == nil { restartRefreshLoop() }
+        if refreshTask == nil || refreshingProviders != preferences.shownProviders { restartRefreshLoop() }
         if !preview {
             Task { [weak self] in
                 guard let self else { return }
@@ -104,12 +108,13 @@ final class FloatingQuotaController {
         refreshTask?.cancel()
         refreshTask = nil
         guard isStarted, preferences.isEnabled, !preview else { return }
+        refreshingProviders = preferences.shownProviders
         refreshTask = Task { [weak self] in
             while !Task.isCancelled {
                 guard let self, self.preferences.isEnabled else { return }
-                await self.store.refreshSubscription(allowKeychainPrompt: false)
+                await self.store.refreshFloatingQuotas(self.preferences.shownProviders)
                 guard !Task.isCancelled else { return }
-                let delay = max(30, self.store.subscriptionNextRefreshAt.timeIntervalSinceNow)
+                let delay = max(30, self.store.nextQuotaRefresh(for: self.preferences.shownProviders).timeIntervalSinceNow)
                 do { try await Task.sleep(for: .seconds(delay)) } catch { return }
             }
         }
@@ -149,7 +154,7 @@ final class FloatingQuotaController {
     }
     private func placePanels() {
         guard let rail, let screen = screen() else { return }
-        rail.setFrame(FloatingQuotaPlacement.railFrame(position: preferences.position, screen: screen.visibleFrame), display: true)
+        rail.setFrame(FloatingQuotaPlacement.railFrame(position: preferences.position, screen: screen.visibleFrame, providerCount: preferences.shownProviders.count), display: true)
         if interaction.isExpanded { showDetails() }
     }
 
@@ -167,8 +172,12 @@ final class FloatingQuotaController {
                 refresh: { [weak self] in self?.refreshExplicitly() }))
             detail = panel
         }
-        let model = FloatingQuota(usage: store.subscription, state: store.subscriptionLoadState)
-        let size = CGSize(width: 310, height: max(410, 290 + model.windows.count * 64 + (model.failed ? 20 : 0)))
+        let model = store.floatingQuota(for: preferences.activeProvider)
+        let extraProviderRow = preferences.shownProviders.count > 3 ? 28 : 0
+        let rowsHeight = min(4, model.windows.count) * 64
+        let noticesHeight = (model.notes.isEmpty ? 0 : 40) + (model.failed ? 20 : 0)
+        let height = max(460 + extraProviderRow, 340 + extraProviderRow + rowsHeight + noticesHeight)
+        let size = CGSize(width: 330, height: CGFloat(height))
         detail?.setFrame(FloatingQuotaPlacement.detailFrame(rail: rail.frame, size: size, screen: screen.visibleFrame, edge: preferences.position.edge), display: true)
         detail?.orderFrontRegardless()
     }
@@ -208,7 +217,7 @@ final class FloatingQuotaController {
         guard !preview else { return }
         Task { [weak self] in
             guard let self else { return }
-            await self.store.refreshSubscription(allowKeychainPrompt: true)
+            await self.store.refreshFloatingQuota(self.preferences.activeProvider, allowKeychainPrompt: true)
             await self.store.loadFloatingTimeIfNeeded(for: self.preferences.timePeriod.period, force: true)
         }
     }
@@ -229,7 +238,7 @@ final class FloatingQuotaController {
             dragStart = nil
             interaction.isDragging = false
             guard let screen = screen(for: rail.frame) else { return }
-            preferences.position = FloatingQuotaPlacement.position(afterDropping: rail.frame, screen: screen.visibleFrame, screenID: screenID(screen))
+            preferences.position = FloatingQuotaPlacement.position(afterDropping: rail.frame, screen: screen.visibleFrame, screenID: screenID(screen), providerCount: preferences.shownProviders.count)
             placePanels()
         }
     }

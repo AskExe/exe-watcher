@@ -3,8 +3,10 @@ import Foundation
 /// Geometry is independent of AppKit so display removal, clamping and snapping are testable.
 enum FloatingQuotaPlacement {
     static let inset: CGFloat = 10
-    static func railSize(horizontal: Bool) -> CGSize {
-        horizontal ? CGSize(width: 300, height: 94) : CGSize(width: 148, height: 176)
+    static func railSize(horizontal: Bool, providerCount: Int = 2) -> CGSize {
+        let count = max(1, min(6, providerCount))
+        return horizontal ? CGSize(width: 248 + count * 64, height: 142)
+            : CGSize(width: 176, height: 156 + ((count + 1) / 2) * 82)
     }
     static func clamped(_ frame: CGRect, to screen: CGRect) -> CGRect {
         let width = min(frame.width, max(1, screen.width - 2 * inset))
@@ -13,8 +15,8 @@ enum FloatingQuotaPlacement {
                       y: min(max(frame.minY, screen.minY + inset), screen.maxY - inset - height),
                       width: width, height: height)
     }
-    static func railFrame(position: FloatingQuotaPosition, screen: CGRect) -> CGRect {
-        let size = railSize(horizontal: position.edge?.horizontal ?? position.horizontal)
+    static func railFrame(position: FloatingQuotaPosition, screen: CGRect, providerCount: Int = 2) -> CGRect {
+        let size = railSize(horizontal: position.edge?.horizontal ?? position.horizontal, providerCount: providerCount)
         let x = position.x.isFinite ? min(1, max(0, position.x)) : 1
         let y = position.y.isFinite ? min(1, max(0, position.y)) : 0.72
         var frame = CGRect(x: screen.minX + inset + x * max(0, screen.width - size.width - 2 * inset),
@@ -29,7 +31,7 @@ enum FloatingQuotaPlacement {
         }
         return clamped(frame, to: screen)
     }
-    static func position(afterDropping frame: CGRect, screen: CGRect, screenID: String?) -> FloatingQuotaPosition {
+    static func position(afterDropping frame: CGRect, screen: CGRect, screenID: String?, providerCount: Int = 2) -> FloatingQuotaPosition {
         let distances: [(FloatingQuotaEdge, CGFloat)] = [
             (.left, abs(frame.minX - screen.minX - inset)),
             (.right, abs(screen.maxX - inset - frame.maxX)),
@@ -39,7 +41,7 @@ enum FloatingQuotaPlacement {
         let nearest = distances.min { $0.1 < $1.1 }
         let edge = nearest.flatMap { $0.1 <= 28 ? $0.0 : nil }
         let horizontal = edge?.horizontal ?? (frame.width > frame.height)
-        let size = railSize(horizontal: horizontal)
+        let size = railSize(horizontal: horizontal, providerCount: providerCount)
         let desired = clamped(CGRect(x: frame.midX - size.width / 2, y: frame.midY - size.height / 2,
                                      width: size.width, height: size.height), to: screen)
         return FloatingQuotaPosition(edge: edge, horizontal: horizontal,
