@@ -47,9 +47,18 @@ it('keeps report totals after an Optimize failure and retries only the analysis'
     await vi.advanceTimersByTimeAsync(31_000)
     expect(scanAndDetect).toHaveBeenCalledTimes(2)
     expect(parseAllSessions).toHaveBeenCalledTimes(1)
+    // Changing period can fail while Optimize remains selected. Retry must reload
+    // the report first, rather than re-running analysis against a failed load.
+    vi.mocked(parseAllSessions).mockRejectedValueOnce(new Error('fixture report load failed'))
+    frame = ''; stdin.write('2')
+    await vi.waitFor(() => expect(frame).toContain('Report could not refresh'))
+    expect(parseAllSessions).toHaveBeenCalledTimes(2)
+    frame = ''; stdin.write('r')
+    await vi.waitFor(() => expect(frame).toContain('Changes are yours to apply'))
+    expect(parseAllSessions).toHaveBeenCalledTimes(3)
     frame = ''; stdin.write('b')
     await vi.waitFor(() => expect(frame).toContain('$42.00'))
     expect(frame).not.toContain('Optimize could not finish')
-    expect(parseAllSessions).toHaveBeenCalledTimes(1)
+    expect(parseAllSessions).toHaveBeenCalledTimes(3)
   } finally { app.unmount(); stdin.destroy(); stdout.destroy() }
 })

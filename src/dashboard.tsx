@@ -809,7 +809,7 @@ export function InteractiveDashboard({ initialPeriod, initialProvider, refreshSe
   useInput((input, key) => {
     if (input === 'q') { loader.current.cancel(); exit(); return }
     if (input === 'r') {
-      if (view === 'optimize' && !loading) { setOptimizeResult(null); setOptimizeAttempt(n => n + 1) }
+      if (view === 'optimize' && !loading && !loadError) { setOptimizeResult(null); setOptimizeAttempt(n => n + 1) }
       else void reloadData(period, activeProvider)
       return
     }
