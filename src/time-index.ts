@@ -112,6 +112,7 @@ function fresh(source: SessionSource, identity: string, size: number, mtime: num
  * Incomplete final JSON waits for its append; oversize records are skipped explicitly.
  */
 async function scanBlock(source: SessionSource, row: TimeFile): Promise<void> {
+  row.waitingForAppend = false
   const handle = await open(source.path, 'r')
   let consumed = 0
   try {
@@ -137,7 +138,7 @@ async function scanBlock(source: SessionSource, row: TimeFile): Promise<void> {
             const entry = JSON.parse(line)
             observeTime(source.provider, row.state, entry)
           } catch {
-            if (atEnd && row.offset + bytesRead >= row.size) break
+            if (atEnd && row.offset + bytesRead >= row.size) { row.waitingForAppend = true; break }
             // Retry an ordinary record split across blocks from its own start.
             if (atEnd && start > 0) { consumed = start; break }
             if (!atEnd) row.state.dropped++
@@ -212,7 +213,7 @@ export async function refreshTimeIndex(options: TimeRefreshOptions = {}): Promis
         const identity = `${s.dev}:${s.ino}:${wal?.size ?? 0}:${wal?.mtimeMs ?? 0}`
         let row = current.files[key]
         const sameAdapter = (row?.adapterVersion ?? 1) === adapterVersion(source.provider)
-        if (row && sameAdapter && !row.unavailable && row.identity === identity && row.size === s.size && row.mtime === s.mtimeMs && row.ctime === s.ctimeMs && row.offset >= row.size) continue
+        if (row && sameAdapter && !row.unavailable && row.identity === identity && row.size === s.size && row.mtime === s.mtimeMs && row.ctime === s.ctimeMs && (row.offset >= row.size || row.waitingForAppend)) continue
         if (Date.now() >= deadline) break
         if (!row && fileCount >= MAX_FILES) { current.warnings.push('Timing file limit reached; additional files remain unknown.'); break }
         // A shrink, replacement, or rewrite invalidates timings from that snapshot.
@@ -235,7 +236,7 @@ export async function refreshTimeIndex(options: TimeRefreshOptions = {}): Promis
               const before = row.offset
               await scanBlock(source, row)
               if (row.offset === before) break // Incomplete final record waits for an append.
-            } while (options.history && row.offset < row.size && row.offset - startedAt < 16 * 1024 ** 2 && Date.now() < deadline)
+            } while (row.offset < row.size && row.offset - startedAt < 16 * 1024 ** 2 && Date.now() < deadline)
           }
           // Keep run IDs: forks can copy the same run into a different session.
           // Per-agent overlap merging is performed only when summarizing a view.

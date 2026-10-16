@@ -212,6 +212,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        store.cancelTimeRecovery()
         healthMonitor?.stop()
         RefreshTracer.shared.instant(name: "app_terminating", category: "lifecycle", tid: .lifecycle)
         RefreshTracer.shared.writeToDisk()

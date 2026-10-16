@@ -42,6 +42,8 @@ struct PeriodSnapshot: Codable, Sendable {
 }
 
 struct TimeBlock: Codable, Sendable {
+    var indexedAt: String? = nil
+    var recovery: TimeRecoveryProgress? = nil
     let since: String
     let through: String
     let aiRunningMs: Double?
@@ -62,6 +64,21 @@ struct TimeBlock: Codable, Sendable {
         let minutes = Int(value / 60_000)
         return minutes >= 60 ? "\(minutes / 60)h \(minutes % 60)m" : "\(minutes)m"
     }
+}
+
+struct TimeRecoveryProgress: Codable, Sendable {
+    let runnableFiles: Int
+    let waitingFiles: Int
+    let pendingBytes: Double
+    let token: String
+}
+
+struct TimeRecoverySnapshots: Codable, Sendable {
+    let generated: String
+    let provider: String
+    let periods: [String: TimeBlock]
+    let allPeriods: [String: TimeBlock]?
+    let recovery: TimeRecoveryProgress
 }
 
 struct TimeProviderBlock: Codable, Sendable, Identifiable {
