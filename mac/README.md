@@ -113,9 +113,9 @@ Releases are built and signed locally. The hosted `Release macOS Menubar` workfl
 
 ## Owl artwork and review
 
-The chosen logo is **01A · Folded wings**: tucked feathers, a slim beak and the original eyes. `assets/owls/selection.json` selects it for the native header, menu bar, loading owl, Finder icon and README banner. Open `docs/launch-preview/index.html` for the selected logo and the remaining wing/beak and eye studies. The first comparison remains at `original-studies.html`. All fonts and brand colors are preserved.
+The chosen logo is **01A · Folded wings**: tucked feathers, a slim beak and the approved contrasting pupil details. `assets/owls/selection.json` selects it for the native header, menu bar, loading owl, Finder icon and README banner. Open `docs/launch-preview/index.html` for the selected logo and the remaining wing/beak and eye studies. The first comparison remains at `original-studies.html`. All fonts and brand colors are preserved.
 
-Vector geometry lives in `assets/owls/marks.json`, `wing-studies.json` and `eye-studies.json`; the selected variation is compiled into the native renderer. Regenerate all assets with `mac/Scripts/build-owl-icons.sh` (requires librsvg and macOS tools). Wing details drop out below 24 points for legibility. Native developer previews accept `EXE_WATCHER_OWL_STYLE=classic`, `refined`, `rounded`, `focus`, or `refined_tucked`; the default and packaged Finder icon are 01A. The macOS menu-bar owl uses the same Exe Gold (#F5D76E) as the header, including on light and dark menu bars.
+Vector geometry lives in `assets/owls/marks.json`, `wing-studies.json` and `eye-studies.json`; the selected variation is compiled into the native renderer. Regenerate all assets with `mac/Scripts/build-owl-icons.sh` (requires librsvg and macOS tools). Wing details drop out below 24 points for legibility. Native developer previews accept `EXE_WATCHER_OWL_STYLE=classic`, `refined`, `rounded`, `focus`, or `refined_tucked`; the default and packaged Finder icon are 01A. The selected mark uses larger white pupil details on black owls and centered dark details on yellow owls; their geometry and colors live in `selection.json`. The same details follow animated eye movement and blinks. The macOS menu-bar owl uses the same Exe Gold (#F5D76E) as the header, including on light and dark menu bars.
 
 ## Design tokens
 

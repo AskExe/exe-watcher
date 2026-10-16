@@ -1,7 +1,7 @@
 // The Watcher owl (01A "folded wings", assets/owls/refined_tucked.svg) as terminal pixel art.
 // Generated from the logo's own vector paths: rendered at 8x, sampled to a 25x36 pixel grid,
 // two pixel rows per terminal row using half blocks (█ ▀ ▄). Frames share one size so the
-// animation never shifts the layout.
+// animation never shifts the layout. Centered contrast dots become one pixel at this size.
 
 export type OwlPose = 'center' | 'left' | 'right' | 'blink'
 
@@ -13,7 +13,7 @@ export const OWL_FRAMES: Record<OwlPose, string[]> = {
     '  ██████████████████████ ',
     '  ███▀    ▀████▀    ▀███ ',
     '  ██   ▄█▄  ██  ▄█▄   ██ ',
-    '  ██   ███  ██  ███   ██ ',
+    '  ██   █▄█  ██  █▄█   ██ ',
     '  ███   ▀  ▄██▄  ▀   ███ ',
     '   ████▄▄▄██████▄▄▄████  ',
     '    ▀███████▄▄███████▀   ',
@@ -33,7 +33,7 @@ export const OWL_FRAMES: Record<OwlPose, string[]> = {
     '  ██████████████████████ ',
     '  ███▀    ▀████▀    ▀███ ',
     '  ██ ▄█▄    ████▄     ██ ',
-    '  ██ ███    █████     ██ ',
+    '  ██ █▄█    ███▄█     ██ ',
     '  ███ ▀    ▄███▀     ███ ',
     '   ████▄▄▄██████▄▄▄████  ',
     '    ▀███████▄▄███████▀   ',
@@ -53,7 +53,7 @@ export const OWL_FRAMES: Record<OwlPose, string[]> = {
     '  ██████████████████████ ',
     '  ███▀    ▀████▀    ▀███ ',
     '  ██     ▄████    ▄█▄ ██ ',
-    '  ██     █████    ███ ██ ',
+    '  ██     █▄███    █▄█ ██ ',
     '  ███     ▀███▄    ▀ ███ ',
     '   ████▄▄▄██████▄▄▄████  ',
     '    ▀███████▄▄███████▀   ',
