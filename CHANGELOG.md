@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.65 (unreleased)
+
+- Add `c` to copy all optimizer recommendations and `e` to save a private Markdown file, ready to share with Claude Code. Include complete fixes and partial-analysis warnings, reuse displayed results without another scan, and show copy/save confirmation or a recoverable error.
+
 ## 0.2.64 (unreleased)
 
 - Make the floating display smaller with compact provider rings and a period pill. Turn You + AI and AI Time into metric buttons that open their explanations, with the same buttons in the detailed card.
