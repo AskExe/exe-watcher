@@ -90,6 +90,8 @@ Scans your sessions and `~/.claude/` config for waste: re-read files, low read:e
 
 In the full report, press `o` to see recommendations, `b` to return, or `r` to run the analysis again. Automatic refresh pauses while you read the optimizer. Large histories produce clearly marked partial recommendations from the newest selected sessions, within a smaller analysis budget. Partial checks omit the overall health grade and cleanup suggestions that require complete history. Nothing is applied automatically; token and dollar savings are estimates.
 
+In the optimizer, press `c` to **copy all** recommendations and suggested fixes, ready to paste into Claude Code, or `e` to **save a Markdown file**. The file goes to Downloads when that folder exists, otherwise the current folder; the saved path appears on screen. Both actions use the displayed results without rescanning. Exports include the selected period, coverage warnings, estimates and complete fixes. If the system clipboard is unavailable, save the Markdown file instead.
+
 ### Compare
 
 ```bash
