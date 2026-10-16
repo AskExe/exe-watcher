@@ -4,8 +4,17 @@ import { AsyncLocalStorage } from 'node:async_hooks'
 export class ResourceBudgetError extends Error {
   constructor(detail: string) { super(`Resource limit reached (${detail}). Scan incomplete; Watcher will retain the last successful refresh.`); this.name = 'ResourceBudgetError' }
 }
+/** A deliberately smaller analysis slice ended; the enclosing hard budget remains active. */
+export class ScanSliceLimitError extends ResourceBudgetError {}
 type Budget = { bytes: number; records: number; started: number; maxRecords: number; signal?: AbortSignal; maxBytes: number }
 const scans = new AsyncLocalStorage<Budget>()
+type ScanSlice = { bytes: number; records: number; started: number; maxBytes: number; maxRecords: number; maxMs: number }
+const slices = new AsyncLocalStorage<ScanSlice>()
+export function withScanSlice<T>(fn: () => Promise<T>, limits: Pick<ScanSlice, 'maxBytes' | 'maxRecords' | 'maxMs'>): Promise<T> {
+  const parent = scans.getStore()
+  if (!parent) return withScanBudget(() => withScanSlice(fn, limits))
+  return slices.run({ bytes: parent.bytes, records: parent.records, started: Date.now(), ...limits }, fn)
+}
 /** Optional lower cap, so a budget abort can be reproduced without a multi-GiB corpus.
  *  Can only tighten the caller's limit, never raise it. */
 function effectiveMaxBytes(requested: number): number {
@@ -30,11 +39,17 @@ export function chargeRead(bytes: number): void {
     global.gc?.()
     if (process.memoryUsage().heapUsed > heapBudget) throw new ResourceBudgetError('parser heap budget')
   }
+  const slice = slices.getStore()
+  if (slice && (budget.bytes - slice.bytes > slice.maxBytes || Date.now() - slice.started > slice.maxMs)) {
+    throw new ScanSliceLimitError('analysis slice budget')
+  }
 }
 export function chargeRecord(): void {
   const budget = scans.getStore()
   if (!budget) return
   if (++budget.records > budget.maxRecords) throw new ResourceBudgetError(`${budget.maxRecords.toLocaleString()} scanned usage records`)
+  const slice = slices.getStore()
+  if (slice && budget.records - slice.records > slice.maxRecords) throw new ScanSliceLimitError('analysis record slice')
   if (budget.records % 256 === 0) chargeRead(0)
 }
 export function checkFileSize(size: number, cap: number): boolean {
