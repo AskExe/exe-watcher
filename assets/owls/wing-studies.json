@@ -2,7 +2,6 @@
   "refined_tucked": {
     "label": "01A · Folded wings",
     "description": "Narrow feathers tucked against the sides, with a slimmer pointed beak.",
-    "pupilCutout": [["ellipse",38,39,1.8,1.8],["ellipse",62,39,1.8,1.8]],
     "beak": [["M",47,54],["Q",50,53,53,54],["L",50,61],["Z"]],
     "detail": [
       [["M",29,69],["Q",28,79,37,86],["Q",36,77,29,69],["Z"]],

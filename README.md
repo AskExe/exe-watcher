@@ -181,11 +181,13 @@ Full-screen terminal dashboard with gradient charts, responsive panels, and keyb
 ### Optimize
 
 ```bash
-exe-watcher optimize           # full scan
+exe-watcher optimize           # bounded Claude Code analysis
 exe-watcher optimize -p week   # scope to last 7 days
 ```
 
 Scans your sessions and `~/.claude/` config for waste: re-read files, low read:edit ratios, uncapped bash output, unused MCP servers, ghost agents, bloated CLAUDE.md files. Returns exact copy-paste fixes and estimated savings. Grades your setup A through F.
+
+In the full report, press `o` to see recommendations, `b` to return, or `r` to run the analysis again. Automatic refresh pauses while you read the optimizer. Large histories produce clearly marked partial recommendations from the newest selected sessions, within a smaller analysis budget. Partial checks omit the overall health grade and cleanup suggestions that require complete history. Nothing is applied automatically; token and dollar savings are estimates.
 
 ### Compare
 

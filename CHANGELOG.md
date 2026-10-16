@@ -2,6 +2,9 @@
 
 ## 0.2.64 (unreleased)
 
+- Keep the full-report optimizer useful on large histories with bounded, explicitly partial recommendations from the newest selected sessions. Retain the original hard resource limits and leave interrupted files uncached.
+- Omit unused-configuration cleanup suggestions and overall health grades when analysis is partial. Pause automatic report refresh while reading optimizer results; manual retry and period changes remain available.
+
 - Expand the floating display to six quota providers: Claude, Codex, Kimi, Cursor, GitHub Copilot and Gemini. Show multiple rings at once, switch provider details and save visibility choices, with Claude/Codex as defaults.
 - Add read-only quota adapters with independent request coalescing and cooldowns, account-scoped stale readings, tenant-bound Copilot requests and bounded HTTP responses without redirects. Never rotate or copy credentials in the new adapters; missing/unlimited allowances stay explicit.
 

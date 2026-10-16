@@ -216,14 +216,31 @@ enum OwlArtwork {
                 ctx.setBlendMode(.normal)
                 ellipse(38, 39, 4.8, 6)
                 ellipse(62, 39, 4.8, 6)
-                ctx.setBlendMode(.clear)
-                ellipse(38, 39, 1.8, 1.8)
-                ellipse(62, 39, 1.8, 1.8)
+                OwlPupilDetails.draw(in: ctx, color: color.cgColor, isTemplate: isTemplate)
             }
             ctx.restoreGState()
             return true
         }
         image.isTemplate = isTemplate
         return image
+    }
+}
+
+// The approved contrast details follow the oval pupils, including during blinks.
+enum OwlPupilDetails {
+    static func draw(in ctx: CGContext, color: CGColor, verticalScale: CGFloat = 1, isTemplate: Bool = false) {
+        guard verticalScale > 0 else { return }
+        let rgb = NSColor(cgColor: color)?.usingColorSpace(.deviceRGB) ?? .black
+        let isDark = !isTemplate && rgb.redComponent * 0.2126 + rgb.greenComponent * 0.7152 + rgb.blueComponent * 0.0722 < 0.5
+        let dx: CGFloat = isDark ? -1.4 : 0
+        let dy: CGFloat = (isDark ? -2 : 0) * verticalScale
+        let radius: CGFloat = isDark ? 1.7 : 1.8
+        ctx.saveGState()
+        defer { ctx.restoreGState() }
+        if isTemplate { ctx.setBlendMode(.clear) }
+        ctx.setFillColor(isDark ? CGColor(srgbRed: 1, green: 1, blue: 1, alpha: 1) : CGColor(srgbRed: 0.09803921568627451, green: 0.08235294117647059, blue: 0.15294117647058825, alpha: 1))
+        for x in [CGFloat(38), 62] {
+            ctx.fillEllipse(in: CGRect(x: x + dx - radius, y: 39 + dy - radius * verticalScale, width: radius * 2, height: radius * 2 * verticalScale))
+        }
     }
 }

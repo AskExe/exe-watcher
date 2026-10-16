@@ -1,6 +1,6 @@
 # Floating display implementation
 
-Branch: `codex/watcher-floating-quota`. Worktree: `/Users/exeai/.codex/worktrees/watcher-floating-quota/exe-watcher`. Original base: `1d310d1`, including accepted main `d5789f6`. Initial floating display/branding: `21036f7`; AI-time focus styling: `004421e`. The current branch adds native multi-provider quotas. Primary and earlier attribution worktrees remain unchanged.
+Branch: `codex/watcher-floating-quota`. Worktree: `/Users/exeai/.codex/worktrees/watcher-floating-quota/exe-watcher`. Original base: `1d310d1`, including accepted main `d5789f6`. Initial floating display/branding: `21036f7`; AI-time focus styling: `004421e`. Multi-provider implementation: `8657056`. Accepted main `4af3375` is integrated, including its authoritative contrast-pupil artwork and optimizer fixes. The current branch adds native multi-provider quotas. Primary and earlier attribution worktrees remain unchanged.
 
 Complete locally, unreleased: an optional native floating rail with **Claude, Codex, Kimi, Cursor, GitHub Copilot and Gemini** quota readers. Claude and Codex are shown by default; the widget’s sliders menu adds/hides providers or shows all six. Click a ring or a provider button for its own card. Six rings fit horizontally at top/bottom edges and in a two-column grid at side edges. Extra quota windows scroll and reset to the top when switching providers. Saved visibility, active provider, position, display, quota horizon and time period survive relaunches.
 
@@ -20,7 +20,7 @@ Attribution: native credential/schema adapters adapt [CodeBurn 9a40cc6](https://
 
 Validation, October 16, 2026:
 
-- Native build and **175 tests in 28 suites pass** (`/tmp/watcher-multi-native-tests.log`), including six-provider mapping, missing/unlimited data, token expiry, passive Keychain reads, source/tenant isolation, malformed/special/oversized credential files, unchanged Cursor DB, request coalescing/cooldown/account changes and six-provider geometry.
+- Native build and **175 tests in 28 suites passed before integration** (`/tmp/watcher-multi-native-tests.log`), including six-provider mapping, missing/unlimited data, token expiry, passive Keychain reads, source/tenant isolation, malformed/special/oversized credential files, unchanged Cursor DB, request coalescing/cooldown/account changes and six-provider geometry.
 - Real native fixture UI: all six rings, horizontal and side-edge layouts, all six provider cards, Gemini window scrolling/reset, visibility hide/show-all, provider/period independence, pinning and saved state after relaunch. Earlier disconnected/stale layout checks remain applicable. Physical multi-display/Spaces switching has not been exercised.
 - Changed-code review covers credential/HTTP boundaries, provider state ownership and cancellation, stale identity handling, prefs/layout and notices. Final integration review covers the complete diff; documentation local links and whitespace checks pass.
 

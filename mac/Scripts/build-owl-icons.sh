@@ -20,3 +20,9 @@ for size in 16 32 128 256 512; do
 done
 iconutil -c icns "${WORK}/AppIcon.iconset" -o "${ROOT}/mac/Sources/ExeWatcherMenubar/Resources/AppIcon.icns"
 rsvg-convert "${ROOT}/assets/owl-header.svg" -o "${ROOT}/assets/owl-header.png"
+rsvg-convert -f pdf "${ROOT}/assets/owls/selected.svg" -o "${ROOT}/mac/Sources/ExeWatcherMenubar/Resources/owl.pdf"
+rsvg-convert -f pdf "${ROOT}/assets/owls/selected-menubar.svg" -o "${ROOT}/mac/Sources/ExeWatcherMenubar/Resources/owl-menubar.pdf"
+cp "${ROOT}/assets/owls/selected-app.svg" "${ROOT}/assets/logo.svg"
+cp "${ROOT}/assets/owl-icon.png" "${ROOT}/assets/logo.png"
+sips -z 256 256 "${ROOT}/assets/owl-icon.png" --out "${WORK}/logo-256.png" >/dev/null
+sips -s format ico "${WORK}/logo-256.png" --out "${ROOT}/assets/logo.ico" >/dev/null

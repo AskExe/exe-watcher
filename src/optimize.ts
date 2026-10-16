@@ -7,7 +7,7 @@ import { homedir } from 'os'
 import { readSessionLines, readSessionFileSync } from './fs-utils.js'
 import { cachedFileParse } from './parsed-file-cache.js'
 import { flushDiscoveryCache } from './discovery-cache.js'
-import { chargeRead, chargeRecord, withScanBudget } from './resource-budget.js'
+import { chargeRead, chargeRecord, withScanBudget, withScanSlice, ScanSliceLimitError } from './resource-budget.js'
 import { discoverAllSessions } from './providers/index.js'
 import type { DateRange, ProjectSummary } from './types.js'
 import { formatCost } from './currency.js'
@@ -130,7 +130,9 @@ export type OptimizeResult = {
   costRate: number
   healthScore: number
   healthGrade: HealthGrade
+  coverage?: OptimizeCoverage
 }
+export type OptimizeCoverage = { totalFiles: number; completedFiles: number; partial: boolean }
 
 export type ToolCall = {
   name: string
@@ -151,6 +153,7 @@ type ScanData = {
   projectCwds: Set<string>
   apiCalls: ApiCallMeta[]
   userMessages: string[]
+  coverage?: OptimizeCoverage
 }
 
 // ============================================================================
@@ -225,7 +228,7 @@ function commandReferences(text: string): string[] {
   return [...text.matchAll(COMMAND_PATTERN)].map(m => `/${(m[1] || m[2] || '').trim()}`)
 }
 
-async function readScanRecords(filePath: string): Promise<ScanRecord[]> {
+async function readScanRecords(filePath: string, consume?: (record: ScanRecord) => void): Promise<ScanRecord[]> {
   const records: ScanRecord[] = []
   let version = ''
   for await (const line of readSessionLines(filePath)) {
@@ -260,7 +263,10 @@ async function readScanRecords(filePath: string): Promise<ScanRecord[]> {
         record.calls.push({ name: block.name, input })
       }
     }
-    if (record.cwd || record.calls.length || record.cacheCreationTokens > 0 || record.commands.length) records.push(record)
+    if (record.cwd || record.calls.length || record.cacheCreationTokens > 0 || record.commands.length) {
+      records.push(record)
+      consume?.(record)
+    }
   }
   return records
 }
@@ -282,27 +288,43 @@ export async function scanJsonlFile(
   project: string,
   dateRange: DateRange | undefined,
   recentCutoffMs = Date.now() - RECENT_WINDOW_MS,
+  sink?: ScanData,
 ): Promise<ScanFileResult> {
   const calls: ToolCall[] = []
   const cwds: string[] = []
   const apiCalls: ApiCallMeta[] = []
   const userMessages: string[] = []
   const sessionId = basename(filePath, '.jsonl')
-  const records = await cachedFileParse(filePath, 'optimize-v1', () => readScanRecords(filePath), undefined, dateRange)
-  for (const record of records) {
-    chargeRecord()
-    if (!inRange(record.timestamp, dateRange)) continue
+  const consume = (record: ScanRecord, replay: boolean) => {
+    if (replay) chargeRecord()
+    if (!inRange(record.timestamp, dateRange)) return
     const recent = isRecent(record.timestamp, recentCutoffMs)
-    if (record.cwd) cwds.push(record.cwd)
+    if (record.cwd) { cwds.push(record.cwd); sink?.projectCwds.add(record.cwd) }
     userMessages.push(...record.commands)
-    if (record.cacheCreationTokens > 0) apiCalls.push({ cacheCreationTokens: record.cacheCreationTokens, version: record.version, recent })
-    for (const call of record.calls) { chargeRecord(); calls.push({ ...call, sessionId, project, recent }) }
+    for (const command of record.commands) sink?.userMessages.push(command)
+    if (record.cacheCreationTokens > 0) {
+      const call = { cacheCreationTokens: record.cacheCreationTokens, version: record.version, recent }
+      apiCalls.push(call); sink?.apiCalls.push(call)
+    }
+    for (const call of record.calls) {
+      if (replay) chargeRecord()
+      const observed = { ...call, sessionId, project, recent }
+      calls.push(observed); sink?.toolCalls.push(observed)
+    }
   }
+  // Emit fresh records as they are parsed. An interrupted file is never cached,
+  // but its observed prefix can still support explicitly partial recommendations.
+  let parsed = false
+  const records = await cachedFileParse(filePath, 'optimize-v1', () => {
+    parsed = true
+    return readScanRecords(filePath, record => consume(record, false))
+  }, undefined, dateRange)
+  if (!parsed) for (const record of records) consume(record, true)
 
   return { calls, cwds, apiCalls, userMessages }
 }
 
-async function scanSessions(projects: ProjectSummary[], dateRange?: DateRange): Promise<ScanData> {
+async function scanSessions(projects: ProjectSummary[], dateRange?: DateRange, allowPartial = false): Promise<ScanData> {
   const sources = await discoverAllSessions('claude')
   const selected = new Map<string, Set<string>>()
   for (const project of projects) {
@@ -314,6 +336,12 @@ async function scanSessions(projects: ProjectSummary[], dateRange?: DateRange): 
   const allCwds = new Set<string>()
   const allApiCalls: ApiCallMeta[] = []
   const allUserMessages: string[] = []
+  const data: ScanData = { toolCalls: allCalls, projectCwds: allCwds, apiCalls: allApiCalls, userMessages: allUserMessages }
+  const recency = new Map<string, number>()
+  for (const project of projects) for (const session of project.sessions) {
+    const key = `${project.project}:${session.sessionId}`
+    recency.set(key, Math.max(recency.get(key) ?? 0, Date.parse(session.lastTimestamp ?? '') || 0))
+  }
 
   const tasks: Array<{ file: string; project: string }> = []
   for (const source of sources) {
@@ -329,15 +357,22 @@ async function scanSessions(projects: ProjectSummary[], dateRange?: DateRange): 
     }
   }
 
-  await runWithConcurrency(tasks, FILE_READ_CONCURRENCY, async ({ file, project }) => {
-    const { calls, cwds, apiCalls, userMessages } = await scanJsonlFile(file, project, dateRange)
-    for (const call of calls) allCalls.push(call)
-    for (const cwd of cwds) allCwds.add(cwd)
-    for (const call of apiCalls) allApiCalls.push(call)
-    for (const message of userMessages) allUserMessages.push(message)
+  tasks.sort((a, b) => (recency.get(`${b.project}:${basename(b.file, '.jsonl')}`) ?? 0)
+    - (recency.get(`${a.project}:${basename(a.file, '.jsonl')}`) ?? 0) || a.file.localeCompare(b.file))
+  const coverage: OptimizeCoverage = { totalFiles: tasks.length, completedFiles: 0, partial: false }
+  const scan = () => runWithConcurrency(tasks, FILE_READ_CONCURRENCY, async ({ file, project }) => {
+    await scanJsonlFile(file, project, dateRange, undefined, data)
+    coverage.completedFiles++
   })
-
-  return { toolCalls: allCalls, projectCwds: allCwds, apiCalls: allApiCalls, userMessages: allUserMessages }
+  if (allowPartial) {
+    try { await withScanSlice(scan, { maxRecords: 100_000, maxBytes: 128 * 1024 ** 2, maxMs: 10_000 }) }
+    catch (error) {
+      if (!(error instanceof ScanSliceLimitError)) throw error
+      coverage.partial = true
+    }
+    data.coverage = coverage
+  } else await scan()
+  return data
 }
 
 // ============================================================================
@@ -971,32 +1006,34 @@ export async function scanAndDetect(
   projects: ProjectSummary[],
   dateRange?: DateRange,
   preScanned?: ScanData | Promise<ScanData>,
+  options: { allowPartial?: boolean } = {},
 ): Promise<OptimizeResult> {
   // Every caller, including the standalone CLI and menu bar, shares these caps.
   try {
-    return await withScanBudget(() => scanAndDetectWithinBudget(projects, dateRange, preScanned))
+    return await withScanBudget(() => scanAndDetectWithinBudget(projects, dateRange, preScanned, options.allowPartial))
   } finally { await flushDiscoveryCache() }
 }
 
 async function scanAndDetectWithinBudget(
   projects: ProjectSummary[], dateRange?: DateRange, preScanned?: ScanData | Promise<ScanData>,
+  allowPartial = false,
 ): Promise<OptimizeResult> {
   if (projects.length === 0) {
     return { findings: [], costRate: 0, healthScore: 100, healthGrade: 'A' }
   }
 
   const costRate = computeInputCostRate(projects)
-  const { toolCalls, projectCwds, apiCalls, userMessages } = preScanned
+  const { toolCalls, projectCwds, apiCalls, userMessages, coverage } = preScanned
     ? await preScanned
-    : await scanSessions(projects, dateRange)
+    : await scanSessions(projects, dateRange, allowPartial)
 
   const findings: WasteFinding[] = []
   const syncDetectors: Array<() => WasteFinding | null> = [
-    () => detectCacheBloat(apiCalls, projects, dateRange),
+    () => coverage?.partial ? null : detectCacheBloat(apiCalls, projects, dateRange),
     () => detectLowReadEditRatio(toolCalls),
     () => detectJunkReads(toolCalls, dateRange),
     () => detectDuplicateReads(toolCalls, dateRange),
-    () => detectUnusedMcp(toolCalls, projects, projectCwds),
+    () => coverage?.partial ? null : detectUnusedMcp(toolCalls, projects, projectCwds),
     () => detectBloatedClaudeMd(projectCwds),
     () => detectBashBloat(),
   ]
@@ -1005,7 +1042,7 @@ async function scanAndDetectWithinBudget(
     if (finding) findings.push(finding)
   }
 
-  const ghostResults = await Promise.all([
+  const ghostResults = coverage?.partial ? [] : await Promise.all([
     detectGhostAgents(toolCalls),
     detectGhostSkills(toolCalls),
     detectGhostCommands(userMessages),
@@ -1014,7 +1051,7 @@ async function scanAndDetectWithinBudget(
 
   findings.sort((a, b) => urgencyScore(b) - urgencyScore(a))
   const { score, grade } = computeHealth(findings)
-  const result: OptimizeResult = { findings, costRate, healthScore: score, healthGrade: grade }
+  const result: OptimizeResult = { findings, costRate, healthScore: score, healthGrade: grade, coverage }
   return result
 }
 
@@ -1088,11 +1125,13 @@ function renderOptimize(
   callCount: number,
   healthScore: number,
   healthGrade: HealthGrade,
+  coverage?: OptimizeCoverage,
 ): string {
   const lines: string[] = []
   lines.push('')
   lines.push(`  ${chalk.bold.hex(ORANGE)('Exe Watcher config health')}${chalk.dim('  ' + periodLabel)}`)
   lines.push(chalk.dim('  Claude Code recommendations. Changes are yours to apply.'))
+  if (coverage?.partial) lines.push(chalk.hex(ORANGE)(`  Partial analysis: ${coverage.completedFiles}/${coverage.totalFiles} logs fully checked; some records remain unchecked. Cleanup suggestions requiring complete history are omitted.`))
   lines.push(chalk.hex(DIM)('  ' + SEP.repeat(PANEL_WIDTH)))
 
   const issueSuffix = findings.length > 0 ? `, ${findings.length} issue${findings.length > 1 ? 's' : ''}` : ''
@@ -1100,12 +1139,12 @@ function renderOptimize(
     `${sessionCount} sessions`,
     `${callCount.toLocaleString()} calls`,
     chalk.hex(GOLD)(formatCost(periodCost)),
-    `Health: ${chalk.bold.hex(GRADE_COLORS[healthGrade])(healthGrade)}${chalk.dim(` (${healthScore}/100${issueSuffix})`)}`,
+    coverage?.partial ? 'Partial check' : `Health: ${chalk.bold.hex(GRADE_COLORS[healthGrade])(healthGrade)}${chalk.dim(` (${healthScore}/100${issueSuffix})`)}`,
   ].join(chalk.hex(DIM)('   ')))
   lines.push('')
 
   if (findings.length === 0) {
-    lines.push(chalk.hex(GREEN)('  Nothing to fix. Your setup is lean.'))
+    lines.push(chalk.hex(GREEN)(coverage?.partial ? '  No recommendations in the checked records; unchecked history is unknown.' : '  Nothing to fix. Your setup is lean.'))
     lines.push('')
     lines.push(chalk.dim('  Exe Watcher optimize scans your Claude Code sessions and config for'))
     lines.push(chalk.dim('  token waste: junk directory reads, duplicate file reads, unused'))
@@ -1147,11 +1186,11 @@ export async function runOptimize(
 
   process.stderr.write(chalk.dim('  Analyzing your sessions...\n'))
 
-  const { findings, costRate, healthScore, healthGrade } = await scanAndDetect(projects, dateRange, preScanned)
+  const { findings, costRate, healthScore, healthGrade, coverage } = await scanAndDetect(projects, dateRange, preScanned, { allowPartial: true })
   const sessions = projects.flatMap(p => p.sessions)
   const periodCost = projects.reduce((s, p) => s + p.totalCostUSD, 0)
   const callCount = projects.reduce((s, p) => s + p.totalApiCalls, 0)
 
-  const output = renderOptimize(findings, costRate, periodLabel, periodCost, sessions.length, callCount, healthScore, healthGrade)
+  const output = renderOptimize(findings, costRate, periodLabel, periodCost, sessions.length, callCount, healthScore, healthGrade, coverage)
   console.log(output)
 }
