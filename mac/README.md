@@ -63,7 +63,7 @@ From 0.2.59, historical token recovery marks missing call counts explicitly: `�
 
 Open the menu bar app, choose **Display settings** (the sliders button in the footer), then enable **Floating quota display**. It starts off. Drag the bottom handle to move it; it snaps to any screen edge or stays floating. Position, display, quota window and time period survive relaunches. Hover for details, click the quota ring to pin them, or use the close button to hide the display. Outside clicks dismiss the detail card; Escape does too when macOS already permits the key event.
 
-The rail shows one ring per selected provider. **Claude and Codex** appear by default; use the floating display’s sliders menu to add **Kimi, Cursor, GitHub Copilot or Gemini**, hide a provider, or show all six. Click a ring or a provider tab to open its own usage card. The rail wraps into two columns at a side edge and scrolls when space is constrained. Provider selection and visibility survive relaunches. Each ring uses the selected five-hour/weekly window when the provider reports it, otherwise its first available window (for example, monthly or per-model). The time rows cover **all agents**, independent of the main popover's provider/period filters:
+The compact rail shows one ring per selected provider. **Claude and Codex** appear by default; use the floating display’s sliders menu to add **Kimi, Cursor, GitHub Copilot or Gemini**, hide a provider, or show all six. Click a ring or a provider tab to open its own usage card. The rail wraps into two columns at a side edge and scrolls when space is constrained. Provider selection and visibility survive relaunches. Each ring uses the selected five-hour/weekly window when the provider reports it, otherwise its first available window (for example, monthly or per-model). The two time buttons cover **all agents**, independent of the main popover's provider/period filters. Click either button to pin its explanation in the usage card; the card has the same buttons, and clicking the selected one again collapses its explanation:
 
 - **You + AI ≈**: your estimated interaction time, inferred from short reply-to-next-prompt gaps. Overlapping interaction intervals count once. It does not measure attention.
 - **AI Time**: recorded runtime added across agents, so simultaneous runs accumulate agent-hours. Inferred durations get an approximation mark.
@@ -71,6 +71,8 @@ The rail shows one ring per selected provider. **Claude and Codex** appear by de
 Time defaults to **Today**; choose **Week** (last seven days), **Month** (calendar month), or **All Time** (retained timing history). Unavailable values show a dash and incomplete coverage is labeled in details.
 
 Claude quota requests are shared with Plan. Each additional provider has an independent request, connection state and cooldown: passive reads at most every five minutes after success or fifteen after failure, with at least a fifteen-minute 429 cooldown (longer provider Retry-After delays are honored). Passive refreshes never open Keychain prompts or rotate credentials. Use Refresh for an explicit connection attempt. This adds no periodic usage-log scan; timing reuses existing snapshots and the bounded timing-only recovery worker. OS threshold notifications remain future work.
+
+If Claude needs a new sign-in, choose **Sign in with Claude** in its card, finish the Claude Code browser login, then Refresh here. Watcher prefers Claude Code's macOS Keychain login; a credential file is used only when that Keychain item is absent.
 
 Supported live readers:
 
