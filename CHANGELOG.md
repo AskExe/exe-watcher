@@ -2,6 +2,7 @@
 
 ## 0.2.64 (unreleased)
 
+- Make the floating display smaller with compact provider rings and a period pill. Turn You + AI and AI Time into metric buttons that open their explanations, with the same buttons in the detailed card.
 - Add a Claude sign-in button to the floating display and prefer Claude Code's current macOS Keychain login over old credential files. Hide provider timing rows without recorded time.
 - Keep the full-report optimizer useful on large histories with bounded, explicitly partial recommendations from the newest selected sessions. Retain the original hard resource limits and leave interrupted files uncached.
 - Omit unused-configuration cleanup suggestions and overall health grades when analysis is partial. Pause automatic report refresh while reading optimizer results; manual retry and period changes remain available.

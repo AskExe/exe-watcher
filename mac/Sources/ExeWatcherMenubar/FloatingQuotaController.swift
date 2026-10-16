@@ -84,6 +84,7 @@ final class FloatingQuotaController {
                 store: store, preferences: preferences, interaction: interaction, preview: preview,
                 hover: { [weak self] in self?.hover($0, detail: false) },
                 togglePin: { [weak self] in self?.togglePin() },
+                selectTimeMetric: { [weak self] in self?.showTimeDetails($0) },
                 drag: { [weak self] in self?.drag($0, point: $1) }))
             rail = panel
             if !previewCard { installEventMonitors() }
@@ -138,6 +139,7 @@ final class FloatingQuotaController {
         interaction.isExpanded = false
         interaction.isPinned = false
         interaction.isDragging = false
+        interaction.selectedTimeMetric = nil
         dragStart = nil
     }
 
@@ -169,6 +171,7 @@ final class FloatingQuotaController {
                 store: store, preferences: preferences, interaction: interaction, preview: preview,
                 hover: { [weak self] in self?.hover($0, detail: true) },
                 togglePin: { [weak self] in self?.togglePin() },
+                selectTimeMetric: { [weak self] in self?.showTimeDetails($0) },
                 refresh: { [weak self] in self?.refreshExplicitly() }))
             detail = panel
         }
@@ -177,7 +180,8 @@ final class FloatingQuotaController {
         let rowsHeight = min(4, model.windows.count) * 64
         let noticesHeight = (model.notes.isEmpty ? 0 : 40) + (model.failed ? 20 : 0)
         let connectionHeight = preferences.activeProvider == .claude && model.windows.isEmpty ? 540 : 460
-        let height = max(connectionHeight + extraProviderRow, 340 + extraProviderRow + rowsHeight + noticesHeight)
+        let timeDetailsHeight = interaction.selectedTimeMetric == nil ? 0 : 48
+        let height = max(connectionHeight + extraProviderRow, 358 + extraProviderRow + rowsHeight + noticesHeight) + timeDetailsHeight
         let size = CGSize(width: 330, height: CGFloat(height))
         detail?.setFrame(FloatingQuotaPlacement.detailFrame(rail: rail.frame, size: size, screen: screen.visibleFrame, edge: preferences.position.edge), display: true)
         detail?.orderFrontRegardless()
@@ -188,9 +192,16 @@ final class FloatingQuotaController {
         hoverWork = nil
         interaction.isPinned = false
         interaction.isExpanded = false
+        interaction.selectedTimeMetric = nil
         hoveringDetail = false
         detail?.close()
         detail = nil
+    }
+    private func showTimeDetails(_ metric: FloatingTimeMetric?) {
+        hoverWork?.cancel()
+        interaction.selectedTimeMetric = metric
+        interaction.isPinned = true
+        showDetails()
     }
     private func togglePin() {
         interaction.isPinned.toggle()

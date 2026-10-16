@@ -1,11 +1,24 @@
 import AppKit
 import SwiftUI
 
+enum FloatingTimeMetric: String, CaseIterable {
+    case interaction, aiWork
+
+    var symbol: String { self == .interaction ? "person.fill" : "sparkles" }
+    var explanation: String {
+        switch self {
+        case .interaction: "Estimated from short gaps between AI replies and your next message. Overlapping interaction time counts once."
+        case .aiWork: "AI runtime added across agents, including simultaneous work. Parallel work can exceed elapsed clock time."
+        }
+    }
+}
+
 @MainActor @Observable
 final class FloatingQuotaInteraction {
     var isExpanded = false
     var isPinned = false
     var isDragging = false
+    var selectedTimeMetric: FloatingTimeMetric?
 }
 
 struct FloatingQuotaRail: View {
@@ -15,43 +28,44 @@ struct FloatingQuotaRail: View {
     let preview: Bool
     let hover: (Bool) -> Void
     let togglePin: () -> Void
+    let selectTimeMetric: (FloatingTimeMetric?) -> Void
     let drag: (FloatingQuotaDragHandle.Phase, CGPoint) -> Void
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 30)) { clock in
             let horizontal = preferences.position.edge?.horizontal ?? preferences.position.horizontal
-            VStack(spacing: 9) {
+            VStack(spacing: 6) {
                 HStack(spacing: 5) {
-                    OwlIcon(size: 14).foregroundStyle(Theme.brandAccent)
-                    Text(preview ? "PREVIEW" : "WATCHER").font(.system(size: 8, weight: .bold)).tracking(1)
+                    OwlIcon(size: 11).foregroundStyle(Theme.brandAccent)
+                    Text(preview ? "PREVIEW" : "WATCHER").font(.system(size: 7, weight: .bold)).tracking(0.8)
                         .foregroundStyle(.secondary)
                     if interaction.isPinned { Image(systemName: "pin.fill").font(.system(size: 8)).foregroundStyle(Theme.brandAccent) }
                     Spacer(minLength: 0)
                     FloatingProviderMenu(preferences: preferences)
                 }
                 if horizontal {
-                    HStack(spacing: 12) {
+                    HStack(spacing: 8) {
                         ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 8) { ForEach(preferences.orderedProviders) { tile($0, now: clock.date) } }
+                            HStack(spacing: 6) { ForEach(preferences.orderedProviders) { tile($0, now: clock.date) } }
                         }.frame(minWidth: 0)
-                        Rectangle().fill(.white.opacity(0.1)).frame(width: 1, height: 62)
-                        timeSummary.frame(width: 162)
+                        Rectangle().fill(.white.opacity(0.1)).frame(width: 1, height: 44)
+                        timeSummary.frame(width: 126)
                     }
                 } else {
                     ScrollView(.vertical, showsIndicators: false) {
-                        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 9) {
+                        LazyVGrid(columns: [GridItem(.flexible(), spacing: 6), GridItem(.flexible())], spacing: 6) {
                             ForEach(preferences.orderedProviders) { tile($0, now: clock.date) }
                         }
-                    }.frame(maxHeight: CGFloat(((preferences.shownProviders.count + 1) / 2) * 82))
+                    }.frame(maxHeight: CGFloat(((preferences.shownProviders.count + 1) / 2) * 60))
                     Rectangle().fill(.white.opacity(0.1)).frame(height: 1)
                     timeSummary
                 }
             }
-            .padding(.horizontal, 13).padding(.top, 12).padding(.bottom, 22)
+            .padding(.horizontal, 10).padding(.top, 8).padding(.bottom, 18)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Theme.warmSurfaceDark.gradient)
-            .overlay(RoundedRectangle(cornerRadius: 22).strokeBorder(Theme.brandAccent.opacity(0.3), lineWidth: 1))
-            .clipShape(RoundedRectangle(cornerRadius: 22))
+            .overlay(RoundedRectangle(cornerRadius: 17).strokeBorder(Theme.brandAccent.opacity(0.25), lineWidth: 1))
+            .clipShape(RoundedRectangle(cornerRadius: 17))
             .overlay(alignment: .bottom) {
                 FloatingQuotaDragHandle(onDrag: drag).frame(width: 64, height: 18)
                     .accessibilityLabel("Move floating usage display")
@@ -63,14 +77,17 @@ struct FloatingQuotaRail: View {
     }
 
     private var timeSummary: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 4) {
             Menu {
                 Picker("Time period", selection: Binding(get: { preferences.timePeriod }, set: { preferences.timePeriod = $0 })) {
                     ForEach(FloatingTimePeriod.allCases, id: \.self) { Text($0.label).tag($0) }
                 }
-            } label: { Text(preferences.timePeriod.label).font(.system(size: 10, weight: .semibold)) }
-            .menuStyle(.borderlessButton).fixedSize().accessibilityLabel("Choose time period")
-            FloatingTimeReadout(time: store.floatingTime(for: preferences.timePeriod.period), compact: true)
+            } label: { Text(preferences.timePeriod.label).font(.system(size: 9, weight: .semibold)) }
+            .menuStyle(.borderlessButton).fixedSize().noFocusRing()
+            .padding(.horizontal, 6).padding(.vertical, 2)
+            .background(.white.opacity(0.045), in: Capsule()).accessibilityLabel("Choose time period")
+            FloatingTimeReadout(time: store.floatingTime(for: preferences.timePeriod.period), compact: true,
+                selected: interaction.selectedTimeMetric, select: { selectTimeMetric($0) })
         }
     }
 
@@ -81,34 +98,35 @@ struct FloatingQuotaRail: View {
         let value = expired ? nil : window?.percent
         let stale = quota.isStale(at: now)
         return Button {
-            if preferences.activeProvider != provider {
+            if preferences.activeProvider != provider || interaction.selectedTimeMetric != nil {
                 preferences.selectedProvider = provider
-                if !interaction.isPinned { togglePin() }
+                if interaction.selectedTimeMetric != nil { selectTimeMetric(nil) }
+                else if !interaction.isPinned { togglePin() }
             } else { togglePin() }
         } label: {
-            VStack(spacing: 3) {
-                Text(provider.name).font(.system(size: 9, weight: .semibold))
+            VStack(spacing: 2) {
+                Text(provider.name).font(.system(size: 8, weight: .semibold))
                     .foregroundStyle(preferences.activeProvider == provider ? Theme.brandAccent : .secondary)
                 ZStack {
-                    Circle().stroke(.white.opacity(0.09), lineWidth: 4)
+                    Circle().stroke(.white.opacity(0.09), lineWidth: 3)
                     if let value {
                         Circle().trim(from: 0, to: value / 100)
-                            .stroke(quotaColor(value), style: StrokeStyle(lineWidth: 4, lineCap: .round))
+                            .stroke(quotaColor(value), style: StrokeStyle(lineWidth: 3, lineCap: .round))
                             .rotationEffect(.degrees(-90)).opacity(stale ? 0.4 : 1)
                     }
                     VStack(spacing: 0) {
                         Text(value.map { "\(Int($0.rounded()))" } ?? "—")
-                            .font(.system(size: 17, weight: .semibold, design: .rounded)).monospacedDigit()
+                            .font(.system(size: 13, weight: .semibold, design: .rounded)).monospacedDigit()
                         Text(value == nil ? (quota.isLoading ? "loading" : "usage") : "% used")
-                            .font(.system(size: 7, weight: .medium)).foregroundStyle(.secondary)
+                            .font(.system(size: 6, weight: .medium)).foregroundStyle(.secondary)
                     }
                     if stale || expired {
-                        Circle().fill(Theme.semanticWarning).frame(width: 6, height: 6).offset(x: 18, y: -18)
+                        Circle().fill(Theme.semanticWarning).frame(width: 4, height: 4).offset(x: 13, y: -13)
                     }
-                }.frame(width: 46, height: 46)
-                Text(window?.label ?? quota.status(at: now)).font(.system(size: 7))
+                }.frame(width: 34, height: 34)
+                Text(window?.label ?? quota.status(at: now)).font(.system(size: 6))
                     .lineLimit(1).foregroundStyle(.secondary)
-            }.frame(width: 56).padding(.vertical, 2).contentShape(Rectangle())
+            }.frame(width: 50).padding(.vertical, 2).contentShape(Rectangle())
         }.buttonStyle(.plain).noFocusRing()
             .accessibilityLabel("\(preview ? "Preview. " : "")\(quota.provider) \(window?.label ?? "capacity"). \(expired ? "Reset pending" : value.map { "\(Int($0.rounded())) percent used" } ?? quota.status(at: now))")
             .help("Show \(provider.name) usage")
@@ -139,6 +157,7 @@ struct FloatingQuotaDetail: View {
     let preview: Bool
     let hover: (Bool) -> Void
     let togglePin: () -> Void
+    let selectTimeMetric: (FloatingTimeMetric?) -> Void
     let refresh: () -> Void
     @State private var openingClaudeLogin = false
     @State private var claudeLoginOpened = false
@@ -178,9 +197,14 @@ struct FloatingQuotaDetail: View {
                 VStack(alignment: .leading, spacing: 9) {
                     Picker("Time period", selection: Binding(get: { preferences.timePeriod }, set: { preferences.timePeriod = $0 })) {
                         ForEach(FloatingTimePeriod.allCases, id: \.self) { Text($0.label).tag($0) }
-                    }.pickerStyle(.segmented).labelsHidden().accessibilityLabel("Time period")
+                    }.pickerStyle(.segmented).labelsHidden().noFocusRing().accessibilityLabel("Time period")
                     let time = store.floatingTime(for: preferences.timePeriod.period)
-                    FloatingTimeReadout(time: time, compact: false)
+                    FloatingTimeReadout(time: time, compact: false, selected: interaction.selectedTimeMetric,
+                        select: { selectTimeMetric(interaction.selectedTimeMetric == $0 ? nil : $0) })
+                    if let metric = interaction.selectedTimeMetric {
+                        Text(metric.explanation).font(.system(size: 10)).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                     Text(time == nil ? (store.floatingTimeError ?? "Loading recorded time…") : time?.coverage == "complete" ? "All agents · recorded history" : "All agents · partial timing history")
                         .font(.system(size: 10)).foregroundStyle(.secondary)
                 }
@@ -289,23 +313,42 @@ struct FloatingQuotaDetail: View {
 private struct FloatingTimeReadout: View {
     let time: TimeBlock?
     let compact: Bool
+    let selected: FloatingTimeMetric?
+    let select: (FloatingTimeMetric) -> Void
 
     var body: some View {
-        VStack(spacing: compact ? 5 : 8) {
-            row("You + AI ≈", time?.userActiveMs, help: "Estimated time you spend interacting with AI, inferred from short reply-to-next-prompt gaps. Overlapping interactions count once; this does not measure attention.")
-            row("AI Time\(time?.estimatedAiMs ?? 0 > 0 ? " ≈" : "")", time?.aiRunningMs, help: "Time AI agents spend working for you, added across all agents. Parallel work can add up to more than the elapsed clock time.")
+        HStack(spacing: compact ? 4 : 8) {
+            metricButton(.interaction, label: "You + AI ≈", milliseconds: time?.userActiveMs)
+            metricButton(.aiWork, label: "AI Time\(time?.estimatedAiMs ?? 0 > 0 ? " ≈" : "")", milliseconds: time?.aiRunningMs)
         }
     }
 
-    private func row(_ label: String, _ milliseconds: Double?, help: String) -> some View {
-        HStack(spacing: 5) {
-            Text(label).foregroundStyle(.secondary)
-            Spacer(minLength: 0)
-            Text(TimeBlock.duration(milliseconds) == "Unknown" ? "—" : TimeBlock.duration(milliseconds))
-                .font(.system(size: compact ? 12 : 15, weight: .semibold, design: .rounded)).monospacedDigit()
-                .lineLimit(1).minimumScaleFactor(0.75)
-        }.font(.system(size: compact ? 10 : 12))
-            .help(help).accessibilityElement(children: .combine).accessibilityHint(help)
+    private func metricButton(_ metric: FloatingTimeMetric, label: String, milliseconds: Double?) -> some View {
+        let active = selected == metric
+        let duration = TimeBlock.duration(milliseconds)
+        let value = duration == "Unknown" ? "—" : duration
+        return Button { select(metric) } label: {
+            VStack(alignment: .leading, spacing: compact ? 3 : 5) {
+                HStack(spacing: 3) {
+                    Image(systemName: metric.symbol).font(.system(size: compact ? 7 : 9))
+                    Text(label).font(.system(size: compact ? 8 : 10, weight: .medium))
+                        .lineLimit(1).minimumScaleFactor(0.8)
+                }.foregroundStyle(active ? Theme.brandAccent : .secondary)
+                Text(value).font(.system(size: compact ? 12 : 17, weight: .semibold, design: .rounded))
+                    .monospacedDigit().lineLimit(1).minimumScaleFactor(0.65)
+                    .foregroundStyle(.primary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, compact ? 6 : 10).padding(.vertical, compact ? 5 : 9)
+            .background(active ? Theme.brandAccent.opacity(0.1) : .white.opacity(0.045), in: RoundedRectangle(cornerRadius: compact ? 7 : 10))
+            .overlay(RoundedRectangle(cornerRadius: compact ? 7 : 10)
+                .strokeBorder(active ? Theme.brandAccent.opacity(0.45) : .white.opacity(0.07), lineWidth: 1))
+            .contentShape(RoundedRectangle(cornerRadius: compact ? 7 : 10))
+        }.buttonStyle(.plain).noFocusRing()
+            .accessibilityLabel("\(label), \(value)")
+            .accessibilityHint("Show details. \(metric.explanation)")
+            .accessibilityAddTraits(active ? .isSelected : [])
+            .help(metric.explanation)
     }
 }
 

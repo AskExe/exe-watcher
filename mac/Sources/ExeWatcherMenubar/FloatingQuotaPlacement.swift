@@ -5,8 +5,8 @@ enum FloatingQuotaPlacement {
     static let inset: CGFloat = 10
     static func railSize(horizontal: Bool, providerCount: Int = 2) -> CGSize {
         let count = max(1, min(6, providerCount))
-        return horizontal ? CGSize(width: 248 + count * 64, height: 142)
-            : CGSize(width: 176, height: 156 + ((count + 1) / 2) * 82)
+        return horizontal ? CGSize(width: 176 + count * 52, height: 104)
+            : CGSize(width: 152, height: 114 + ((count + 1) / 2) * 60)
     }
     static func clamped(_ frame: CGRect, to screen: CGRect) -> CGRect {
         let width = min(frame.width, max(1, screen.width - 2 * inset))
