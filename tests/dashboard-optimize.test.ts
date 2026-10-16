@@ -14,9 +14,10 @@ import { parseAllSessions } from '../src/parser.js'
 import { scanAndDetect } from '../src/optimize.js'
 import { ResourceBudgetError } from '../src/resource-budget.js'
 
-afterEach(() => vi.clearAllMocks())
+afterEach(() => { vi.clearAllMocks(); vi.useRealTimers() })
 
 it('keeps report totals after an Optimize failure and retries only the analysis', async () => {
+  vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
   const timestamp = new Date().toISOString()
   const projects: ProjectSummary[] = [{ project: 'fixture', projectPath: '/fixture', totalCostUSD: 42, totalApiCalls: 1,
     sessions: [{ sessionId: 's', project: 'fixture', firstTimestamp: timestamp, lastTimestamp: timestamp, totalCostUSD: 42,
@@ -29,7 +30,7 @@ it('keeps report totals after an Optimize failure and retries only the analysis'
   let frame = ''
   const stdout = Object.assign(new Writable({ write(chunk, _encoding, callback) { frame += chunk.toString(); callback() } }), { columns: 120, rows: 80, isTTY: true })
   const stdin = Object.assign(new PassThrough(), { isTTY: true, setRawMode: vi.fn(), ref: vi.fn(), unref: vi.fn() })
-  const app = render(React.createElement(InteractiveDashboard, { initialPeriod: 'today', initialProvider: 'claude' }), {
+  const app = render(React.createElement(InteractiveDashboard, { initialPeriod: 'today', initialProvider: 'claude', refreshSeconds: 30 }), {
     stdout: stdout as unknown as NodeJS.WriteStream, stdin: stdin as unknown as NodeJS.ReadStream,
     debug: true, interactive: true, patchConsole: false, exitOnCtrlC: false,
   })
@@ -41,6 +42,9 @@ it('keeps report totals after an Optimize failure and retries only the analysis'
     expect(frame).not.toContain('Report could not refresh')
     frame = ''; stdin.write('r')
     await vi.waitFor(() => expect(frame).toContain('Changes are yours to apply'))
+    expect(scanAndDetect).toHaveBeenCalledTimes(2)
+    expect(parseAllSessions).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(31_000)
     expect(scanAndDetect).toHaveBeenCalledTimes(2)
     expect(parseAllSessions).toHaveBeenCalledTimes(1)
     frame = ''; stdin.write('b')

@@ -10,7 +10,7 @@ import { formatCost, formatTokens } from './format.js'
 import { parseAllSessions, filterProjectsByName, getDiscoveredProviderNames } from './parser.js'
 import { loadPricing } from './models.js'
 import { getAllProviders } from './providers/index.js'
-import { scanAndDetect, type WasteFinding, type WasteAction, type OptimizeResult } from './optimize.js'
+import { scanAndDetect, type WasteFinding, type WasteAction, type OptimizeResult, type OptimizeCoverage } from './optimize.js'
 import { estimateContextBudget, discoverProjectCwd, type ContextBudget } from './context-budget.js'
 import { dateKey } from './day-aggregator.js'
 import { CompareView } from './compare.js'
@@ -569,7 +569,7 @@ function FindingPanel({ index, finding, costRate, width }: { index: number; find
 
 const GRADE_COLORS: Record<string, string> = { A: '#16A34A', B: '#16A34A', C: GOLD, D: ORANGE, F: '#DC2626' }
 
-function OptimizeView({ findings, costRate, projects, label, width, healthScore, healthGrade }: { findings: WasteFinding[]; costRate: number; projects: ProjectSummary[]; label: string; width: number; healthScore: number; healthGrade: string }) {
+function OptimizeView({ findings, costRate, projects, label, width, healthScore, healthGrade, coverage }: { findings: WasteFinding[]; costRate: number; projects: ProjectSummary[]; label: string; width: number; healthScore: number; healthGrade: string; coverage?: OptimizeCoverage }) {
   const periodCost = projects.reduce((s, p) => s + p.totalCostUSD, 0)
   const totalTokens = findings.reduce((s, f) => s + f.tokensSaved, 0)
   const totalCost = totalTokens * costRate
@@ -581,11 +581,12 @@ function OptimizeView({ findings, costRate, projects, label, width, healthScore,
       <Box flexDirection="column" borderStyle="round" borderColor={ORANGE} paddingX={1} width={width}>
         <Text wrap="truncate-end">
           <Text bold color={ORANGE}>Exe Watcher Optimize</Text>
-          <Text dimColor>  {label}   Setup: </Text>
-          <Text bold color={gradeColor}>{healthGrade}</Text>
-          <Text dimColor> ({healthScore}/100)</Text>
+          <Text dimColor>  {label}   </Text>
+          {coverage?.partial ? <Text color={ORANGE}>Partial check</Text> : <Text>Setup: <Text bold color={gradeColor}>{healthGrade}</Text><Text dimColor> ({healthScore}/100)</Text></Text>}
         </Text>
         <Text dimColor>Claude Code recommendations. Changes are yours to apply.</Text>
+        {coverage?.partial && <Text color={ORANGE}>Partial analysis: {coverage.completedFiles}/{coverage.totalFiles} logs fully checked; some records remain unchecked.</Text>}
+        {coverage?.partial && <Text dimColor>Cleanup suggestions requiring complete history are omitted.</Text>}
         <Text color="#16A34A" wrap="truncate-end">Savings: ~{formatTokens(totalTokens)} tokens (~{formatCost(totalCost)}, ~{pct}% of spend)</Text>
       </Box>
       {findings.map((f, i) => <FindingPanel key={i} index={i + 1} finding={f} costRate={costRate} width={width} />)}
@@ -736,7 +737,7 @@ export function InteractiveDashboard({ initialPeriod, initialProvider, refreshSe
     let cancelled = false
     const controller = new AbortController()
     async function scan() {
-      const result = await loader.current.run(signal => withScanBudget(() => scanAndDetect(projects, getDateRange(period)), 200_000, AbortSignal.any([signal, controller.signal])))
+      const result = await loader.current.run(signal => withScanBudget(() => scanAndDetect(projects, getDateRange(period), undefined, { allowPartial: true }), 200_000, AbortSignal.any([signal, controller.signal])))
       if (!cancelled && result) setOptimizeResult(result)
     }
     void scan().catch(error => {
@@ -785,10 +786,10 @@ export function InteractiveDashboard({ initialPeriod, initialProvider, refreshSe
   }, [projectFilter, excludeFilter])
 
   useEffect(() => {
-    if (!refreshSeconds || refreshSeconds <= 0) return
+    if (!refreshSeconds || refreshSeconds <= 0 || view === 'optimize') return
     const id = setInterval(() => { if (!loader.current.busy && Date.now() >= retryAt.current) void reloadData(period, activeProvider) }, refreshSeconds * 1000)
     return () => clearInterval(id)
-  }, [refreshSeconds, period, activeProvider, reloadData])
+  }, [refreshSeconds, period, activeProvider, reloadData, view])
 
   const switchPeriod = useCallback((np: Period) => {
     if (np === period) return
@@ -874,7 +875,7 @@ export function InteractiveDashboard({ initialPeriod, initialProvider, refreshSe
               <Text dimColor>Your usage report is still available. Press b to go back, r to retry, or 1–5 for a shorter period.</Text>
             </Panel>
         : view === 'optimize' && optimizeResult
-          ? <OptimizeView findings={optimizeResult.findings} costRate={optimizeResult.costRate} projects={projects} label={PERIOD_LABELS[period]} width={dashWidth} healthScore={optimizeResult.healthScore} healthGrade={optimizeResult.healthGrade} />
+          ? <OptimizeView findings={optimizeResult.findings} costRate={optimizeResult.costRate} projects={projects} label={PERIOD_LABELS[period]} width={dashWidth} healthScore={optimizeResult.healthScore} healthGrade={optimizeResult.healthGrade} coverage={optimizeResult.coverage} />
           : view === 'optimize'
             ? <Panel title="Optimization" color={ORANGE} width={dashWidth}><Text>Scanning…</Text></Panel>
             : <DashboardContent projects={projects} period={period} columns={columns} activeProvider={activeProvider} budgets={projectBudgets} planUsage={planUsage} recovery={recovery} time={time} />}

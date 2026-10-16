@@ -13,6 +13,7 @@ import * as fsUtils from '../src/fs-utils.js'
 import { scanAndDetect, scanJsonlFile } from '../src/optimize.js'
 import { clearDiscoveryCache } from '../src/discovery-cache.js'
 import { withScanBudget } from '../src/resource-budget.js'
+import * as budget from '../src/resource-budget.js'
 
 const timestamp = '2026-10-15T12:00:00Z'
 const range = { start: new Date('2026-10-15T00:00:00Z'), end: new Date('2026-10-15T23:59:59Z') }
@@ -88,4 +89,23 @@ it('retains completed file evidence on a bounded failure so retry can finish', a
 it('honors cancellation even when no transcript needs reading', async () => {
   const controller = new AbortController(); controller.abort()
   await expect(withScanBudget(() => scanAndDetect([project(['active'])], range), 200_000, controller.signal)).rejects.toThrow('scan cancelled')
+})
+
+it('returns observed partial recommendations without caching an incomplete file or suggesting unused cleanup', async () => {
+  await file('selected/a.jsonl', entry('/app/node_modules/a').repeat(3))
+  const second = await file('selected/b.jsonl', entry('/app/node_modules/b').repeat(40))
+  for (let i = 0; i < 6; i++) await file(`.claude/agents/agent-${i}.md`, 'An agent definition')
+  const read = vi.spyOn(fsUtils, 'readSessionLines')
+  const original = budget.withScanSlice
+  const slice = vi.spyOn(budget, 'withScanSlice').mockImplementation(fn => original(fn,
+    { maxRecords: 20, maxBytes: 1024 ** 2, maxMs: 10_000 }))
+  const selected = [project(['a', 'b'])]
+  const partial = await scanAndDetect(selected, range, undefined, { allowPartial: true })
+  expect(partial.coverage).toEqual({ totalFiles: 2, completedFiles: 1, partial: true })
+  expect(partial.findings.some(f => f.title.includes('build/dependency'))).toBe(true)
+  expect(partial.findings.some(f => f.title.includes('never use'))).toBe(false)
+  slice.mockRestore()
+  const full = await scanAndDetect(selected, range)
+  expect(full.findings.some(f => f.title.includes('custom agent'))).toBe(true)
+  expect(read.mock.calls.filter(([path]) => path === second)).toHaveLength(2)
 })

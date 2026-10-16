@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.64 (unreleased)
+
+- Keep the full-report optimizer useful on large histories with bounded, explicitly partial recommendations from the newest selected sessions. Retain the original hard resource limits and leave interrupted files uncached.
+- Omit unused-configuration cleanup suggestions and overall health grades when analysis is partial. Pause automatic report refresh while reading optimizer results; manual retry and period changes remain available.
+
 ## 0.2.63 (unreleased)
 
 - Continue queued timing recovery automatically in small timing-only steps, so quiet logs finish without waiting for another usage event. Share one child-process slot, rest between steps, and stop when work is drained, blocked or cancelled.
