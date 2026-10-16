@@ -388,6 +388,7 @@ struct StarBanner: View {
 
 struct FooterBar: View {
     @Environment(AppStore.self) private var store
+    @Environment(FloatingQuotaPreferences.self) private var quotaPreferences
 
     var body: some View {
         HStack(spacing: 6) {
@@ -440,10 +441,24 @@ struct FooterBar: View {
             .fixedSize()
             .noFocusRing()
 
+            Menu {
+                Toggle("Floating quota display", isOn: Binding(
+                    get: { quotaPreferences.isEnabled }, set: { quotaPreferences.isEnabled = $0 }))
+                Button("Reset floating display position") { quotaPreferences.resetPosition() }
+            } label: {
+                Image(systemName: "slider.horizontal.3")
+                    .font(.system(size: 11, weight: .medium))
+            }
+            .menuStyle(.button)
+            .menuIndicator(.hidden)
+            .controlSize(.small)
+            .help("Display settings")
+            .accessibilityLabel("Display settings")
+
             Spacer()
 
             Button { openReport() } label: {
-                Label("Open Full Report", systemImage: "terminal")
+                Label("Report", systemImage: "terminal")
                     .font(.system(size: 11, weight: .semibold))
                     .labelStyle(.titleAndIcon)
             }

@@ -1,5 +1,6 @@
 import Foundation
 import Security
+import LocalAuthentication
 
 private let credentialsRelativePath = ".claude/.credentials.json"
 private let keychainService = "Claude Code-credentials"
@@ -31,14 +32,16 @@ enum SubscriptionError: Error, LocalizedError {
 }
 
 struct SubscriptionClient {
-    static func fetch() async throws -> SubscriptionUsage {
-        let creds = try loadCredentials()
+    static func fetch(allowKeychainPrompt: Bool = true) async throws -> SubscriptionUsage {
+        let creds = try loadCredentials(allowKeychainPrompt: allowKeychainPrompt)
 
         // Try the usage call with the existing token first. Only refresh on 401.
         do {
             let response = try await fetchUsage(token: creds.accessToken)
             return mapResponse(response, rawTier: creds.rateLimitTier)
         } catch SubscriptionError.usageFetchFailed(401, _) {
+            // Passive dock refreshes never rotate credentials owned by another app.
+            guard allowKeychainPrompt else { throw SubscriptionError.usageFetchFailed(401, nil) }
             guard let refreshToken = creds.refreshToken, !refreshToken.isEmpty else {
                 throw SubscriptionError.usageFetchFailed(401, "no refresh token available")
             }
@@ -50,28 +53,33 @@ struct SubscriptionClient {
 
     // MARK: - Credentials
 
-    private static func loadCredentials() throws -> StoredCredentials {
+    private static func loadCredentials(allowKeychainPrompt: Bool) throws -> StoredCredentials {
         // Try file first (silent, no popup). Falls back to Keychain (one-time macOS
         // permission prompt — click "Always Allow" and it never asks again).
         if let data = try readFileCredentials() {
             return try parseCredentials(data: sanitize(data))
         }
-        if let creds = try readKeychainCredentials() {
+        if let creds = try readKeychainCredentials(allowPrompt: allowKeychainPrompt) {
             return creds
         }
         throw SubscriptionError.noCredentials
     }
 
-    private static func readKeychainCredentials() throws -> StoredCredentials? {
-        let query: [String: Any] = [
+    private static func readKeychainCredentials(allowPrompt: Bool) throws -> StoredCredentials? {
+        var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: keychainService,
             kSecMatchLimit as String: kSecMatchLimitOne,
             kSecReturnData as String: true,
         ]
+        if !allowPrompt {
+            let context = LAContext()
+            context.interactionNotAllowed = true
+            query[kSecUseAuthenticationContext as String] = context
+        }
         var result: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
-        if status == errSecItemNotFound || status == errSecAuthFailed { return nil }
+        if status == errSecItemNotFound || status == errSecAuthFailed || status == errSecInteractionNotAllowed { return nil }
         guard status == errSecSuccess, let data = result as? Data else {
             NSLog("Exe Watcher: keychain query status=\(status)")
             return nil

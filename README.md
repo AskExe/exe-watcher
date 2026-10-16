@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/owl-header.png" alt="Exe Watcher banner" width="520" />
+  <img src="assets/owls/readme-owl.gif" alt="Watcher owl glancing and blinking above the EXE wordmark" width="280" />
 </p>
 
 <p align="center"><strong>The owl watching your AI team — spend, AI work time, and memory per employee, in your terminal and macOS menu bar.</strong></p>
@@ -29,7 +29,7 @@ npm install -g exe-watcher
 exe-watcher report
 ```
 
-This README describes the current source. AI time was added in 0.2.62 and automatic timing catch-up in 0.2.63; both are currently marked unreleased in the [changelog](CHANGELOG.md). Check [Releases](https://github.com/AskExe/exe-watcher/releases) for packaged app availability. To run the current CLI from source:
+This README describes the current source. AI time was added in 0.2.62 and automatic timing catch-up in 0.2.63; the floating display is added in 0.2.64. These are currently marked unreleased in the [changelog](CHANGELOG.md). Check [Releases](https://github.com/AskExe/exe-watcher/releases) for packaged app availability. To run the current CLI from source:
 
 ```bash
 git clone https://github.com/AskExe/exe-watcher.git
@@ -43,6 +43,7 @@ node dist/cli.js report
 
 ## Built for AI employee teams
 
+- **Floating display** — an optional on-screen Claude five-hour/weekly quota widget, with **You + AI ≈** (your estimated interaction time) and **AI Time** (work time added across all agents). Defaults to Today; switch to Week, Month or All Time. Enable it from the menu bar footer’s **Display settings → Floating quota display**. [Details](mac/README.md#floating-display).
 - **AI running time** — adds recorded work across agents, so parallel work is counted as agent-hours.
 - **Elapsed busy time** — merges overlapping runs to show how long at least one agent was working.
 - **Your time ≈** — estimates interaction from short reply-to-next-prompt gaps, with known subagents excluded. It is not an attention or productivity measurement.
@@ -64,7 +65,7 @@ Watcher started as an import of CodeBurn 0.8.9 on **April 24, 2026**. By this re
 | May–June | Improved accounting, period consistency, wake/recovery behavior, provider isolation, and model presentation. |
 | October 3 | Added bounded event-driven usage refreshes, retained-history recovery, and pricing/accounting corrections. |
 | October 14–15 | Added self-contained universal macOS packaging, the chosen owl artwork and animation, native Kimi usage, and clearer historical call coverage. |
-| October 16 | Added the three AI time totals, provider coverage, a separate resumable timing index, and automatic timing catch-up. |
+| October 16 | Added the three AI time totals, provider coverage, a resumable timing index, automatic timing catch-up, and the floating quota/time display. |
 
 ### Where Watcher differs today
 
@@ -78,7 +79,7 @@ Comparison checked against [CodeBurn 0.9.27, revision 9a40cc6](https://github.co
 
 Our subsequent work also includes accounting fixes, bounded history recovery, event-driven native refreshes, current API pricing, Kimi support, self-contained packaging, and Watcher's visual identity. These are documented improvements to our imported baseline; some capabilities also exist in today's CodeBurn. [Detailed evidence and adoption backlog](docs/codeburn-upstream-review.md) · [Changelog](CHANGELOG.md)
 
-CodeBurn's separate floating **Capacity Dock** and broader quota tools are recorded in our adoption backlog. They are not implemented in Watcher yet.
+Watcher’s new floating display takes inspiration from CodeBurn’s **Capacity Dock** and adds our two time totals. This unreleased implementation supports Claude quotas; Codex quotas and OS threshold notifications remain in the [adoption backlog](docs/codeburn-upstream-review.md).
 
 ---
 

@@ -216,6 +216,9 @@ enum OwlArtwork {
                 ctx.setBlendMode(.normal)
                 ellipse(38, 39, 4.8, 6)
                 ellipse(62, 39, 4.8, 6)
+                ctx.setBlendMode(.clear)
+                ellipse(38, 39, 1.8, 1.8)
+                ellipse(62, 39, 1.8, 1.8)
             }
             ctx.restoreGState()
             return true

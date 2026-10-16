@@ -15,7 +15,7 @@ const marks = wingStudy ? {
 } : originals;
 const selectedStyle = wingStudy ? selection.style : 'refined';
 let instance = 0;
-const svg = (name, tiny = false) => readFileSync(`${root}/assets/owls/${name}${tiny ? '-menubar' : ''}.svg`, 'utf8').replaceAll('face', `mask-${name}-${++instance}`).replace('role="img"', 'aria-hidden="true"').replace('viewBox=', 'class="owl" viewBox=');
+const svg = (name, tiny = false) => readFileSync(`${root}/assets/owls/${name}${tiny ? '-menubar' : ''}.svg`, 'utf8').replaceAll('face', `mask-${name}-${++instance}`).replaceAll('pupils', `pupils-${name}-${instance}`).replace('role="img"', 'aria-hidden="true"').replace('viewBox=', 'class="owl" viewBox=');
 const app = name => name === 'classic' ? '../../assets/owls/classic-app.png' : `../../assets/owls/${name}-app.svg`;
 const nav = name => `<div class="native-header"><div class="brand">${svg(name)}<div><b>WATCHER</b><small>by EXE</small></div></div><strong>$10,188.23</strong></div>`;
 const menu = name => `<div class="menu-bar"><span></span><span>Finder</span><span class="spacer"></span><span class="status">${svg(name, true)}<span>$142.68</span></span><span>Wed 14 Oct</span></div>`;

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.64 (unreleased)
+
+- Add an optional native floating display, inspired by CodeBurn's Capacity Dock, with Claude five-hour/weekly quota rings, reset timing, hover details, pinning, edge snapping and saved placement.
+- Show estimated You + AI interaction time and total AI work time across agents. Default to Today, with Week, Month and All Time controls independent of the main popover filters.
+- Share quota requests with Plan, keep stale/missing readings explicit, and use passive credential reads with rate-limit backoff. Preserve the existing bounded usage/timing workers.
+- Adopt the supplied owl's centered pupil cutouts across native artwork and app icons, and add a small looping owl GIF to the README with editable animation source.
+
 ## 0.2.63 (unreleased)
 
 - Continue queued timing recovery automatically in small timing-only steps, so quiet logs finish without waiting for another usage event. Share one child-process slot, rest between steps, and stop when work is drained, blocked or cancelled.

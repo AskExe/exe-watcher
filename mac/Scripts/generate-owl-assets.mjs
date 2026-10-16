@@ -12,7 +12,7 @@ const reviewMarks = { ...marks, ...Object.fromEntries(Object.entries(studies).ma
   ...marks.refined, ...study, cutout: [...marks.refined.cutout.slice(0, 2), study.beak],
 }])) };
 Object.assign(reviewMarks, Object.fromEntries(Object.entries(eyeStudies).map(([name, study]) => [name, {
-  ...reviewMarks.refined_tucked, ...study, cutout: [...study.eyes, reviewMarks.refined_tucked.beak],
+  ...reviewMarks.refined_tucked, ...study, pupilCutout: study.pupilCutout ?? [], cutout: [...study.eyes, reviewMarks.refined_tucked.beak],
 }])));
 if (!reviewMarks[selection.style] || reviewMarks[selection.style].label !== selection.label) {
   throw new Error('Selected owl must match an existing named variation.');
@@ -24,9 +24,15 @@ const svgShape = s => s[0] === 'ellipse'
 const svg = (name, appIcon = false, tiny = false) => {
   const m = reviewMarks[name];
   // Eye/wing cutouts stay transparent in the standalone mark and macOS template image.
-  const drawing = `<defs><mask id="face"><rect width="100" height="100" fill="white"/><g fill="black">${[...m.cutout, ...(tiny ? [] : m.detail)].map(svgShape).join('')}</g></mask></defs><g fill="#F5D76E"><g mask="url(#face)">${m.solid.map(svgShape).join('')}</g>${m.pupils.map(svgShape).join('')}</g>`;
+  const pupils = m.pupilCutout?.length
+    ? `<g mask="url(#pupils)">${m.pupils.map(svgShape).join('')}</g>`
+    : m.pupils.map(svgShape).join('');
+  const pupilMask = m.pupilCutout?.length
+    ? `<mask id="pupils"><rect width="100" height="100" fill="white"/><g fill="black">${m.pupilCutout.map(svgShape).join('')}</g></mask>`
+    : '';
+  const drawing = `<defs>${pupilMask}<mask id="face"><rect width="100" height="100" fill="white"/><g fill="black">${[...m.cutout, ...(tiny ? [] : m.detail)].map(svgShape).join('')}</g></mask></defs><g fill="#F5D76E"><g mask="url(#face)">${m.solid.map(svgShape).join('')}</g>${pupils}</g>`;
   return appIcon
-    ? `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><rect width="512" height="512" rx="112" fill="#1A1528"/><g transform="translate(90 55) scale(3.32)">${drawing}</g><text x="60" y="460" font-family="Futura, Avenir Next, Helvetica Neue, sans-serif" font-weight="bold" font-size="38" letter-spacing="7" fill="#F5D76E">EXE</text></svg>\n`
+    ? `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><rect width="512" height="512" rx="112" fill="${name === selection.style ? '#191527' : '#1A1528'}"/><g transform="translate(90 55) scale(3.32)">${drawing}</g><text x="60" y="460" font-family="Futura, Avenir Next, Helvetica Neue, sans-serif" font-weight="bold" font-size="38" letter-spacing="7" fill="#F5D76E">EXE</text></svg>\n`
     : `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="${m.label.replaceAll('&', '&amp;').replaceAll('"', '&quot;')}">${drawing}</svg>\n`;
 };
 const swiftShape = s => s[0] === 'ellipse'
@@ -49,6 +55,7 @@ for (const [name, m] of Object.entries(nativeMarks)) {
   source += `            case .${name}:\n                ${m.solid.map(swiftShape).join('\n                ')}\n                ctx.setBlendMode(.clear)\n                ${m.cutout.map(swiftShape).join('\n                ')}\n`;
   if(m.detail.length) source += `                if size >= 24 {\n                    ${m.detail.map(swiftShape).join('\n                    ')}\n                }\n`;
   source += `                ctx.setBlendMode(.normal)\n                ${m.pupils.map(swiftShape).join('\n                ')}\n`;
+  if (m.pupilCutout?.length) source += `                ctx.setBlendMode(.clear)\n                ${m.pupilCutout.map(swiftShape).join('\n                ')}\n`;
 }
 source += `            }\n            ctx.restoreGState()\n            return true\n        }\n        image.isTemplate = isTemplate\n        return image\n    }\n}\n`;
 writeFileSync(`${root}/mac/Sources/ExeWatcherMenubar/Theme/OwlArtwork.swift`, source);

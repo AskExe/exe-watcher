@@ -42,7 +42,7 @@ Upstream paths below refer to the pinned [reviewed revision](https://github.com/
 | --- | --- | --- | --- |
 | 1 | Multi-provider live quotas: `src/quota/index.ts`, `src/quota/codex.ts`, `docs/plans-and-quota.md` | Live Claude limits in the Swift app; no `quota` CLI or Codex quota reader | Add Claude/Codex quota JSON and menu bar rows with provider-reported windows, remaining %, reset time, and unavailable states. Verify missing/expired auth, account changes, 429s and malformed responses. |
 | 1 | Provenance and pacing: `src/quota.ts`, `src/quota/types.ts` | Claude projections and capacity estimation already exist | Share a quota model across surfaces; label measured/estimated/stale readings. Preserve missing values. Test expired resets, early-window noise, zero limits and clock skew; upstream suppresses exhaustion ETAs for windows at or below six hours. |
-| 1 | On-screen Capacity Dock: `mac/Sources/CodeBurnMenubar/CapacityDockController.swift`, `Views/CapacityDockView.swift`, `Data/CapacityDockPreferences.swift` | Quota display inside the menu bar popover; no floating quota panel | Add an optional native floating widget with five-hour/weekly rings, hover details, reset countdowns and persisted edge/position. Reuse the quota snapshot; test focus, Spaces/full-screen, multiple displays, stale data and accessibility. |
+| 1 | On-screen Capacity Dock: `mac/Sources/CodeBurnMenubar/CapacityDockController.swift`, `Views/CapacityDockView.swift`, `Data/CapacityDockPreferences.swift` | Implemented locally in `codex/watcher-floating-quota`: native Claude quota widget plus all-agent timing | Hover details, pin/dismiss, reset timing, all-edge placement and saved preferences are implemented. Codex quotas and OS threshold alerts remain candidates. See [implementation handoff](floating-quota-handoff.md). |
 | 2 | Quota threshold notifications: `mac/Sources/CodeBurnMenubar/Data/QuotaCrossing.swift`, `Data/EarlyQuotaResetMonitor.swift` | No quota-crossing notification monitor | Evaluate separate opt-in 80%/100% warnings and early-reset notices. Deduplicate per provider/window/reset cycle, persist across relaunches, honor notification permissions and use existing refreshes. |
 | 2 | Offline diagnostics and token-source audit: `docs/cli.md`, `src/doctor.ts`, `src/audit-report.ts` | Discovery/pricing warnings, partial-history and call-count indicators | Add bounded, read-only provider diagnostics showing paths, coverage and pricing source; fixture checks must distinguish missing data from zero. |
 | 2 | Local MCP tools: `src/mcp/server.ts`, `src/mcp/redact.ts`, `docs/mcp.md` | JSON CLI reports and Exe OS integration | Expose bounded usage/savings queries to our agents. Pseudonymize project names by default; include completeness warnings and no transcript/credential content. |
@@ -61,9 +61,11 @@ This is native macOS UI within CodeBurn's menu utility, not part of its Electron
 
 The persistent widget is distinct from actual macOS notification banners. Upstream also implements warnings at **80%** and **100%**, deduplicated per quota cycle, with persisted notification state. `CodeBurnApp.swift` invokes `quotaCrossingMonitor.record(windows: store.quotaWindows)` during refresh. [Threshold notification source](https://github.com/getagentseal/codeburn/blob/9a40cc603fcd194caca9daa8c5134a61ea7e0e2b/mac/Sources/CodeBurnMenubar/Data/QuotaCrossing.swift). Early-reset notices have a separate monitor.
 
-The earlier backlog grouped the dock with broader desktop/web work; this follow-up separates it as a priority-1 native feature. Watcher's current Claude five-hour display does not provide this on-screen surface.
+The earlier backlog grouped the dock with broader desktop/web work; this follow-up separates it as a priority-1 native feature. The follow-up implementation now provides a Watcher on-screen surface using the existing Claude reader; it has not been released.
 
 ### First implementation slice: optional floating quota widget
+
+Implemented on `codex/watcher-floating-quota` (unreleased). See [handoff and checks](floating-quota-handoff.md). This also adds You + AI interaction estimates and AI agent-hours with Today/Week/Month/All Time controls. The remaining bullets describe the broader migration boundary, including the future Codex adapter.
 
 - Add an optional Watcher floating widget using SwiftUI/AppKit, starting with the existing Claude quota data and adding Codex via the shared model. Include a show/hide setting, an expanded five-hour/weekly card, reset countdowns and saved position. This can stay within our native macOS app.
 - Reuse the current Claude reader and usage presentation. Existing code: `mac/Sources/ExeWatcherMenubar/Data/SubscriptionClient.swift`, `SubscriptionUsage.swift`, `Views/HeatmapSection.swift` and `src/providers/codex.ts`.
@@ -81,9 +83,9 @@ The initial import already preserved the original MIT license. Before this revie
 
 For future imports, inspect applicable third-party notices, not only CodeBurn's root MIT label. Current upstream includes separately licensed DeepSeek parsing code, vector assets and Lucide icons in `THIRD_PARTY_NOTICES.md`; copy relevant notices only when adopting those components. Preserve bundled dependency/runtime licenses too.
 
-## Handoff and stopping condition
+## Attribution review handoff (completed before implementation)
 
-Owned branch: `codex/codeburn-attribution-review`, started from Watcher `09daeac` and now including accepted main `d5789f6`. Scope: attribution, release notice inclusion, README refresh and this comparison/backlog. Feature adoption remains proposed. No merge into main, npm publication, app release or deployment is part of this review.
+Owned branch: `codex/codeburn-attribution-review`, started from Watcher `09daeac` and now including accepted main `d5789f6`. Scope: attribution, release notice inclusion, README refresh and this comparison/backlog. Feature adoption was proposed at that stage; the subsequent native implementation is recorded in the floating-display section and its linked handoff. No merge into main, npm publication, app release or deployment is part of this review.
 
 Required checks: exact imported-tree comparison; verbatim upstream notice comparison; shell syntax for both packaging scripts; CLI typecheck/build; inspect an actual npm tarball for `LICENSE` and `THIRD_PARTY_NOTICES.md`; and verify notice files copied by the macOS runtime bundler. Full signed/notarized packaging is a release check for a future authorized release. Finish when the evidence and backlog are saved and these local checks pass. Record results below.
 

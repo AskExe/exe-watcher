@@ -450,6 +450,9 @@ enum OwlRig {
         ctx.translateBy(x: CGFloat(pose.pupilX), y: CGFloat(pose.pupilY))
         ellipse(38, 39, 4.8, CGFloat(pose.pupilRY))
         ellipse(62, 39, 4.8, CGFloat(pose.pupilRY))
+        ctx.setBlendMode(.clear)
+        ellipse(38, 39, 1.8, CGFloat(pose.pupilRY) * 0.3)
+        ellipse(62, 39, 1.8, CGFloat(pose.pupilRY) * 0.3)
 
         ctx.endTransparencyLayer()
     }

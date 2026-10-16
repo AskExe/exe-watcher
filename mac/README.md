@@ -59,6 +59,21 @@ From 0.2.57, Watcher also reads native Kimi Code `sessions/**/wire.jsonl` files 
 
 From 0.2.59, historical token recovery marks missing call counts explicitly: `—` means unavailable and `18+` means at least 18 calls are recorded. Costs recovered from cumulative token counters no longer appear to have an exact zero or partial call count. The aggregate call count uses the same notation; counts backed by request logs remain unchanged.
 
+## Floating display
+
+Open the menu bar app, choose **Display settings** (the sliders button in the footer), then enable **Floating quota display**. It starts off. Drag the bottom handle to move it; it snaps to any screen edge or stays floating. Position, display, quota window and time period survive relaunches. Hover for details, click the quota ring to pin them, or use the close button to hide the display. Outside clicks dismiss the detail card; Escape does too when macOS already permits the key event.
+
+The ring shows Claude's reported five-hour or weekly utilization and reset timing. The time rows cover **all agents**, independent of the main popover's provider/period filters:
+
+- **You + AI ≈**: your estimated interaction time, inferred from short reply-to-next-prompt gaps. Overlapping interaction intervals count once. It does not measure attention.
+- **AI Time**: recorded runtime added across agents, so simultaneous runs accumulate agent-hours. Inferred durations get an approximation mark.
+
+Time defaults to **Today**; choose **Week** (last seven days), **Month** (calendar month), or **All Time** (retained timing history). Unavailable values show a dash and incomplete coverage is labeled in details.
+
+Quota requests are shared with Plan: passive reads at most every five minutes after success or fifteen after failure, with a fifteen-minute 429 cooldown. Passive refreshes never open Keychain prompts or rotate credentials. Use Connect/Refresh for an explicit connection attempt. This adds no periodic usage-log scan; timing reuses existing snapshots and the bounded timing-only recovery worker. Codex subscription quotas and OS threshold notifications remain future work.
+
+For a credential-free visual review, launch a developer build with `--floating-quota-preview`. Add `--quota-preview-card` to review only its expanded card, or `--quota-state=stale|disconnected|loading|expired` for failure states. This uses isolated preferences and sample quota/time data, bypassing normal usage, login-item and updater startup.
+
 ## Project layout
 
 ```
