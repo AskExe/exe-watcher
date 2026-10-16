@@ -24,6 +24,16 @@ Already present in the imported snapshot: the CLI/TUI; Claude, Codex, Cursor, Cu
 
 Subsequent Watcher work includes Exe branding and owl artwork; Exe OS agent/memory integration (`src/cli.ts`, `src/menubar-json.ts`); bounded scans and resumable historical accounting (`src/resource-budget.ts`, `src/history-build.ts`); event-driven refreshes (`mac/Sources/ExeWatcherMenubar/Data/RefreshCoalescer.swift`); provider discovery/recovery and pricing fixes; native Kimi support (`src/providers/kimi.ts`); self-contained macOS packaging; and AI time reporting (`src/time-tracking.ts`, `src/time-index.ts`). This identifies our development direction, not features claimed to be absent from today's upstream.
 
+### README comparison refresh, October 16
+
+The refreshed README dates the import prominently, documents 175 days of development as **nearly six months**, and records feature milestones from source history. Six calendar months will be reached on October 24, 2026. The README now brings AI time and employee memory/spend into its main feature sections, updates CLI/options and budget explanations, and identifies unreleased source functionality.
+
+Current upstream `main` was rechecked and remained `9a40cc6` (0.9.27). Its [`src/sessions-report.ts`](https://github.com/getagentseal/codeburn/blob/9a40cc603fcd194caca9daa8c5134a61ea7e0e2b/src/sessions-report.ts) includes session duration and [`src/codex-throughput.ts`](https://github.com/getagentseal/codeburn/blob/9a40cc603fcd194caca9daa8c5134a61ea7e0e2b/src/codex-throughput.ts) measures Codex generation timing. Its JSON/desktop views also include agent/subagent breakdowns. Accordingly, the README does not claim that all time tracking or agent-spend reporting is exclusive to Watcher.
+
+A targeted review across upstream `src/`, `mac/`, `app/` and `docs/` found no equivalent of Watcher's combined AI-running/elapsed-busy/interaction-time report, persistent employee-memory ledger, or Exe OS stats integration. The README labels these as findings for the reviewed revision. Local evidence is `src/time-tracking.ts`, `src/time-index.ts`, `src/menubar-json.ts`, `src/cli.ts`, and native `Views/AITimeSection.swift` / `Views/AgentsSection.swift`.
+
+Accepted Watcher main advanced to `d5789f6` during this refresh; it was merged into the review branch before editing. This includes the 0.2.63 timing catch-up changes. Earlier 0.2.62 package-check results below remain historical results for their recorded baseline; this follow-up changes documentation only.
+
 ## Adoption candidates, in proposed order
 
 Upstream paths below refer to the pinned [reviewed revision](https://github.com/getagentseal/codeburn/tree/9a40cc603fcd194caca9daa8c5134a61ea7e0e2b). Candidates require selective adaptation: the two projects' data models and refresh policies have diverged.
@@ -73,7 +83,7 @@ For future imports, inspect applicable third-party notices, not only CodeBurn's 
 
 ## Handoff and stopping condition
 
-Owned branch: `codex/codeburn-attribution-review`, based on Watcher `09daeac`. Scope: attribution, release notice inclusion and this comparison/backlog. Feature adoption remains proposed. No merge, npm publication, app release or deployment is part of this review.
+Owned branch: `codex/codeburn-attribution-review`, started from Watcher `09daeac` and now including accepted main `d5789f6`. Scope: attribution, release notice inclusion, README refresh and this comparison/backlog. Feature adoption remains proposed. No merge into main, npm publication, app release or deployment is part of this review.
 
 Required checks: exact imported-tree comparison; verbatim upstream notice comparison; shell syntax for both packaging scripts; CLI typecheck/build; inspect an actual npm tarball for `LICENSE` and `THIRD_PARTY_NOTICES.md`; and verify notice files copied by the macOS runtime bundler. Full signed/notarized packaging is a release check for a future authorized release. Finish when the evidence and backlog are saved and these local checks pass. Record results below.
 
@@ -89,3 +99,5 @@ Validation completed October 16, 2026:
 Detailed local check output was saved at `/tmp/exe-watcher-codeburn-review-20261016/` (`checks.json`, `npm-pack.json`, `bundle-runtime.log`, and the npm tarball). Temporary runtime bundles and review caches were removed after verification. Session token usage figures were unavailable.
 
 Website follow-up: verified the official Capacity Dock description/screenshot and pinned native panel/notification source; checked referenced paths against upstream's tree; reviewed the documentation-only diff and ran `git diff --check`. No runtime implementation changed, so the earlier build/package checks remain applicable.
+
+README refresh checks: eight local links and both internal navigation anchors resolve; code fences are balanced; the 175-day date calculation matches; five CLI help smoke checks cover report/time/Optimize/Compare/menu bar options; source review covers employee data and upstream timing distinctions. Changed-content and final integration review passed for the two documentation files, with accepted main included and `git diff --check` clean. No runtime code changed in this refresh. Token usage figures remain unavailable.
