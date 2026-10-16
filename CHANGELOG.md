@@ -2,6 +2,7 @@
 
 ## 0.2.64 (unreleased)
 
+- Suppress the blue macOS focus outline on AI-time details and retry controls, matching the other popover controls.
 - Add an optional native floating display, inspired by CodeBurn's Capacity Dock, with Claude five-hour/weekly quota rings, reset timing, hover details, pinning, edge snapping and saved placement.
 - Show estimated You + AI interaction time and total AI work time across agents. Default to Today, with Week, Month and All Time controls independent of the main popover filters.
 - Share quota requests with Plan, keep stale/missing readings explicit, and use passive credential reads with rate-limit backoff. Preserve the existing bounded usage/timing workers.

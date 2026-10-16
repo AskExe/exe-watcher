@@ -22,3 +22,5 @@ Checks completed October 16, 2026:
 No real credentials, provider requests, login registration or updater calls were used for UI QA. The user’s installed app was not replaced. Signed/notarized packaging, publication and merge into main remain release work. Session token counts unavailable. Latest animation service budget: 48% used / 52% remaining.
 
 Review a local build with `--floating-quota-preview` (sample data and isolated preferences), optionally `--quota-preview-card` and `--quota-state=stale|disconnected|loading|expired`. The fixture-only bundle is under `mac/.build/Watcher Floating Preview.app`; it is not a release build.
+
+Follow-up, October 16: the AI-time details button and timing Retry control now use the existing `noFocusRing()` styling after the user reported an automatic blue focus outline. Native rebuild and all four `TimePayloadTests` pass (`/tmp/watcher-time-focus-check.log`); diff/whitespace review passes. This follow-up has no separate real-window focus verification or release/install.
