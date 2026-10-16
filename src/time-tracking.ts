@@ -1,4 +1,5 @@
 import type { DateRange } from './types.js'
+import { createHash } from 'node:crypto'
 
 export const TIME_HISTORY_START = new Date('2025-07-01T00:00:00').getTime()
 export const TIME_PROVIDERS = ['claude', 'codex', 'cursor', 'cursor-agent', 'copilot', 'opencode', 'kimi', 'pi', 'omp']
@@ -20,9 +21,12 @@ export type TimeFile = {
   provider: string; project: string; identity: string; size: number; mtime: number; ctime: number
   offset: number; anchor: string; dbOffset?: number; discarding?: boolean; unavailable?: boolean; state: TimeState
   adapterVersion?: number
+  waitingForAppend?: boolean
 }
 export type TimeIndex = { version: 1; files: Record<string, TimeFile>; updatedAt: string; warnings: string[] }
+export type TimeRecoveryProgress = { runnableFiles: number; waitingFiles: number; pendingBytes: number; token: string }
 export type TimeReport = {
+  indexedAt: string; recovery: TimeRecoveryProgress
   since: string; through: string; aiRunningMs: number | null; elapsedBusyMs: number | null; userActiveMs: number | null
   estimatedAiMs: number; coverage: 'partial' | 'missing'; pendingFiles: number; indexedFiles: number
   firstRecordedAt: string | null; lastRecordedAt: string | null
@@ -219,7 +223,15 @@ export function summarizeTime(index: TimeIndex, range: DateRange, provider = 'al
   const all = [...agents.values()].flatMap(v => unionIntervals(v, range))
   const estimated = [...estimatedAgents.values()].flatMap(v => unionIntervals(v, range))
   const busy = unionIntervals(all, range), human = unionIntervals(user, range)
+  const pending = files.filter(f => f.offset < f.size || f.unavailable)
+  const waitingFiles = pending.filter(f => f.waitingForAppend && !f.unavailable).length
+  const recovery = {
+    runnableFiles: pending.length - waitingFiles, waitingFiles,
+    pendingBytes: pending.reduce((n, f) => n + Math.max(0, f.size - f.offset), 0),
+    token: createHash('sha256').update(files.map(f => `${f.identity}:${f.size}:${f.mtime}:${f.offset}:${f.dbOffset ?? 0}:${!!f.waitingForAppend}:${!!f.unavailable}`).join('|')).digest('hex'),
+  }
   return {
+    indexedAt: index.updatedAt, recovery,
     since: new Date(Math.max(TIME_HISTORY_START, range.start.getTime())).toISOString(), through: range.end.toISOString(),
     aiRunningMs: all.length ? sum(all) : null, elapsedBusyMs: busy.length ? sum(busy) : null,
     userActiveMs: human.length ? sum(human) : null, estimatedAiMs: sum(estimated),
@@ -235,7 +247,8 @@ export function summarizeTime(index: TimeIndex, range: DateRange, provider = 'al
       'Retained local records only, since July 1, 2025. Missing history is unknown, not zero. Run time can include tools and waiting.',
       'Your time is an estimate of reply-to-next-prompt gaps up to 5 minutes, merged across chats. Longer idle gaps and subagents are excluded; unidentified automation may be included. It does not measure attention.',
       ...(estimated.length ? ['Some AI time is inferred from prompt/response timestamps, limited to spans up to 30 minutes. Longer unmeasured gaps stay unknown.'] : []),
-      ...(pendingFiles ? ['Timing recovery is incomplete. Saved progress will resume on later updates; usage costs are unaffected.'] : []),
+      ...(recovery.runnableFiles ? ['Timing recovery is in progress. Queued timing work continues in bounded steps; usage costs are unaffected.'] : []),
+      ...(waitingFiles ? ['Some logs end mid-record. Their incomplete records remain unknown until more data is saved.'] : []),
       ...(files.some(f => [f.state, ...Object.values(f.state.children ?? {})].some(s => s.dropped)) ? ['Some timing records were incomplete, oversized or had unverified gaps; their missing time is unknown.'] : []),
       ...index.warnings,
     ],

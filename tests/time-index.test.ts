@@ -43,7 +43,7 @@ it('persists completed files on resource exhaustion and recovers on a later proc
 it('advances a manual large-file pass in small blocks while automatic work stays small', async () => {
   const body = (JSON.stringify({ type: 'padding', content: 'x'.repeat(100_000) }) + '\n').repeat(24) + event(60, 'task_complete', { duration_ms: 60_000 })
   const manual = join(dir, 'manual.jsonl'), automatic = join(dir, 'automatic.jsonl')
-  await writeFile(manual, body); await writeFile(automatic, body)
+  await writeFile(manual, body); await writeFile(automatic, body.repeat(8))
   const recovered = await refreshTimeIndex({ sources: [source(manual)], history: true })
   expect(duration(recovered)).toBe(60_000)
   expect(summarizeTime(recovered, range).pendingFiles).toBe(0)
@@ -51,10 +51,35 @@ it('advances a manual large-file pass in small blocks while automatic work stays
   expect(summarizeTime(small, range).pendingFiles).toBe(1)
 })
 
+it('drains a quiet backlog through bounded automatic continuation without new file writes', async () => {
+  const path = join(dir, 'quiet.jsonl')
+  const padding = (JSON.stringify({ type: 'padding', content: 'x'.repeat(100_000) }) + '\n').repeat(220)
+  await writeFile(path, padding + event(60, 'task_complete', { duration_ms: 60_000 }))
+  vi.stubEnv('EXE_WATCHER_MAX_SCAN_BYTES', String(4 * 1024 ** 2))
+  let previous = '', finished = false
+  for (let step = 0; step < 16; step++) {
+    const index = await refreshTimeIndex({ sources: [source(path)] })
+    const time = summarizeTime(index, range)
+    expect(time.recovery.token).not.toBe(previous)
+    previous = time.recovery.token
+    if (!time.recovery.runnableFiles) {
+      expect(time.aiRunningMs).toBe(60_000); finished = true; break
+    }
+  }
+  expect(finished).toBe(true)
+})
+
 it('waits for a partial final record and keeps timings when a source is later removed', async () => {
   const path = join(dir, 'partial.jsonl'), body = event(60, 'task_complete', { duration_ms: 60_000 })
   await writeFile(path, body.slice(0, -20))
-  expect(duration(await refreshTimeIndex({ sources: [source(path)], history: true }))).toBeNull()
+  const waiting = await refreshTimeIndex({ sources: [source(path)], history: true })
+  expect(duration(waiting)).toBeNull()
+  expect(summarizeTime(waiting, range).recovery).toMatchObject({ runnableFiles: 0, waitingFiles: 1 })
+  vi.stubEnv('EXE_WATCHER_MAX_SCAN_BYTES', '1')
+  const unchanged = await refreshTimeIndex({ sources: [source(path)] })
+  expect(unchanged.updatedAt).toBe(waiting.updatedAt)
+  expect(unchanged.warnings).toEqual([])
+  vi.unstubAllEnvs(); vi.stubEnv('EXE_WATCHER_CACHE_DIR', join(dir, 'cache'))
   await appendFile(path, body.slice(-20))
   expect(duration(await refreshTimeIndex({ sources: [source(path)], history: true }))).toBe(60_000)
   await rm(path)
