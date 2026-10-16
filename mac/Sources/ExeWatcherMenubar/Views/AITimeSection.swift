@@ -54,7 +54,7 @@ struct AITimeContent: View {
             .noFocusRing()
             if showDetails {
                 if let time {
-                    ForEach(time.providers) { provider in
+                    ForEach(time.providers.filter { TimeBlock.duration($0.aiRunningMs) != "Unknown" }) { provider in
                         HStack {
                             Text(provider.name)
                             Spacer()

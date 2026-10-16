@@ -12,7 +12,7 @@ enum QuotaProviderID: String, CaseIterable, Codable, Sendable, Identifiable {
     }
     var signInHelp: String {
         switch self {
-        case .claude: "Sign in to Claude Code, then refresh. macOS may ask for Keychain access on an explicit refresh."
+        case .claude: "Select Sign in with Claude to connect through Claude Code. Finish in your browser, then Refresh here. Already signed in? Refresh to allow Keychain access."
         case .codex: "Sign in to Codex with ChatGPT, run it once to refresh its session, then refresh here. API-key accounts do not expose a subscription allowance."
         case .kimi: "Sign in to Kimi Code and run it once to refresh its session, then refresh here."
         case .cursor: "Sign in to the Cursor app, then refresh here."

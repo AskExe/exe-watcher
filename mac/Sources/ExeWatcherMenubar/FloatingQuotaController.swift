@@ -176,7 +176,8 @@ final class FloatingQuotaController {
         let extraProviderRow = preferences.shownProviders.count > 3 ? 28 : 0
         let rowsHeight = min(4, model.windows.count) * 64
         let noticesHeight = (model.notes.isEmpty ? 0 : 40) + (model.failed ? 20 : 0)
-        let height = max(460 + extraProviderRow, 340 + extraProviderRow + rowsHeight + noticesHeight)
+        let connectionHeight = preferences.activeProvider == .claude && model.windows.isEmpty ? 540 : 460
+        let height = max(connectionHeight + extraProviderRow, 340 + extraProviderRow + rowsHeight + noticesHeight)
         let size = CGSize(width: 330, height: CGFloat(height))
         detail?.setFrame(FloatingQuotaPlacement.detailFrame(rail: rail.frame, size: size, screen: screen.visibleFrame, edge: preferences.position.edge), display: true)
         detail?.orderFrontRegardless()

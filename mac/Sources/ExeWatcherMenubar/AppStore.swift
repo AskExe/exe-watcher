@@ -70,6 +70,7 @@ final class AppStore {
     private(set) var timeRecoveryMessage: String?
     var subscription: SubscriptionUsage?
     var subscriptionError: String?
+    var subscriptionConnectionMessage: String?
     var subscriptionLoadState: SubscriptionLoadState = .idle
     private(set) var subscriptionNextRefreshAt: Date = .distantPast
     private(set) var subscriptionRateLimitedUntil: Date = .distantPast
@@ -657,7 +658,11 @@ final class AppStore {
     }
 
     func floatingQuota(for provider: QuotaProviderID) -> FloatingQuota {
-        if provider == .claude { return FloatingQuota(usage: subscription, state: subscriptionLoadState) }
+        if provider == .claude {
+            var quota = FloatingQuota(usage: subscription, state: subscriptionLoadState)
+            quota.message = subscriptionConnectionMessage
+            return quota
+        }
         return FloatingQuota(provider: provider, state: providerQuotaStates[provider] ?? ProviderQuotaState())
     }
 
@@ -748,18 +753,24 @@ final class AppStore {
             let usage = try await task.value
             subscription = usage
             subscriptionError = nil
+            subscriptionConnectionMessage = nil
             subscriptionLoadState = .loaded
             subscriptionNextRefreshAt = now().addingTimeInterval(5 * 60)
             if persistSubscriptionSnapshots { await captureSnapshots(for: usage) }
         } catch SubscriptionError.noCredentials {
             subscription = nil
             subscriptionError = nil
+            subscriptionConnectionMessage = nil
             subscriptionLoadState = .noCredentials
             subscriptionNextRefreshAt = now().addingTimeInterval(15 * 60)
         } catch {
             // A network failure leaves the last reading visible, explicitly stale.
             // Rejected/malformed credentials must not leave another account's reading visible.
+            subscriptionConnectionMessage = nil
             switch error {
+            case SubscriptionError.keychainAccessRequired:
+                subscription = nil
+                subscriptionConnectionMessage = "Select Refresh to allow Watcher to read your Claude Code sign-in from Keychain. You can also sign in again below."
             case SubscriptionError.credentialsInvalid,
                  SubscriptionError.usageFetchFailed(401, _),
                  SubscriptionError.usageFetchFailed(403, _),
@@ -767,12 +778,19 @@ final class AppStore {
                  SubscriptionError.refreshFailed(401, _),
                  SubscriptionError.refreshFailed(403, _):
                 subscription = nil
+                subscriptionConnectionMessage = "Your Claude sign-in needs to be renewed. Select Sign in with Claude, finish in your browser, then Refresh here."
             case SubscriptionError.usageFetchFailed(429, _), SubscriptionError.refreshFailed(429, _):
                 subscriptionRateLimitedUntil = now().addingTimeInterval(15 * 60)
             default: break
             }
             subscriptionError = String(describing: error)
-            subscriptionLoadState = .failed
+            if case SubscriptionError.keychainAccessRequired = error {
+                // Explicit Refresh must be able to request access immediately after
+                // a silent startup read; retain the passive fifteen-minute cooldown.
+                subscriptionLoadState = .noCredentials
+            } else {
+                subscriptionLoadState = .failed
+            }
             subscriptionNextRefreshAt = now().addingTimeInterval(15 * 60)
             NSLog("Exe Watcher: subscription fetch failed: \(error)")
         }

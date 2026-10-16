@@ -16,6 +16,7 @@ private let maxCredentialBytes = 64 * 1024
 enum SubscriptionError: Error, LocalizedError {
     case noCredentials
     case credentialsInvalid
+    case keychainAccessRequired
     case refreshFailed(Int, String?)
     case usageFetchFailed(Int, String?)
     case decodeFailed(Error)
@@ -24,6 +25,7 @@ enum SubscriptionError: Error, LocalizedError {
         switch self {
         case .noCredentials: "No Claude OAuth credentials found"
         case .credentialsInvalid: "Claude OAuth credentials malformed"
+        case .keychainAccessRequired: "Allow Watcher to read your Claude Code sign-in by selecting Refresh."
         case let .refreshFailed(code, body): "Token refresh failed (\(code))\(body.map { ": \($0)" } ?? "")"
         case let .usageFetchFailed(code, body): "Usage fetch failed (\(code))\(body.map { ": \($0)" } ?? "")"
         case let .decodeFailed(err): "Decode failed: \(err.localizedDescription)"
@@ -53,19 +55,23 @@ struct SubscriptionClient {
 
     // MARK: - Credentials
 
-    private static func loadCredentials(allowKeychainPrompt: Bool) throws -> StoredCredentials {
-        // Try file first (silent, no popup). Falls back to Keychain (one-time macOS
-        // permission prompt — click "Always Allow" and it never asks again).
-        if let data = try readFileCredentials() {
+    static func loadCredentials(
+        allowKeychainPrompt: Bool,
+        readKeychain: (Bool) throws -> Data? = readKeychainCredentials,
+        readFile: () throws -> Data? = readFileCredentials
+    ) throws -> StoredCredentials {
+        // Claude Code's macOS source of truth is Keychain. An older fallback file
+        // must not mask a renewed login or select another account when access is denied.
+        if let data = try readKeychain(allowKeychainPrompt) {
             return try parseCredentials(data: sanitize(data))
         }
-        if let creds = try readKeychainCredentials(allowPrompt: allowKeychainPrompt) {
-            return creds
+        if let data = try readFile() {
+            return try parseCredentials(data: sanitize(data))
         }
         throw SubscriptionError.noCredentials
     }
 
-    private static func readKeychainCredentials(allowPrompt: Bool) throws -> StoredCredentials? {
+    private static func readKeychainCredentials(allowPrompt: Bool) throws -> Data? {
         var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: keychainService,
@@ -79,12 +85,15 @@ struct SubscriptionClient {
         }
         var result: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
-        if status == errSecItemNotFound || status == errSecAuthFailed || status == errSecInteractionNotAllowed { return nil }
+        if status == errSecItemNotFound { return nil }
+        if status == errSecAuthFailed || status == errSecInteractionNotAllowed || status == errSecUserCanceled {
+            throw SubscriptionError.keychainAccessRequired
+        }
         guard status == errSecSuccess, let data = result as? Data else {
             NSLog("Exe Watcher: keychain query status=\(status)")
-            return nil
+            throw SubscriptionError.keychainAccessRequired
         }
-        return try parseCredentials(data: sanitize(data))
+        return data
     }
 
     private static func readFileCredentials() throws -> Data? {
@@ -116,6 +125,7 @@ struct SubscriptionClient {
     /// even a partial access token reaching Console.app is a leak, and the byte-window
     /// diagnostic that used to live here could overlap the `accessToken` field bytes.
     private static func parseCredentials(data: Data) throws -> StoredCredentials {
+        guard data.count <= maxCredentialBytes else { throw SubscriptionError.credentialsInvalid }
         do {
             let root = try JSONDecoder().decode(CredentialsRoot.self, from: data)
             guard let oauth = root.claudeAiOauth else { throw SubscriptionError.credentialsInvalid }
@@ -223,7 +233,7 @@ struct SubscriptionClient {
 
 // MARK: - Internal models
 
-private struct StoredCredentials {
+struct StoredCredentials {
     let accessToken: String
     let refreshToken: String?
     let expiresAt: Date?

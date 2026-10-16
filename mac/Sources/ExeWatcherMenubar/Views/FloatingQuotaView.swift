@@ -140,6 +140,9 @@ struct FloatingQuotaDetail: View {
     let hover: (Bool) -> Void
     let togglePin: () -> Void
     let refresh: () -> Void
+    @State private var openingClaudeLogin = false
+    @State private var claudeLoginOpened = false
+    @State private var claudeLoginFailed = false
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 30)) { clock in
@@ -201,6 +204,27 @@ struct FloatingQuotaDetail: View {
                             .font(.system(size: 13, weight: .medium))
                         Text(quota.message ?? (quota.isConnected ? "Any additional allowance details reported by the provider appear below." : quota.providerID.signInHelp))
                             .font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                        if quota.providerID == .claude && !quota.isLoading && !quota.isConnected {
+                            Button {
+                                openingClaudeLogin = true
+                                Task {
+                                    claudeLoginOpened = await TerminalLauncher.openClaudeLogin()
+                                    claudeLoginFailed = !claudeLoginOpened
+                                    openingClaudeLogin = false
+                                }
+                            } label: {
+                                Label(openingClaudeLogin ? "Opening Claude…" : "Sign in with Claude", systemImage: "person.crop.circle.badge.checkmark")
+                                    .font(.system(size: 11, weight: .semibold))
+                            }.goldButton().disabled(preview || openingClaudeLogin)
+                            if claudeLoginOpened {
+                                Text("Finish signing in in your browser, then select Refresh below.")
+                                    .font(.system(size: 10)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                            }
+                            if claudeLoginFailed {
+                                Text("Could not open Terminal. Run claude auth login in your terminal, then Refresh here.")
+                                    .font(.system(size: 10)).foregroundStyle(Theme.semanticWarning).textSelection(.enabled)
+                            }
+                        }
                     }.padding(.vertical, 4)
                 } else {
                     ScrollView(.vertical) {
