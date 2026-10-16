@@ -1,4 +1,8 @@
 {
   "style": "refined_tucked",
-  "label": "01A · Folded wings"
+  "label": "01A · Folded wings",
+  "pupilDetails": {
+    "blackOnYellow": { "color": "#FFFFFF", "offsetX": -1.4, "offsetY": -2, "radius": 1.7 },
+    "yellowOnBlack": { "color": "#191527", "offsetX": 0, "offsetY": 0, "radius": 1.8 }
+  }
 }

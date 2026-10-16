@@ -21,10 +21,16 @@ const nativeMarks = { ...marks, [selection.style]: reviewMarks[selection.style] 
 const svgShape = s => s[0] === 'ellipse'
   ? `<ellipse cx="${s[1]}" cy="${s[2]}" rx="${s[3]}" ry="${s[4]}"/>`
   : `<path d="${s.map(c => c.join(' ')).join(' ')}"/>`;
-const svg = (name, appIcon = false, tiny = false) => {
+const pupilDetails = (name, palette) => {
+  if (name !== selection.style) return '';
+  const d = selection.pupilDetails[palette];
+  return reviewMarks[name].pupils.map(p => `<circle cx="${p[1] + d.offsetX}" cy="${p[2] + d.offsetY}" r="${d.radius}" fill="${d.color}"/>`).join('');
+};
+const svg = (name, appIcon = false, tiny = false, palette = 'yellowOnBlack') => {
   const m = reviewMarks[name];
+  const foreground = palette === 'blackOnYellow' ? '#191527' : '#F5D76E';
   // Eye/wing cutouts stay transparent in the standalone mark and macOS template image.
-  const drawing = `<defs><mask id="face"><rect width="100" height="100" fill="white"/><g fill="black">${[...m.cutout, ...(tiny ? [] : m.detail)].map(svgShape).join('')}</g></mask></defs><g fill="#F5D76E"><g mask="url(#face)">${m.solid.map(svgShape).join('')}</g>${m.pupils.map(svgShape).join('')}</g>`;
+  const drawing = `<defs><mask id="face"><rect width="100" height="100" fill="white"/><g fill="black">${[...m.cutout, ...(tiny ? [] : m.detail)].map(svgShape).join('')}</g></mask></defs><g fill="${foreground}"><g mask="url(#face)">${m.solid.map(svgShape).join('')}</g>${m.pupils.map(svgShape).join('')}${pupilDetails(name, palette)}</g>`;
   return appIcon
     ? `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><rect width="512" height="512" rx="112" fill="#1A1528"/><g transform="translate(90 55) scale(3.32)">${drawing}</g><text x="60" y="460" font-family="Futura, Avenir Next, Helvetica Neue, sans-serif" font-weight="bold" font-size="38" letter-spacing="7" fill="#F5D76E">EXE</text></svg>\n`
     : `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="${m.label.replaceAll('&', '&amp;').replaceAll('"', '&quot;')}">${drawing}</svg>\n`;
@@ -49,8 +55,16 @@ for (const [name, m] of Object.entries(nativeMarks)) {
   source += `            case .${name}:\n                ${m.solid.map(swiftShape).join('\n                ')}\n                ctx.setBlendMode(.clear)\n                ${m.cutout.map(swiftShape).join('\n                ')}\n`;
   if(m.detail.length) source += `                if size >= 24 {\n                    ${m.detail.map(swiftShape).join('\n                    ')}\n                }\n`;
   source += `                ctx.setBlendMode(.normal)\n                ${m.pupils.map(swiftShape).join('\n                ')}\n`;
+  if (name === selection.style) source += `                OwlPupilDetails.draw(in: ctx, color: color.cgColor, isTemplate: isTemplate)\n`;
 }
 source += `            }\n            ctx.restoreGState()\n            return true\n        }\n        image.isTemplate = isTemplate\n        return image\n    }\n}\n`;
+const detail = selection.pupilDetails;
+const swiftDetail = field => `isDark ? ${detail.blackOnYellow[field]} : ${detail.yellowOnBlack[field]}`;
+const swiftColor = hex => {
+  const [red, green, blue] = hex.match(/[a-f\d]{2}/gi).map(v => parseInt(v, 16) / 255);
+  return `CGColor(srgbRed: ${red}, green: ${green}, blue: ${blue}, alpha: 1)`;
+};
+source += `\n// The approved contrast details follow the oval pupils, including during blinks.\nenum OwlPupilDetails {\n    static func draw(in ctx: CGContext, color: CGColor, verticalScale: CGFloat = 1, isTemplate: Bool = false) {\n        guard verticalScale > 0 else { return }\n        let rgb = NSColor(cgColor: color)?.usingColorSpace(.deviceRGB) ?? .black\n        let isDark = !isTemplate && rgb.redComponent * 0.2126 + rgb.greenComponent * 0.7152 + rgb.blueComponent * 0.0722 < 0.5\n        let dx: CGFloat = ${swiftDetail('offsetX')}\n        let dy: CGFloat = (${swiftDetail('offsetY')}) * verticalScale\n        let radius: CGFloat = ${swiftDetail('radius')}\n        ctx.saveGState()\n        defer { ctx.restoreGState() }\n        if isTemplate { ctx.setBlendMode(.clear) }\n        ctx.setFillColor(isDark ? ${swiftColor(detail.blackOnYellow.color)} : ${swiftColor(detail.yellowOnBlack.color)})\n        for x in [CGFloat(38), 62] {\n            ctx.fillEllipse(in: CGRect(x: x + dx - radius, y: 39 + dy - radius * verticalScale, width: radius * 2, height: radius * 2 * verticalScale))\n        }\n    }\n}\n`;
 writeFileSync(`${root}/mac/Sources/ExeWatcherMenubar/Theme/OwlArtwork.swift`, source);
 for (const name of [...Object.keys(studies), ...Object.keys(eyeStudies)]) {
   writeFileSync(`${root}/assets/owls/${name}.svg`, svg(name));
@@ -60,6 +74,7 @@ for (const name of [...Object.keys(studies), ...Object.keys(eyeStudies)]) {
 writeFileSync(`${root}/assets/owls/selected.svg`, svg(selection.style));
 writeFileSync(`${root}/assets/owls/selected-menubar.svg`, svg(selection.style, false, true));
 writeFileSync(`${root}/assets/owls/selected-app.svg`, svg(selection.style, true));
+writeFileSync(`${root}/assets/owls/selected-black-on-yellow.svg`, svg(selection.style, false, false, 'blackOnYellow'));
 const mark = svg(selection.style).replace(/^<svg[^>]*>/, '').replace(/<\/svg>\s*$/, '');
 writeFileSync(`${root}/assets/owl-header.svg`, `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 200" width="800" height="200">\n  <rect width="800" height="200" rx="16" fill="#1A1528"/>\n  <g transform="translate(341.2500, 40.3687) scale(1.175)">${mark}</g>\n  <text x="28" y="184" font-family="Futura, Avenir Next, Helvetica Neue, sans-serif" font-weight="bold" font-size="18" letter-spacing="4" fill="#F5D76E">EXE</text>\n</svg>\n`);
 console.log('Generated owl artwork, three wing/beak variations and three eye variations.');

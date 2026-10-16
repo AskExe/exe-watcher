@@ -322,6 +322,13 @@ private struct Bitmap {
         return Double(rgba[(y * width + x) * 4 + 3]) / 255
     }
 
+    func pixel(unitX: Double, unitY: Double) -> [UInt8] {
+        let x = min(width - 1, Int(unitX / 100 * Double(width)))
+        let y = min(height - 1, Int(unitY / 100 * Double(height)))
+        let offset = (y * width + x) * 4
+        return Array(rgba[offset..<(offset + 4)])
+    }
+
     /// Centroid and count of transparent pixels inside a unit-space box.
     func holes(x: ClosedRange<Double>, y: ClosedRange<Double>) -> (x: Double, y: Double, count: Int) {
         var sx = 0.0, sy = 0.0, n = 0
@@ -396,6 +403,31 @@ private let beakBoxY = 52.5...62.0
 
 @Suite("Owl rig rendering", .serialized)
 struct OwlRigRenderingTests {
+    @Test(arguments: [false, true])
+    func approvedPupilDetailsStayContrasting(isDarkOwl: Bool) {
+        let color = isDarkOwl ? NSColor.black : NSColor(Theme.brandAccent)
+        let x = isDarkOwl ? 36.6 : 38
+        let y = isDarkOwl ? 37.0 : 39
+        let images = [
+            OwlArtwork.image(size: 100, style: .refined_tucked, color: color, isTemplate: false),
+            OwlRig.image(size: 100, pose: .neutral, color: color, isTemplate: false),
+        ]
+        for image in images {
+            #expect(!image.isTemplate)
+            // A white backdrop catches transparent dots that disappear in a light menu bar.
+            let bitmap = Bitmap(renderAppKit(image, points: 100, scale: 3, background: .white))
+            for eyeX in [x, x + 24] {
+                let pupil = bitmap.pixel(unitX: eyeX, unitY: y)
+                #expect(pupil[3] == 255)
+                if isDarkOwl {
+                    #expect(pupil.prefix(3).allSatisfy { $0 > 245 })
+                } else {
+                    #expect(pupil.prefix(3).allSatisfy { $0 < 45 })
+                }
+            }
+        }
+    }
+
     @Test(arguments: OwlRenderer.allCases)
     func earsAreAtTheTop(renderer: OwlRenderer) {
         let bitmap = Bitmap(render(renderer, pose: .neutral, points: 100, scale: 2))
