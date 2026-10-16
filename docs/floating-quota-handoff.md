@@ -2,6 +2,8 @@
 
 Branch: `codex/watcher-floating-quota`. Base: `1d310d1` (attribution/README work, including accepted main `d5789f6`). Worktree: `/Users/exeai/.codex/worktrees/watcher-floating-quota/exe-watcher`. Primary checkout and earlier attribution worktree remain unchanged.
 
+Implementation commit: `21036f7`.
+
 Deliverable complete locally (unreleased): optional native Watcher floating display with Claude five-hour/weekly quota, reset timing, hover expansion, pin/dismiss, all-edge snapping, free placement and saved preferences. You + AI ≈ shows estimated human interaction time; AI Time adds agent runtime, including parallel agents. Time defaults to Today, with Week (last seven days), Month (calendar month) and All Time (retained history). These totals cover all agents independently of the main popover selection. Unknown values remain dashes, partial timing is labeled, and inferred AI time has an approximation mark.
 
 Enable through the main menu bar footer’s **Display settings → Floating quota display**. The feature starts disabled. The native panels cannot take keyboard focus, use floating level below system notifications, and join Spaces/full-screen. Drag the visible bottom grip; top/bottom placements use a horizontal layout. Position, display, quota horizon and time period persist.
