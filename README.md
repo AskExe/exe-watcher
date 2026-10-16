@@ -364,27 +364,17 @@ tests/              CLI data integrity tests (Vitest)
 
 ## Origin & attribution
 
-Watcher is forked from [codeburn](https://github.com/getagentseal/codeburn) by [AgentSeal](https://github.com/getagentseal) (MIT license). We forked rather than contributed upstream because our roadmap diverges significantly:
+Watcher is an independently developed derivative of [CodeBurn](https://github.com/getagentseal/codeburn) by [AgentSeal](https://github.com/getagentseal), used under the MIT license. It began as a source import into a new repository on **April 24, 2026 at 14:40 Asia/Makassar (06:40 UTC)**, initially named exe-fuelbar. It is a fork in the development sense; GitHub does not list this repository as a fork.
 
-**What we changed:**
-- Rebranded to Watcher with the Exe Foundry Bold design system
-- 8 provider support (added Cursor Agent, Copilot, OMP, Pi, OpenCode)
-- Native macOS menubar app with multi-period views, provider tabs, project spend, and subscription tracking
-- Exe OS integration — per-agent spend and memory tracking for AI employee teams
-- Daily cache system (v8) with atomic writes and cold-start/progressive full-history backfill
-- Capacity estimation from usage patterns
-- Multi-currency support (17 currencies)
-- Test coverage across CLI, Swift state, resource limits, and UI smoke layers
-- Consolidated activity categories from 13 to 6
-- Fixed double-counting bugs in the menubar JSON pipeline
-- Performance: 7-day and 30-day queries from 2-5s down to ~1s via daily cache
+The [initial import](https://github.com/AskExe/exe-watcher/commit/8545e35633958ab3fd12600c1ac89c528c867904) contains 112 files identical to the corresponding files in [CodeBurn commit d3c4de0](https://github.com/getagentseal/codeburn/commit/d3c4de03759f0ded38052874fa829709d27fe7c6), whose package version was 0.8.9. Upstream's commit history was not imported.
 
-**Why we forked:**
-- Full control over the data pipeline to integrate with exe-os (our AI employee operating system)
-- Our classification model, provider support, and UI direction serve a different user base (AI-first teams running multi-agent workflows)
-- MIT license allows this — we give full credit to AgentSeal for the foundation
+**The inherited foundation** includes the CLI/TUI, eight provider integrations, the native macOS menu bar app, subscription tracking (including Claude's five-hour and weekly windows), capacity estimation, currency support, model comparisons, and optimization analysis. These were already present at import and belong in CodeBurn's credit.
 
-Thank you to AgentSeal for building the original. If you want a clean cost tracker without exe-os integration, [codeburn](https://github.com/getagentseal/codeburn) is excellent.
+**Watcher's subsequent work** includes its Exe branding and owl artwork, Exe OS agent/memory integration, bounded event-driven refreshes and history recovery, accounting and pricing corrections, native Kimi Code support, self-contained macOS packaging, and AI running/elapsed/interaction time reporting. The roadmap serves our AI employee teams and multi-agent workflows.
+
+AgentSeal's original copyright notice and the full MIT terms are preserved in [LICENSE](LICENSE) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). The notices ship with the npm package and packaged macOS app. See the [dated upstream comparison and adoption backlog](docs/codeburn-upstream-review.md) for evidence and features to evaluate.
+
+Thank you to AgentSeal and CodeBurn's contributors for the foundation.
 
 ---
 
@@ -402,7 +392,7 @@ Thank you to AgentSeal for building the original. If you want a clean cost track
 
 ## License
 
-MIT
+MIT. Includes CodeBurn by AgentSeal; see [LICENSE](LICENSE) and [third-party notices](THIRD_PARTY_NOTICES.md).
 
 ---
 

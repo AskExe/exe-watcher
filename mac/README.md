@@ -91,7 +91,7 @@ npm ci
 mac/Scripts/package-app.sh v0.2.55
 ```
 
-This builds a universal app, updater ZIP, drag-to-install DMG and `SHA256SUMS.txt` in `mac/.build/dist`. It freezes the CLI's production dependencies and a checksum-pinned universal Node 22.23.3 runtime. Only explicit build outputs/manifests are copied; local credentials and configuration are excluded. The original Node license and dependency licenses ship with the app.
+This builds a universal app, updater ZIP, drag-to-install DMG and `SHA256SUMS.txt` in `mac/.build/dist`. It freezes the CLI's production dependencies and a checksum-pinned universal Node 22.23.3 runtime. Only explicit build outputs/manifests are copied; local credentials and configuration are excluded. Watcher's `LICENSE` and `THIRD_PARTY_NOTICES.md`, including CodeBurn's original MIT notice, ship at `Contents/Resources/cli/`. The original Node license and dependency licenses also ship with the app.
 
 Local builds default to ad-hoc signing for development. To produce a public download:
 

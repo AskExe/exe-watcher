@@ -101,7 +101,7 @@ cat > "${BUNDLE}/Contents/Info.plist" <<PLIST
     <key>NSHighResolutionCapable</key>
     <true/>
     <key>NSHumanReadableCopyright</key>
-    <string>© Exe AI</string>
+    <string>© 2026 Exe AI. Includes CodeBurn © 2026 AgentSeal (MIT).</string>
 </dict>
 </plist>
 PLIST
@@ -172,6 +172,9 @@ Drag Watcher by EXE into Applications, then open it.
 Watcher lives in your menu bar. Click the owl to see your local AI coding usage.
 Node and the Watcher CLI are included. No npm install or account is required.
 Costs are API-equivalent estimates, not subscription invoices.
+
+Includes code from CodeBurn by AgentSeal (MIT).
+License and attribution notices: Watcher by EXE.app/Contents/Resources/cli/
 
 Support: https://github.com/AskExe/exe-watcher/issues
 README
