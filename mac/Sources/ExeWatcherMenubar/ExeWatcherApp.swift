@@ -89,6 +89,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         // Isolated visual review: no usage scans, login registration, credential reads or
         // updater requests. Only the real floating-panel implementation uses sample data.
         if FloatingQuotaPreview.isEnabled {
+            if FloatingQuotaPreview.showTimePreviewIfRequested() { return }
             FloatingQuotaPreview.configure(store: store, preferences: quotaPreferences)
             startFloatingQuota()
             return

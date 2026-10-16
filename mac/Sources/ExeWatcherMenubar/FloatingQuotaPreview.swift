@@ -1,8 +1,38 @@
 import Foundation
+import AppKit
+import SwiftUI
 
 /// Developer-only fixture launch. It never reads credentials or contacts a provider.
 @MainActor
 enum FloatingQuotaPreview {
+    private static var timePreviewWindow: NSWindow?
+    /// Inspect the real timing disclosure in a key window without usage scans or credentials.
+    static func showTimePreviewIfRequested() -> Bool {
+        guard ProcessInfo.processInfo.arguments.contains("--ai-time-preview") else { return false }
+        let rows: [(String, Int, Int, Double?)] = [
+            ("claude", 1253, 7, 84_540_000), ("codex", 5759, 10, 16_920_000),
+            ("cursor", 1, 0, nil), ("cursor-agent", 0, 0, nil), ("copilot", 0, 0, nil),
+            ("opencode", 389, 0, nil), ("kimi", 142, 10, 10_020_000),
+            ("pi", 0, 0, nil), ("omp", 0, 0, nil),
+        ]
+        let time = TimeBlock(since: "2026-10-16T00:00:00Z", through: "2026-10-16T23:59:59Z",
+            aiRunningMs: 111_480_000, elapsedBusyMs: 30_000_000, userActiveMs: 900_000,
+            estimatedAiMs: 1, coverage: "partial", pendingFiles: 0, indexedFiles: 27,
+            firstRecordedAt: nil, lastRecordedAt: nil,
+            providers: rows.map { TimeProviderBlock(name: $0.0, files: $0.1, timedFiles: $0.2, aiRunningMs: $0.3, status: "partial") }, notes: [])
+        let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 400, height: 330),
+            styleMask: [.titled, .closable], backing: .buffered, defer: false)
+        window.title = "Watcher AI time preview"
+        window.isReleasedWhenClosed = false
+        window.contentViewController = NSHostingController(rootView: AITimeContent(time: time)
+            .frame(width: 400, height: 330, alignment: .topLeading)
+            .background(Theme.brandPurpleDark).preferredColorScheme(.dark))
+        timePreviewWindow = window
+        window.center()
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        return true
+    }
     static var isEnabled: Bool { ProcessInfo.processInfo.arguments.contains("--floating-quota-preview") }
     static var defaults: UserDefaults {
         isEnabled ? UserDefaults(suiteName: "com.askexe.watcher.floating-quota-preview")! : .standard
