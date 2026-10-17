@@ -27,11 +27,18 @@ export function verifyRelease(release, version, sourceTree, buildInfo) {
   }
 }
 
-function releaseMetadata(tag) {
-  try { return JSON.parse(run('gh', ['api', `repos/${repository}/releases/tags/${tag}`], { stdio: ['ignore', 'pipe', 'pipe'] })); }
+export function releaseMetadata(tag, invoke = run) {
+  const options = { stdio: ['ignore', 'pipe', 'pipe'] };
+  try { return JSON.parse(invoke('gh', ['api', `repos/${repository}/releases/tags/${tag}`], options)); }
   catch (error) {
-    if (String(error.stderr).includes('HTTP 404')) return null;
-    throw Error('Could not read GitHub release metadata. Check gh authentication/network access.');
+    if (!String(error.stderr).includes('HTTP 404')) throw Error('Could not read GitHub release metadata. Check gh authentication/network access.');
+    // The tag endpoint exposes published releases. Include authenticated drafts
+    // so a new upload can be verified and interrupted uploads cannot be replaced.
+    const pages = JSON.parse(invoke('gh', ['api', '--paginate', '--slurp', `repos/${repository}/releases`],
+      { ...options, maxBuffer: 32 * 1024 * 1024 }));
+    const matches = pages.flat().filter(release => release.tag_name === tag);
+    if (matches.length > 1) throw Error('Multiple releases use this tag. Inspect them before publishing.');
+    return matches[0] ?? null;
   }
 }
 
