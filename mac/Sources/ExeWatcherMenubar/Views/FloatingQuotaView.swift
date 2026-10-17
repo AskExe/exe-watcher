@@ -21,6 +21,19 @@ final class FloatingQuotaInteraction {
     var selectedTimeMetric: FloatingTimeMetric?
 }
 
+private struct FloatingOwl: View {
+    let size: CGFloat
+    @State private var presence = OwlPresence()
+
+    var body: some View {
+        AnimatedOwl(size: size)
+            .environment(presence)
+            .onAppear { presence.popoverWillShow() }
+            .onDisappear { presence.popoverDidClose() }
+            .accessibilityHidden(true)
+    }
+}
+
 struct FloatingQuotaRail: View {
     let store: AppStore
     let preferences: FloatingQuotaPreferences
@@ -34,19 +47,22 @@ struct FloatingQuotaRail: View {
     var body: some View {
         TimelineView(.periodic(from: .now, by: 30)) { clock in
             let horizontal = preferences.position.edge?.horizontal ?? preferences.position.horizontal
-            VStack(spacing: 6) {
-                HStack(spacing: 5) {
-                    OwlIcon(size: 11).foregroundStyle(Theme.brandAccent)
+            VStack(spacing: 5) {
+                HStack(alignment: .center, spacing: 5) {
+                    FloatingOwl(size: 12)
                     Text(preview ? "PREVIEW" : "WATCHER").font(.system(size: 7, weight: .bold)).tracking(0.8)
                         .foregroundStyle(.secondary)
+                        .alignmentGuide(VerticalAlignment.center) { dimensions in
+                            dimensions[.firstTextBaseline] - NSFont.systemFont(ofSize: 7, weight: .bold).capHeight / 2
+                        }
                     if interaction.isPinned { Image(systemName: "pin.fill").font(.system(size: 8)).foregroundStyle(Theme.brandAccent) }
                     Spacer(minLength: 0)
                     FloatingProviderMenu(preferences: preferences)
-                }
+                }.frame(height: 14)
                 if horizontal {
                     HStack(spacing: 8) {
                         ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 6) { ForEach(preferences.orderedProviders) { tile($0, now: clock.date) } }
+                            HStack(spacing: 4) { ForEach(preferences.orderedProviders) { tile($0, now: clock.date) } }
                         }.frame(minWidth: 0)
                         Rectangle().fill(.white.opacity(0.1)).frame(width: 1, height: 44)
                         timeSummary.frame(width: 126)
@@ -109,8 +125,9 @@ struct FloatingQuotaRail: View {
                 else if !interaction.isPinned { togglePin() }
             } else { togglePin() }
         } label: {
-            VStack(spacing: 2) {
-                Text(provider.name).font(.system(size: 8, weight: .semibold))
+            VStack(spacing: 1) {
+                Text(provider.name).font(.system(size: 8.5, weight: .semibold))
+                    .lineLimit(1).minimumScaleFactor(0.8)
                     .foregroundStyle(preferences.activeProvider == provider ? Theme.brandAccent : .secondary)
                 ZStack {
                     Circle().stroke(.white.opacity(0.09), lineWidth: 3)
@@ -120,19 +137,24 @@ struct FloatingQuotaRail: View {
                             .rotationEffect(.degrees(-90)).opacity(stale ? 0.4 : 1)
                     }
                     VStack(spacing: 0) {
-                        Text(value.map { "\(Int($0.rounded()))%" } ?? "—")
-                            .font(.system(size: 13, weight: .semibold, design: .rounded)).monospacedDigit()
-                            .lineLimit(1).minimumScaleFactor(0.8)
+                        HStack(alignment: .firstTextBaseline, spacing: 0.5) {
+                            Text(value.map { "\(Int($0.rounded()))" } ?? "—")
+                                .font(.system(size: 16, weight: .semibold, design: .rounded)).monospacedDigit()
+                            if value != nil {
+                                Text("%").font(.system(size: 8, weight: .medium, design: .rounded))
+                                    .foregroundStyle(.secondary)
+                            }
+                        }.lineLimit(1).minimumScaleFactor(0.8)
                         Text(value == nil ? (quota.isLoading ? "loading" : "quota") : "left")
                             .font(.system(size: 6, weight: .medium)).foregroundStyle(.secondary)
                     }
                     if stale || expired {
-                        Circle().fill(Theme.semanticWarning).frame(width: 4, height: 4).offset(x: 13, y: -13)
+                        Circle().fill(Theme.semanticWarning).frame(width: 4, height: 4).offset(x: 15, y: -15)
                     }
-                }.frame(width: 34, height: 34)
-                Text(windowLabel).font(.system(size: 6))
+                }.frame(width: 38, height: 38)
+                Text(windowLabel).font(.system(size: 6.5))
                     .lineLimit(1).minimumScaleFactor(0.8).foregroundStyle(.secondary)
-            }.frame(width: 50).padding(.vertical, 2).contentShape(Rectangle())
+            }.frame(width: 50, height: 60).contentShape(Rectangle())
         }.buttonStyle(.plain).noFocusRing()
             .accessibilityLabel("\(preview ? "Preview. " : "")\(quota.provider) \(windowLabel). \(expired ? "Reset pending" : value.map { "\(Int($0.rounded())) percent left" } ?? quota.status(at: now))")
             .help(quota.windows.isEmpty ? "Show \(provider.name) usage" : quota.windows.map { reading in
@@ -201,8 +223,7 @@ struct FloatingQuotaDetail: View {
             let stale = quota.isStale(at: clock.date)
             VStack(alignment: .leading, spacing: 16) {
                 HStack(spacing: 9) {
-                    OwlIcon(size: 26)
-                        .foregroundStyle(Theme.brandAccent)
+                    FloatingOwl(size: 26)
                     VStack(alignment: .leading, spacing: 3) {
                         Text("\(quota.provider) usage").font(.system(size: 15, weight: .semibold))
                         Text(preview ? "Preview · sample data" : (quota.plan ?? "Subscription capacity"))
@@ -356,15 +377,15 @@ private struct FloatingTimeReadout: View {
             VStack(alignment: .leading, spacing: compact ? 3 : 5) {
                 HStack(spacing: 3) {
                     Image(systemName: metric.symbol).font(.system(size: compact ? 7 : 9))
-                    Text(label).font(.system(size: compact ? 8 : 10, weight: .medium))
+                    Text(label).font(.system(size: compact ? 7.5 : 10, weight: .medium))
                         .lineLimit(1).minimumScaleFactor(0.8)
                 }.foregroundStyle(active ? Theme.brandAccent : .secondary)
-                Text(value).font(.system(size: compact ? 12 : 17, weight: .semibold, design: .rounded))
+                durationText(value)
                     .monospacedDigit().lineLimit(1).minimumScaleFactor(0.65)
                     .foregroundStyle(.primary)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, compact ? 6 : 10).padding(.vertical, compact ? 5 : 9)
+            .padding(.horizontal, compact ? 6 : 10).padding(.vertical, compact ? 4 : 9)
             .background(active ? Theme.brandAccent.opacity(0.1) : .white.opacity(0.045), in: RoundedRectangle(cornerRadius: compact ? 7 : 10))
             .overlay(RoundedRectangle(cornerRadius: compact ? 7 : 10)
                 .strokeBorder(active ? Theme.brandAccent.opacity(0.45) : .white.opacity(0.07), lineWidth: 1))
@@ -374,6 +395,16 @@ private struct FloatingTimeReadout: View {
             .accessibilityHint("Show details. \(metric.explanation)")
             .accessibilityAddTraits(active ? .isSelected : [])
             .help(metric.explanation)
+    }
+
+    private func durationText(_ value: String) -> Text {
+        value.reduce(Text("")) { result, character in
+            let unit = character.isLetter
+            return result + Text(String(character))
+                .font(.system(size: unit ? (compact ? 9 : 12) : (compact ? 14 : 19),
+                    weight: unit ? .medium : .semibold, design: .rounded))
+                .foregroundColor(unit ? .secondary : .primary)
+        }
     }
 }
 
