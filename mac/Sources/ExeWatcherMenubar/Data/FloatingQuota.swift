@@ -38,7 +38,7 @@ struct FloatingQuota: Equatable {
         failed = state == .failed
         let inputs: [(String, String, Double?, Date?)] = [
             ("fiveHour", "5-hour window", usage?.fiveHourPercent, usage?.fiveHourResetsAt),
-            ("weekly", "Weekly total", usage?.sevenDayPercent, usage?.sevenDayResetsAt),
+            ("weekly", "Weekly", usage?.sevenDayPercent, usage?.sevenDayResetsAt),
             ("opus", "Weekly · Opus", usage?.sevenDayOpusPercent, usage?.sevenDayOpusResetsAt),
             ("sonnet", "Weekly · Sonnet", usage?.sevenDaySonnetPercent, usage?.sevenDaySonnetResetsAt),
         ]
