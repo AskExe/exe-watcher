@@ -43,7 +43,7 @@ node dist/cli.js report
 
 ## Built for AI employee teams
 
-- **Floating display** — a compact on-screen quota display for Claude, Codex, Kimi, Cursor, GitHub Copilot and Gemini, with **You + AI ≈** (your estimated interaction time) and **AI Time** (work time added across all agents). Quota rings show **remaining capacity**, default to **Weekly**, and have a **Weekly / 5h** toggle. Click either time button for its explanation. Time totals default to Today; switch to Week, Month or All Time. Enable it from the menu bar footer’s **Display settings → Floating quota display**. [Details](mac/README.md#floating-display).
+- **Floating display** — a compact on-screen quota display for Claude, Codex, Kimi, Cursor, GitHub Copilot and Gemini, with **You + AI ≈** (your estimated interaction time) and **AI Time** (work time added across all agents). Quota rings show **quota left**, default to **Weekly**, and have a **Weekly / 5h** toggle. Click either time button for its explanation. Time totals default to Today; switch to Week, Month or All Time. Enable it from the menu bar footer’s **Display settings → Floating quota display**. [Details](mac/README.md#floating-display).
 - **AI running time** — adds recorded work across agents, so parallel work is counted as agent-hours.
 - **Elapsed busy time** — merges overlapping runs to show how long at least one agent was working.
 - **Your time ≈** — estimates interaction from short reply-to-next-prompt gaps, with known subagents excluded. It is not an attention or productivity measurement.

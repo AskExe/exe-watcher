@@ -123,7 +123,7 @@ struct FloatingQuotaRail: View {
                         Text(value.map { "\(Int($0.rounded()))%" } ?? "—")
                             .font(.system(size: 13, weight: .semibold, design: .rounded)).monospacedDigit()
                             .lineLimit(1).minimumScaleFactor(0.8)
-                        Text(value == nil ? (quota.isLoading ? "loading" : "quota") : "remaining")
+                        Text(value == nil ? (quota.isLoading ? "loading" : "quota") : "left")
                             .font(.system(size: 6, weight: .medium)).foregroundStyle(.secondary)
                     }
                     if stale || expired {
@@ -134,9 +134,9 @@ struct FloatingQuotaRail: View {
                     .lineLimit(1).minimumScaleFactor(0.8).foregroundStyle(.secondary)
             }.frame(width: 50).padding(.vertical, 2).contentShape(Rectangle())
         }.buttonStyle(.plain).noFocusRing()
-            .accessibilityLabel("\(preview ? "Preview. " : "")\(quota.provider) \(windowLabel). \(expired ? "Reset pending" : value.map { "\(Int($0.rounded())) percent remaining" } ?? quota.status(at: now))")
+            .accessibilityLabel("\(preview ? "Preview. " : "")\(quota.provider) \(windowLabel). \(expired ? "Reset pending" : value.map { "\(Int($0.rounded())) percent left" } ?? quota.status(at: now))")
             .help(quota.windows.isEmpty ? "Show \(provider.name) usage" : quota.windows.map { reading in
-                reading.expired(at: now) ? "\(reading.label): reset pending" : "\(reading.label): \(Int(reading.remainingPercent.rounded()))% remaining"
+                reading.expired(at: now) ? "\(reading.label): reset pending" : "\(reading.label): \(Int(reading.remainingPercent.rounded()))% left"
             }.joined(separator: "\n"))
     }
 }
@@ -158,7 +158,7 @@ private struct FloatingQuotaHorizonToggle: View {
                 }.buttonStyle(.plain).noFocusRing()
                     .accessibilityLabel("Show \(horizon.label) quota limits")
                     .accessibilityAddTraits(preferences.horizon == horizon ? .isSelected : [])
-                    .help("Show \(horizon.label.lowercased()) quota remaining for all providers")
+                    .help("Show \(horizon.label.lowercased()) quota left for all providers")
             }
         }.padding(2).background(.white.opacity(0.045), in: RoundedRectangle(cornerRadius: 6))
             .fixedSize().accessibilityElement(children: .contain).accessibilityLabel("Quota window")
@@ -319,7 +319,7 @@ struct FloatingQuotaDetail: View {
             HStack {
                 Text(window.label).font(.system(size: 12, weight: .medium)).lineLimit(1).help(window.label)
                 Spacer()
-                Text(expired ? "—" : "\(Int(window.remainingPercent.rounded()))% remaining")
+                Text(expired ? "—" : "\(Int(window.remainingPercent.rounded()))% left")
                     .font(.system(size: 13, weight: .semibold, design: .rounded)).monospacedDigit()
                     .foregroundStyle(expired ? .secondary : quotaColor(window.remainingPercent))
             }
