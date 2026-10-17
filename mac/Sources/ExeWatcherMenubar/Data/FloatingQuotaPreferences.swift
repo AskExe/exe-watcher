@@ -62,7 +62,7 @@ final class FloatingQuotaPreferences {
         shownProviders = savedProviders.isEmpty ? [.claude, .codex] : savedProviders
         selectedProvider = defaults.string(forKey: Self.selectedProviderKey).flatMap(QuotaProviderID.init(rawValue:)) ?? .claude
         isEnabled = defaults.bool(forKey: Self.enabledKey)
-        horizon = defaults.string(forKey: Self.horizonKey).flatMap(FloatingQuota.Horizon.init(rawValue:)) ?? .fiveHour
+        horizon = defaults.string(forKey: Self.horizonKey).flatMap(FloatingQuota.Horizon.init(rawValue:)) ?? .weekly
         timePeriod = defaults.string(forKey: Self.timePeriodKey).flatMap(FloatingTimePeriod.init(rawValue:)) ?? .today
         if let data = defaults.data(forKey: Self.positionKey),
            let saved = try? JSONDecoder().decode(FloatingQuotaPosition.self, from: data), saved.isValid {

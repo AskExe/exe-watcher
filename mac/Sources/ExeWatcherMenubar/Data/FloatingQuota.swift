@@ -3,15 +3,16 @@ import Foundation
 /// Presentation only. Quota is provider-reported capacity, never inferred from dollar spend.
 struct FloatingQuota: Equatable {
     enum Horizon: String, Codable, CaseIterable {
-        case fiveHour, weekly
+        case weekly, fiveHour
         var label: String { self == .fiveHour ? "5-hour" : "Weekly" }
     }
     struct Window: Identifiable, Equatable, Sendable {
         let id: String
         let label: String
-        let percent: Double
+        let percent: Double // Provider-reported percentage used. UI presents remaining capacity.
         let resetsAt: Date?
-        var fraction: Double { percent / 100 }
+        var remainingPercent: Double { 100 - percent }
+        var remainingFraction: Double { remainingPercent / 100 }
         func expired(at now: Date) -> Bool { resetsAt.map { $0 <= now } ?? false }
     }
     let providerID: QuotaProviderID
@@ -64,7 +65,10 @@ struct FloatingQuota: Equatable {
     }
 
     func primary(_ horizon: Horizon) -> Window? {
-        windows.first { $0.id == horizon.rawValue } ?? windows.first
+        if let window = windows.first(where: { $0.id == horizon.rawValue }) { return window }
+        // A missing 5-hour limit must not masquerade as the requested window.
+        if providerID == .claude || providerID == .codex { return nil }
+        return windows.first
     }
     func isStale(at now: Date) -> Bool {
         guard let fetchedAt else { return false }

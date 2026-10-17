@@ -78,14 +78,18 @@ struct FloatingQuotaRail: View {
 
     private var timeSummary: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Menu {
-                Picker("Time period", selection: Binding(get: { preferences.timePeriod }, set: { preferences.timePeriod = $0 })) {
-                    ForEach(FloatingTimePeriod.allCases, id: \.self) { Text($0.label).tag($0) }
-                }
-            } label: { Text(preferences.timePeriod.label).font(.system(size: 9, weight: .semibold)) }
-            .menuStyle(.borderlessButton).fixedSize().noFocusRing()
-            .padding(.horizontal, 6).padding(.vertical, 2)
-            .background(.white.opacity(0.045), in: Capsule()).accessibilityLabel("Choose time period")
+            HStack(spacing: 4) {
+                Menu {
+                    Picker("Time period", selection: Binding(get: { preferences.timePeriod }, set: { preferences.timePeriod = $0 })) {
+                        ForEach(FloatingTimePeriod.allCases, id: \.self) { Text($0.label).tag($0) }
+                    }
+                } label: { Text(preferences.timePeriod.label).font(.system(size: 9, weight: .semibold)) }
+                .menuStyle(.borderlessButton).fixedSize().noFocusRing()
+                .padding(.horizontal, 6).padding(.vertical, 2)
+                .background(.white.opacity(0.045), in: Capsule()).accessibilityLabel("Choose time period")
+                Spacer(minLength: 0)
+                FloatingQuotaHorizonToggle(preferences: preferences, compact: true)
+            }
             FloatingTimeReadout(time: store.floatingTime(for: preferences.timePeriod.period), compact: true,
                 selected: interaction.selectedTimeMetric, select: { selectTimeMetric($0) })
         }
@@ -95,7 +99,8 @@ struct FloatingQuotaRail: View {
         let quota = store.floatingQuota(for: provider)
         let window = quota.primary(preferences.horizon)
         let expired = window?.expired(at: now) == true
-        let value = expired ? nil : window?.percent
+        let value = expired ? nil : window?.remainingPercent
+        let windowLabel = window?.label ?? (quota.windows.isEmpty ? quota.status(at: now) : "\(preferences.horizon.label) unavailable")
         let stale = quota.isStale(at: now)
         return Button {
             if preferences.activeProvider != provider || interaction.selectedTimeMetric != nil {
@@ -115,23 +120,48 @@ struct FloatingQuotaRail: View {
                             .rotationEffect(.degrees(-90)).opacity(stale ? 0.4 : 1)
                     }
                     VStack(spacing: 0) {
-                        Text(value.map { "\(Int($0.rounded()))" } ?? "—")
+                        Text(value.map { "\(Int($0.rounded()))%" } ?? "—")
                             .font(.system(size: 13, weight: .semibold, design: .rounded)).monospacedDigit()
-                        Text(value == nil ? (quota.isLoading ? "loading" : "usage") : "% used")
+                            .lineLimit(1).minimumScaleFactor(0.8)
+                        Text(value == nil ? (quota.isLoading ? "loading" : "quota") : "remaining")
                             .font(.system(size: 6, weight: .medium)).foregroundStyle(.secondary)
                     }
                     if stale || expired {
                         Circle().fill(Theme.semanticWarning).frame(width: 4, height: 4).offset(x: 13, y: -13)
                     }
                 }.frame(width: 34, height: 34)
-                Text(window?.label ?? quota.status(at: now)).font(.system(size: 6))
-                    .lineLimit(1).foregroundStyle(.secondary)
+                Text(windowLabel).font(.system(size: 6))
+                    .lineLimit(1).minimumScaleFactor(0.8).foregroundStyle(.secondary)
             }.frame(width: 50).padding(.vertical, 2).contentShape(Rectangle())
         }.buttonStyle(.plain).noFocusRing()
-            .accessibilityLabel("\(preview ? "Preview. " : "")\(quota.provider) \(window?.label ?? "capacity"). \(expired ? "Reset pending" : value.map { "\(Int($0.rounded())) percent used" } ?? quota.status(at: now))")
+            .accessibilityLabel("\(preview ? "Preview. " : "")\(quota.provider) \(windowLabel). \(expired ? "Reset pending" : value.map { "\(Int($0.rounded())) percent remaining" } ?? quota.status(at: now))")
             .help(quota.windows.isEmpty ? "Show \(provider.name) usage" : quota.windows.map { reading in
-                reading.expired(at: now) ? "\(reading.label): reset pending" : "\(reading.label): \(Int(reading.percent.rounded()))% used · \(Int((100 - reading.percent).rounded()))% remaining"
+                reading.expired(at: now) ? "\(reading.label): reset pending" : "\(reading.label): \(Int(reading.remainingPercent.rounded()))% remaining"
             }.joined(separator: "\n"))
+    }
+}
+
+private struct FloatingQuotaHorizonToggle: View {
+    let preferences: FloatingQuotaPreferences
+    let compact: Bool
+
+    var body: some View {
+        HStack(spacing: 1) {
+            ForEach(FloatingQuota.Horizon.allCases, id: \.self) { horizon in
+                Button { preferences.horizon = horizon } label: {
+                    Text(compact && horizon == .fiveHour ? "5h" : horizon.label)
+                        .font(.system(size: compact ? 7 : 9, weight: .semibold))
+                        .padding(.horizontal, compact ? 4 : 7).padding(.vertical, compact ? 2 : 3)
+                        .foregroundStyle(preferences.horizon == horizon ? Theme.brandAccent : .secondary)
+                        .background(preferences.horizon == horizon ? Theme.brandAccent.opacity(0.18) : .clear,
+                            in: RoundedRectangle(cornerRadius: 4))
+                }.buttonStyle(.plain).noFocusRing()
+                    .accessibilityLabel("Show \(horizon.label) quota limits")
+                    .accessibilityAddTraits(preferences.horizon == horizon ? .isSelected : [])
+                    .help("Show \(horizon.label.lowercased()) quota remaining for all providers")
+            }
+        }.padding(2).background(.white.opacity(0.045), in: RoundedRectangle(cornerRadius: 6))
+            .fixedSize().accessibilityElement(children: .contain).accessibilityLabel("Quota window")
     }
 }
 
@@ -215,14 +245,7 @@ struct FloatingQuotaDetail: View {
                     Circle().fill(stale || quota.failed ? Theme.semanticWarning : Theme.brandAccent).frame(width: 5, height: 5)
                     Text(quota.status(at: clock.date)).font(.system(size: 10, weight: .medium))
                     Spacer()
-                    if quota.windows.contains(where: { $0.id == "fiveHour" }) && quota.windows.contains(where: { $0.id == "weekly" }) {
-                        Menu {
-                            Picker("Ring shows", selection: Binding(get: { preferences.horizon }, set: { preferences.horizon = $0 })) {
-                                ForEach(FloatingQuota.Horizon.allCases, id: \.self) { Text($0.label).tag($0) }
-                            }
-                        } label: { Text("Ring: \(preferences.horizon.label)").font(.system(size: 10)) }
-                        .menuStyle(.borderlessButton).fixedSize().accessibilityLabel("Choose ring window")
-                    }
+                    FloatingQuotaHorizonToggle(preferences: preferences, compact: false)
                 }.foregroundStyle(stale || quota.failed ? Theme.semanticWarning : .secondary)
                 if quota.windows.isEmpty {
                     VStack(alignment: .leading, spacing: 8) {
@@ -296,23 +319,18 @@ struct FloatingQuotaDetail: View {
             HStack {
                 Text(window.label).font(.system(size: 12, weight: .medium)).lineLimit(1).help(window.label)
                 Spacer()
-                Text(expired ? "—" : "\(Int(window.percent.rounded()))% used")
+                Text(expired ? "—" : "\(Int(window.remainingPercent.rounded()))% remaining")
                     .font(.system(size: 13, weight: .semibold, design: .rounded)).monospacedDigit()
-                    .foregroundStyle(expired ? .secondary : quotaColor(window.percent))
+                    .foregroundStyle(expired ? .secondary : quotaColor(window.remainingPercent))
             }
             GeometryReader { bounds in
                 ZStack(alignment: .leading) {
                     Capsule().fill(.white.opacity(0.07))
-                    if !expired { Capsule().fill(quotaColor(window.percent)).frame(width: bounds.size.width * window.fraction) }
+                    if !expired { Capsule().fill(quotaColor(window.remainingPercent)).frame(width: bounds.size.width * window.remainingFraction) }
                 }
             }.frame(height: 5).opacity(stale ? 0.4 : 1)
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                if !expired {
-                    Text("\(Int((100 - window.percent).rounded()))% remaining").fixedSize()
-                }
-                Spacer(minLength: 0)
-                Text(FloatingQuota.resetText(window.resetsAt, now: now)).multilineTextAlignment(.trailing)
-            }.font(.system(size: 10)).foregroundStyle(.secondary)
+            Text(FloatingQuota.resetText(window.resetsAt, now: now))
+                .font(.system(size: 10)).foregroundStyle(.secondary)
         }
     }
 }
@@ -359,8 +377,8 @@ private struct FloatingTimeReadout: View {
     }
 }
 
-private func quotaColor(_ percent: Double) -> Color {
-    percent >= 95 ? Theme.oneShotLow : percent >= 80 ? Theme.semanticWarning : Theme.brandAccent
+private func quotaColor(_ remainingPercent: Double) -> Color {
+    remainingPercent <= 5 ? Theme.oneShotLow : remainingPercent <= 20 ? Theme.semanticWarning : Theme.brandAccent
 }
 
 /// Absolute screen-space deltas avoid the moving-coordinate feedback of a SwiftUI drag.

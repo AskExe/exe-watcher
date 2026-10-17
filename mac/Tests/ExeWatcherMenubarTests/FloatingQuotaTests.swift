@@ -13,17 +13,43 @@ private func quotaUsage(fiveHour: Double? = 64, weekly: Double? = 38, fetchedAt:
 
 @Suite("Floating quota presentation and placement")
 struct FloatingQuotaTests {
-    @Test("missing and invalid readings never masquerade as zero; available horizon falls back")
+    @Test("missing and invalid readings never masquerade as zero or a different window")
     func unknownData() {
         let missing = FloatingQuota(usage: nil, state: .noCredentials)
         #expect(missing.windows.isEmpty)
         #expect(missing.primary(.fiveHour) == nil)
         #expect(missing.status(at: quotaNow) == "Connect")
         let invalid = FloatingQuota(usage: quotaUsage(fiveHour: .nan), state: .loaded)
-        #expect(invalid.primary(.fiveHour)?.id == "weekly")
+        #expect(invalid.primary(.fiveHour) == nil)
+        #expect(invalid.primary(.weekly)?.id == "weekly")
         #expect(invalid.windows.count == 1)
         let zero = FloatingQuota(usage: quotaUsage(fiveHour: 0), state: .loaded)
         #expect(zero.primary(.fiveHour)?.percent == 0)
+        #expect(zero.primary(.fiveHour)?.remainingPercent == 100)
+    }
+
+    @Test("Claude and Codex show remaining quota for the selected window")
+    func remainingCapacity() {
+        let claude = FloatingQuota(usage: quotaUsage(fiveHour: 0, weekly: 80), state: .loaded)
+        let codex = FloatingQuota(provider: .codex, state: .init(snapshot: .init(provider: .codex,
+            windows: [.init(id: "weekly", label: "Weekly", percent: 68, resetsAt: quotaNow.addingTimeInterval(86400))],
+            fetchedAt: quotaNow), loadState: .loaded))
+        #expect(claude.primary(.weekly)?.remainingPercent == 20)
+        #expect(claude.primary(.fiveHour)?.remainingPercent == 100)
+        #expect(codex.primary(.weekly)?.remainingPercent == 32)
+        #expect(codex.primary(.weekly)?.remainingFraction == 0.32)
+        #expect(codex.primary(.fiveHour) == nil)
+        let exhausted = FloatingQuota(usage: quotaUsage(weekly: 100), state: .loaded)
+        #expect(exhausted.primary(.weekly)?.remainingPercent == 0)
+    }
+
+    @Test("providers with other quota periods retain their reported window")
+    func otherProviderWindows() {
+        let cursor = FloatingQuota(provider: .cursor, state: .init(snapshot: .init(provider: .cursor,
+            windows: [.init(id: "monthly", label: "Monthly", percent: 74, resetsAt: nil)],
+            fetchedAt: quotaNow), loadState: .loaded))
+        #expect(cursor.primary(.weekly)?.id == "monthly")
+        #expect(cursor.primary(.fiveHour)?.remainingPercent == 26)
     }
 
     @Test("staleness, clock skew and expired cycles are explicit")
@@ -75,14 +101,15 @@ struct FloatingQuotaTests {
         defer { defaults.removePersistentDomain(forName: name) }
         let preferences = FloatingQuotaPreferences(defaults: defaults)
         #expect(!preferences.isEnabled)
+        #expect(preferences.horizon == .weekly)
         #expect(preferences.timePeriod == .today)
         preferences.isEnabled = true
-        preferences.horizon = .weekly
+        preferences.horizon = .fiveHour
         preferences.timePeriod = .month
         preferences.position = FloatingQuotaPosition(edge: nil, x: 0.4, y: 0.6, screenID: "test")
         let restored = FloatingQuotaPreferences(defaults: defaults)
         #expect(restored.isEnabled)
-        #expect(restored.horizon == .weekly)
+        #expect(restored.horizon == .fiveHour)
         #expect(restored.timePeriod == .month)
         #expect(restored.position == preferences.position)
         defaults.set(Data("{\"x\":null}".utf8), forKey: "exe-watcher.floatingQuota.position")
