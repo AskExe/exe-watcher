@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.66 (2026-10-17)
+
+- Publish the floating quota display and AI timing work from 0.2.61–0.2.65. Claude and Codex default to Weekly with a shared 5-hour toggle; percentages show capacity **left**. Compact metric buttons, clearer numbers, an aligned animated owl, Claude sign-in, hidden unknown timing rows and suppressed focus rectangles polish the display.
+- Load real all-agent You + AI interaction estimates and AI Time independently of financial history. Persist all timing periods across restarts, retain All Time across day changes, and keep recorded totals visible during an offline refresh. AI Time includes parallel agent work; coverage depends on retained timing records.
+- Pair npm publication with a matching signed, notarized Mac release and verified source provenance. The app updater and odd.community/watcher follow the latest stable release.
+- Include CodeBurn attribution and its MIT notice in the app, npm package and README, with the documented import date and subsequent Watcher improvements.
+
 ## 0.2.65 (unreleased)
 
 - Make the floating display smaller with compact provider rings and a period pill. Turn You + AI and AI Time into metric buttons that open their explanations, with the same buttons in the detailed card.

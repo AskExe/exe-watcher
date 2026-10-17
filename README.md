@@ -29,7 +29,7 @@ npm install -g exe-watcher
 exe-watcher report
 ```
 
-This README describes the current source. AI time was added in 0.2.62 and automatic timing catch-up in 0.2.63; the floating display is added in 0.2.64. These are currently marked unreleased in the [changelog](CHANGELOG.md). Check [Releases](https://github.com/AskExe/exe-watcher/releases) for packaged app availability. To run the current CLI from source:
+Version 0.2.66 brings AI time, automatic timing catch-up and the floating quota display to the packaged app. All Time timing survives restarts and refreshes independently of cost history. Download the matching app from [Releases](https://github.com/AskExe/exe-watcher/releases/latest) or [odd.community/watcher](https://odd.community/watcher). To run the current CLI from source:
 
 ```bash
 git clone https://github.com/AskExe/exe-watcher.git
@@ -79,7 +79,7 @@ Comparison checked against [CodeBurn 0.9.27, revision 9a40cc6](https://github.co
 
 Our subsequent work also includes accounting fixes, bounded history recovery, event-driven native refreshes, current API pricing, Kimi support, self-contained packaging, and Watcher's visual identity. These are documented improvements to our imported baseline; some capabilities also exist in today's CodeBurn. [Detailed evidence and adoption backlog](docs/codeburn-upstream-review.md) · [Changelog](CHANGELOG.md)
 
-Watcher’s new floating display takes inspiration from CodeBurn’s **Capacity Dock** and adds our two time totals. This unreleased implementation supports six quota providers, including Claude and Codex. OS threshold notifications and additional adapters remain in the [adoption backlog](docs/codeburn-upstream-review.md).
+Watcher’s floating display takes inspiration from CodeBurn’s **Capacity Dock** and adds our two time totals. It supports six quota providers, including Claude and Codex, with Weekly as their default and a 5-hour toggle. OS threshold notifications and additional adapters remain in the [adoption backlog](docs/codeburn-upstream-review.md).
 
 ---
 

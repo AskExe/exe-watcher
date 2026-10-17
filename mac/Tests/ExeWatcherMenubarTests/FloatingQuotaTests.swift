@@ -224,6 +224,62 @@ struct FloatingTimeTests {
         #expect(await reads.providers.count == 1)
         clock.now = quotaNow.addingTimeInterval(86_400)
         #expect(store.floatingTime(for: .today) == nil)
+        #expect(store.floatingTime(for: .all)?.aiRunningMs == 9_000_000)
+    }
+
+    @Test("All Time survives relaunch and day rollover without financial history")
+    @MainActor func durableAllTime() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let badge = directory.appendingPathComponent("native-badge.json")
+        let reads = FloatingTimeReads()
+        let clock = QuotaClock()
+        let store = AppStore(now: { clock.now }, badgeCacheURL: badge,
+            fetchTimeSnapshots: { try await reads.fetch($0) }, persistSubscriptionSnapshots: false)
+        await store.loadFloatingTimeIfNeeded(for: .today)
+        let restored = AppStore(now: { clock.now }, badgeCacheURL: badge,
+            fetchTimeSnapshots: { try await reads.fetch($0) }, persistSubscriptionSnapshots: false)
+        #expect(restored.floatingTime(for: .all)?.userActiveMs == 1_800_000)
+        #expect(restored.floatingTime(for: .all)?.aiRunningMs == 9_000_000)
+        await restored.loadFloatingTimeIfNeeded(for: .all)
+        #expect(await reads.providers.count == 1)
+        clock.now = quotaNow.addingTimeInterval(86_400)
+        let nextDay = AppStore(now: { clock.now }, badgeCacheURL: badge,
+            fetchTimeSnapshots: { try await reads.fetch($0) }, persistSubscriptionSnapshots: false)
+        #expect(nextDay.floatingTime(for: .today) == nil)
+        #expect(nextDay.floatingTime(for: .all)?.aiRunningMs == 9_000_000)
+        await nextDay.loadFloatingTimeIfNeeded(for: .today)
+        #expect(await reads.providers.count == 2)
+        #expect(nextDay.floatingTime(for: .today)?.aiRunningMs == 9_000_000)
+    }
+
+    @Test("a Today-only timing cache does not block loading All Time")
+    @MainActor func incompleteTimingCache() async throws {
+        let reads = FloatingTimeReads()
+        let store = AppStore(now: { quotaNow }, fetchTimeSnapshots: { try await reads.fetch($0) }, persistSubscriptionSnapshots: false)
+        var snapshots = try await reads.fetch(.all)
+        snapshots = TimeRecoverySnapshots(generated: snapshots.generated, provider: snapshots.provider,
+            periods: ["today": try #require(snapshots.periods["today"])], allPeriods: nil, recovery: snapshots.recovery)
+        let anchor = PayloadCacheKey(period: .today, provider: .all, now: quotaNow).dateAnchor
+        store.applyTimeSnapshots(snapshots, dateAnchor: anchor)
+        #expect(store.floatingTime(for: .today) != nil)
+        #expect(store.floatingTime(for: .all) == nil)
+        await store.loadFloatingTimeIfNeeded(for: .today)
+        #expect(store.floatingTime(for: .all)?.aiRunningMs == 9_000_000)
+    }
+
+    @Test("an offline refresh retains cached real All Time totals")
+    @MainActor func staleTotalsSurviveFailure() async {
+        let reads = FloatingTimeReads()
+        let clock = QuotaClock()
+        let store = AppStore(now: { clock.now }, fetchTimeSnapshots: { try await reads.fetch($0) }, persistSubscriptionSnapshots: false)
+        await store.loadFloatingTimeIfNeeded(for: .all)
+        clock.now = quotaNow.addingTimeInterval(301)
+        await reads.setFailure()
+        await store.loadFloatingTimeIfNeeded(for: .all)
+        #expect(store.floatingTimeError != nil)
+        #expect(store.floatingTime(for: .all)?.aiRunningMs == 9_000_000)
+        #expect(!store.isLoadingFloatingTime)
     }
 
     @Test("failed reads back off; unknown time remains unknown")

@@ -107,7 +107,7 @@ struct FloatingQuotaRail: View {
                 FloatingQuotaHorizonToggle(preferences: preferences, compact: true)
             }
             FloatingTimeReadout(time: store.floatingTime(for: preferences.timePeriod.period), compact: true,
-                selected: interaction.selectedTimeMetric, select: { selectTimeMetric($0) })
+                selected: interaction.selectedTimeMetric, isLoading: store.isLoadingFloatingTime, select: { selectTimeMetric($0) })
         }
     }
 
@@ -253,6 +253,7 @@ struct FloatingQuotaDetail: View {
                     }.pickerStyle(.segmented).labelsHidden().noFocusRing().accessibilityLabel("Time period")
                     let time = store.floatingTime(for: preferences.timePeriod.period)
                     FloatingTimeReadout(time: time, compact: false, selected: interaction.selectedTimeMetric,
+                        isLoading: store.isLoadingFloatingTime,
                         select: { selectTimeMetric(interaction.selectedTimeMetric == $0 ? nil : $0) })
                     if let metric = interaction.selectedTimeMetric {
                         Text(metric.explanation).font(.system(size: 10)).foregroundStyle(.secondary)
@@ -360,6 +361,7 @@ private struct FloatingTimeReadout: View {
     let time: TimeBlock?
     let compact: Bool
     let selected: FloatingTimeMetric?
+    let isLoading: Bool
     let select: (FloatingTimeMetric) -> Void
 
     var body: some View {
@@ -372,7 +374,7 @@ private struct FloatingTimeReadout: View {
     private func metricButton(_ metric: FloatingTimeMetric, label: String, milliseconds: Double?) -> some View {
         let active = selected == metric
         let duration = TimeBlock.duration(milliseconds)
-        let value = duration == "Unknown" ? "—" : duration
+        let value = duration == "Unknown" ? (isLoading ? "…" : "—") : duration
         return Button { select(metric) } label: {
             VStack(alignment: .leading, spacing: compact ? 3 : 5) {
                 HStack(spacing: 3) {

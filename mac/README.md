@@ -120,7 +120,7 @@ The app's Update button downloads the latest macOS app, including its matching b
 
 ```bash
 npm ci
-mac/Scripts/package-app.sh v0.2.55
+mac/Scripts/package-app.sh v0.2.66
 ```
 
 This builds a universal app, updater ZIP, drag-to-install DMG and `SHA256SUMS.txt` in `mac/.build/dist`. It freezes the CLI's production dependencies and a checksum-pinned universal Node 22.23.3 runtime. Only explicit build outputs/manifests are copied; local credentials and configuration are excluded. Watcher's `LICENSE` and `THIRD_PARTY_NOTICES.md`, including CodeBurn's original MIT notice, ship at `Contents/Resources/cli/`. The original Node license and dependency licenses also ship with the app.
@@ -130,18 +130,19 @@ Local builds default to ad-hoc signing for development. To produce a public down
 ```bash
 CODESIGN_IDENTITY='Developer ID Application: Your Name (TEAMID)' \
 NOTARY_PROFILE='your-existing-keychain-profile' \
-REQUIRE_NOTARIZATION=1 mac/Scripts/package-app.sh v0.2.55
+REQUIRE_NOTARIZATION=1 mac/Scripts/package-app.sh v0.2.66
 ```
 
 The release mode signs the runtime and app with hardened runtime, submits both app and DMG to Apple, staples their tickets, and verifies the app's Gatekeeper assessment. An unsigned or unnotarized package is a review build, not a public launch artifact. See [Apple's notarization documentation](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution).
 
 Releases are built and signed locally. The hosted `Release macOS Menubar` workflow is disabled: it has no signing secrets and only failed on each tag. To ship a version:
 
-1. Bump `package.json`, `package-lock.json` and `CHANGELOG.md`, open the PR, and merge it once CI passes.
-2. Package with the release command above. `BUILD-INFO.txt` must name a commit whose tree equals the merge commit (`git rev-parse <sha>^{tree}`), with zero modified files.
-3. Publish the release at the merge commit, attaching all four files from `mac/.build/dist`: `gh release create mac-vX.Y.Z --target <merge sha> --latest <dmg> <zip> SHA256SUMS.txt BUILD-INFO.txt`. The in-app updater reads the latest release, so this is what customers receive.
-4. Update the download on odd.community (`OddCommunity/odd-website`): the `/watcher/download` redirect in `vercel.json`, the version line and release-notes link in `public/watcher/index.html`, and the README note. Merge that PR, then deploy it. Merging does not publish the site: run `vercel deploy --prod` from a clean checkout of the merged commit.
-5. Verify as a customer: `curl -I https://odd.community/watcher/download` redirects to the new DMG, the downloaded DMG matches `SHA256SUMS.txt`, and `spctl` accepts it as Notarized Developer ID.
+1. Bump `package.json`, `package-lock.json` and `CHANGELOG.md`, open the PR, and merge it once CI passes. Publish from a clean checkout of the actual merged main with successful CI on that commit.
+2. Set `CODESIGN_IDENTITY` and `NOTARY_PROFILE` to the release Mac's existing identity and Keychain profile. Run `npm run release:mac`, or `npm publish --registry=https://registry.npmjs.org` to publish both app and npm. The npm prepublish hook requires the paired Mac release first. Keep the npm token in the release environment or Keychain, never in source.
+3. The release helper builds and notarizes the app and DMG, or reuses a verified package whose source tree matches merged main. It checks Gatekeeper, signatures, checksums and all four uploaded asset digests before publishing the latest GitHub release at the merge commit. `BUILD-INFO.txt` records the measured source revision and tree with zero modified tracked files. An existing matching public release is verified and reused for npm retries; an existing draft requires inspection rather than overwriting.
+4. The app checks GitHub's latest release and offers an Update button. npm users update their global CLI with `npm install -g exe-watcher@latest --registry=https://registry.npmjs.org`; `exe-watcher menubar --force` installs the matching latest native app. The paired release hook runs only when publishing, not when customers install npm.
+5. After the release resolver is deployed in `OddCommunity/odd-website`, `/watcher/release` and `/watcher/download` follow the same latest stable Mac release with a five-minute CDN cache. Future releases need no website version-pin edits. Website changes still require a merged PR and `vercel deploy --prod` from its clean merged main.
+6. Verify as a customer: the website version and download resolve to the new release, the downloaded DMG matches `SHA256SUMS.txt`, and `spctl` accepts the app as Notarized Developer ID. Exercise `exe-watcher menubar --force` and confirm the installed version and real timing totals.
 
 ## Owl artwork and review
 

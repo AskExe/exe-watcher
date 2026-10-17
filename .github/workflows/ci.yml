@@ -35,6 +35,9 @@ jobs:
       - name: Test
         run: npx vitest run
 
+      - name: Paired app and npm release checks
+        run: npm run test:release
+
   semgrep:
     runs-on: ubuntu-latest
     steps:

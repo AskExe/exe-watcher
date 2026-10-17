@@ -39,6 +39,13 @@ private struct PeriodCacheSnapshot: Codable {
     let entries: [PersistedPeriod]
 }
 
+private struct TimingCacheSnapshot: Codable {
+    let version: Int
+    let dateAnchor: String
+    let fetchedAt: Date
+    let periods: [String: TimeBlock]
+}
+
 struct PayloadCacheKey: Hashable {
     let period: Period
     let provider: ProviderFilter
@@ -80,9 +87,11 @@ final class AppStore {
     private let persistSubscriptionSnapshots: Bool
     private var floatingTimeSnapshots: [Period: TimeBlock] = [:]
     private var floatingTimeAnchor = ""
+    private var floatingTimeFetchedAt: Date?
     @ObservationIgnored private var floatingTimeTask: Task<TimeRecoverySnapshots, Error>?
     @ObservationIgnored private var floatingTimeRetryAt: Date = .distantPast
     private(set) var floatingTimeError: String?
+    private(set) var isLoadingFloatingTime = false
     var providerQuotaStates: [QuotaProviderID: ProviderQuotaState] = [:]
     @ObservationIgnored private var providerQuotaTasks: [QuotaProviderID: Task<ProviderQuotaSnapshot, Error>] = [:]
     private let fetchProviderQuota: ProviderQuotaFetcher
@@ -108,6 +117,9 @@ final class AppStore {
     private let badgeCacheURL: URL?
     private var periodCacheURL: URL? {
         badgeCacheURL?.deletingLastPathComponent().appendingPathComponent("period-snapshots.json")
+    }
+    private var timingCacheURL: URL? {
+        badgeCacheURL?.deletingLastPathComponent().appendingPathComponent("native-time-snapshots.json")
     }
     private var cache: [PayloadCacheKey: CachedPayload] = [:]
     private var errorsByKey: [PayloadCacheKey: String] = [:]
@@ -168,6 +180,25 @@ final class AppStore {
                                               historicalValidatedAt: entry.historicalValidatedAt)
             }
         }
+        if let url = timingCacheURL,
+           let data = try? SafeFile.read(from: url.path, maxBytes: 2 * 1024 * 1024),
+           let saved = try? JSONDecoder().decode(TimingCacheSnapshot.self, from: data),
+           saved.version == 1, saved.fetchedAt <= now() {
+            floatingTimeAnchor = todayKey.dateAnchor
+            floatingTimeFetchedAt = saved.fetchedAt
+            for period in Period.allCases where saved.dateAnchor == todayKey.dateAnchor || period == .all {
+                floatingTimeSnapshots[period] = saved.periods[period.cliArg]
+            }
+        }
+    }
+
+    private func persistTiming() {
+        guard let url = timingCacheURL, let fetchedAt = floatingTimeFetchedAt else { return }
+        let periods = Dictionary(uniqueKeysWithValues: floatingTimeSnapshots.map { ($0.key.cliArg, $0.value) })
+        let saved = TimingCacheSnapshot(version: 1, dateAnchor: floatingTimeAnchor, fetchedAt: fetchedAt, periods: periods)
+        if let data = try? JSONEncoder().encode(saved), data.count <= 2 * 1024 * 1024 {
+            try? SafeFile.write(data, to: url.path)
+        }
     }
 
     private func persistPeriods() {
@@ -213,6 +244,7 @@ final class AppStore {
                 if scope == .all {
                     if floatingTimeAnchor != dateAnchor { floatingTimeSnapshots = [:] }
                     floatingTimeAnchor = dateAnchor
+                    floatingTimeFetchedAt = now()
                     floatingTimeSnapshots[period] = Self.newerTime(floatingTimeSnapshots[period], time)
                 }
                 guard let saved = cache[target] else { continue }
@@ -222,6 +254,9 @@ final class AppStore {
                     historicalValidatedAt: saved.historicalValidatedAt)
             }
         }
+        // Save independent timing even while recovery is pending and no financial
+        // All Time payload exists. Never write or refresh cost timestamps here.
+        persistTiming()
         // Source progress is already durable per step. Avoid rewriting full financial
         // snapshots every chunk; persist the display once the known queue is drained.
         if fresh.recovery.runnableFiles == 0 {
@@ -233,19 +268,25 @@ final class AppStore {
     /// All-provider timing does not depend on which financial view the popover has loaded.
     func floatingTime(for period: Period) -> TimeBlock? {
         let anchor = key(period: .today, provider: .all, includeOptimize: false).dateAnchor
-        let separate = floatingTimeAnchor == anchor ? floatingTimeSnapshots[period] : nil
+        let separate = floatingTimeAnchor == anchor || period == .all ? floatingTimeSnapshots[period] : nil
         return Self.newerTime(mergedPayload(period: period, provider: .all)?.time, separate)
     }
 
     func loadFloatingTimeIfNeeded(for period: Period, force: Bool = false) async {
-        if !force, floatingTime(for: period) != nil { return }
+        if !force, floatingTimeAnchor == key(period: .today, provider: .all, includeOptimize: false).dateAnchor,
+           floatingTimeSnapshots[period] != nil, floatingTimeSnapshots[.all] != nil,
+           let fetchedAt = floatingTimeFetchedAt, fetchedAt <= now(), now().timeIntervalSince(fetchedAt) < 5 * 60 {
+            scheduleTimeRecovery(floatingTimeSnapshots[period]?.recovery)
+            return
+        }
         if !force, now() < floatingTimeRetryAt { return }
         if let task = floatingTimeTask { _ = try? await task.value; return }
         let anchor = key(period: .today, provider: .all, includeOptimize: false).dateAnchor
         let fetch = fetchTimeSnapshots
         let task = Task { try await fetch(.all) }
         floatingTimeTask = task
-        defer { floatingTimeTask = nil }
+        isLoadingFloatingTime = true
+        defer { floatingTimeTask = nil; isLoadingFloatingTime = false }
         do {
             let snapshots = try await task.value
             try Task.checkCancellation()

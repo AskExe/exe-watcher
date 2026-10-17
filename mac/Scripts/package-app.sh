@@ -193,6 +193,7 @@ fi
 cat > "${DIST_DIR}/BUILD-INFO.txt" <<INFO
 Watcher ${APP_VERSION}
 Source base revision: $(git -C "${ROOT}" rev-parse HEAD)
+Source tree: $(git -C "${ROOT}" rev-parse 'HEAD^{tree}')
 Modified tracked files: $(git -C "${ROOT}" status --porcelain --untracked-files=no | wc -l | tr -d ' ')
 Local source additions may also be included; this is not a merge receipt.
 Signing identity: ${IDENTITY}
