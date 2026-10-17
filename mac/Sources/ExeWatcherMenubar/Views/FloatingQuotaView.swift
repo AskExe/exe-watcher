@@ -129,7 +129,9 @@ struct FloatingQuotaRail: View {
             }.frame(width: 50).padding(.vertical, 2).contentShape(Rectangle())
         }.buttonStyle(.plain).noFocusRing()
             .accessibilityLabel("\(preview ? "Preview. " : "")\(quota.provider) \(window?.label ?? "capacity"). \(expired ? "Reset pending" : value.map { "\(Int($0.rounded())) percent used" } ?? quota.status(at: now))")
-            .help("Show \(provider.name) usage")
+            .help(quota.windows.isEmpty ? "Show \(provider.name) usage" : quota.windows.map { reading in
+                reading.expired(at: now) ? "\(reading.label): reset pending" : "\(reading.label): \(Int(reading.percent.rounded()))% used · \(Int((100 - reading.percent).rounded()))% remaining"
+            }.joined(separator: "\n"))
     }
 }
 
@@ -294,7 +296,7 @@ struct FloatingQuotaDetail: View {
             HStack {
                 Text(window.label).font(.system(size: 12, weight: .medium)).lineLimit(1).help(window.label)
                 Spacer()
-                Text(expired ? "—" : "\(Int(window.percent.rounded()))%")
+                Text(expired ? "—" : "\(Int(window.percent.rounded()))% used")
                     .font(.system(size: 13, weight: .semibold, design: .rounded)).monospacedDigit()
                     .foregroundStyle(expired ? .secondary : quotaColor(window.percent))
             }
@@ -304,8 +306,13 @@ struct FloatingQuotaDetail: View {
                     if !expired { Capsule().fill(quotaColor(window.percent)).frame(width: bounds.size.width * window.fraction) }
                 }
             }.frame(height: 5).opacity(stale ? 0.4 : 1)
-            Text(FloatingQuota.resetText(window.resetsAt, now: now))
-                .font(.system(size: 10)).foregroundStyle(.secondary)
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                if !expired {
+                    Text("\(Int((100 - window.percent).rounded()))% remaining").fixedSize()
+                }
+                Spacer(minLength: 0)
+                Text(FloatingQuota.resetText(window.resetsAt, now: now)).multilineTextAlignment(.trailing)
+            }.font(.system(size: 10)).foregroundStyle(.secondary)
         }
     }
 }
