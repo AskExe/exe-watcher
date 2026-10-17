@@ -126,6 +126,7 @@ jobs:
             mac/.build/dist/ExeWatcherMenubar-*.zip
             mac/.build/dist/Watcher-*.dmg
             mac/.build/dist/SHA256SUMS.txt
+            mac/.build/dist/BUILD-INFO.txt
           fail_on_unmatched_files: true
 
       - name: Remove temporary signing material

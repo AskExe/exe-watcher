@@ -59,6 +59,38 @@ From 0.2.57, Watcher also reads native Kimi Code `sessions/**/wire.jsonl` files 
 
 From 0.2.59, historical token recovery marks missing call counts explicitly: `—` means unavailable and `18+` means at least 18 calls are recorded. Costs recovered from cumulative token counters no longer appear to have an exact zero or partial call count. The aggregate call count uses the same notation; counts backed by request logs remain unchanged.
 
+## Floating display
+
+Open the menu bar app, choose **Display settings** (the sliders button in the footer), then enable **Floating quota display**. It starts off. Drag the bottom handle to move it; it snaps to any screen edge or stays floating. Position, display, quota window and time period survive relaunches. Hover for details, click the quota ring to pin them, or use the close button to hide the display. Outside clicks dismiss the detail card; Escape does too when macOS already permits the key event.
+
+The compact rail shows one ring per selected provider. **Claude and Codex** appear by default; use the floating display’s sliders menu to add **Kimi, Cursor, GitHub Copilot or Gemini**, hide a provider, or show all six. Click a ring or a provider tab to open its own usage card. The rail wraps into two columns at a side edge and scrolls when space is constrained. Provider selection and visibility survive relaunches. Rings, bars and quota labels show **quota left**. **Weekly** is the default; the compact **Weekly / 5h** toggle switches all rings together and remembers your choice. Claude and Codex show a dash when the selected window is unavailable. Other providers keep their own reported period (for example, monthly or per-model). The two time buttons cover **all agents**, independent of the main popover's provider/period filters. Click either button to pin its explanation in the usage card; the card has the same buttons, and clicking the selected one again collapses its explanation:
+
+- **You + AI ≈**: your estimated interaction time, inferred from short reply-to-next-prompt gaps. Overlapping interaction intervals count once. It does not measure attention.
+- **AI Time**: recorded runtime added across agents, so simultaneous runs accumulate agent-hours. Inferred durations get an approximation mark.
+
+Time defaults to **Today**; choose **Week** (last seven days), **Month** (calendar month), or **All Time** (retained timing history). Unavailable values show a dash and incomplete coverage is labeled in details.
+
+Claude quota requests are shared with Plan. Each additional provider has an independent request, connection state and cooldown: passive reads at most every five minutes after success or fifteen after failure, with at least a fifteen-minute 429 cooldown (longer provider Retry-After delays are honored). Passive refreshes never open Keychain prompts or rotate credentials. Use Refresh for an explicit connection attempt. This adds no periodic usage-log scan; timing reuses existing snapshots and the bounded timing-only recovery worker. OS threshold notifications remain future work.
+
+If Claude needs a new sign-in, choose **Sign in with Claude** in its card, finish the Claude Code browser login, then Refresh here. Watcher prefers Claude Code's macOS Keychain login; a credential file is used only when that Keychain item is absent.
+
+Supported live readers:
+
+| Provider | Existing local sign-in | Reported capacity |
+| --- | --- | --- |
+| Claude | Claude Code credentials or permitted Keychain access | Five-hour, weekly and model windows |
+| Codex | ChatGPT credentials in `CODEX_HOME/auth.json` or the `Codex Auth` Keychain item, following the root `cli_auth_credentials_store` setting | Provider-reported windows, additional model limits and monthly credit allowance when present |
+| Kimi | Kimi Code credentials under `KIMI_CODE_HOME` | Weekly and rate-limit windows |
+| Cursor | One read-only lookup in the Cursor app’s local state database | Monthly, Auto/API and other reported pools |
+| GitHub Copilot | Editor-plugin `hosts.json` / `apps.json` under the XDG config directory | Premium allowance and Chat, when metered; unlimited is labeled explicitly |
+| Gemini | Gemini CLI’s `~/.gemini/oauth_creds.json` | Per-model remaining-quota buckets for eligible accounts |
+
+The five new adapters never refresh or write OAuth tokens, copy credentials to Watcher storage, read browser cookies or change a provider’s login. Codex can request Keychain access only on an explicit refresh. Expired sessions need the provider’s own client to renew them. API-key Codex accounts, custom Codex gateways, encrypted/ephemeral stores and ineligible Gemini tiers can have no readable subscription quota. Missing or unlimited percentages remain dashes, not zero.
+
+Copilot credentials stay bound to their GitHub.com or Enterprise Cloud (`*.ghe.com`) host; unsupported or unidentified hosts fail without a request to GitHub.com. New adapters reject HTTP redirects, use ephemeral sessions without cookie/cache persistence, cap response/credential sizes and suppress response bodies in errors. Endpoints are informed by CodeBurn’s adapters and may change; an unrecognized response is unavailable. Quota support does not add a local spend/time importer for a previously unsupported client.
+
+For a credential-free visual review, launch a developer build with `--floating-quota-preview`. Add `--quota-providers=all` for all six rings, `--quota-provider=codex` to select one, `--quota-preview-card` to review only its expanded card, or `--quota-state=stale|disconnected|loading|expired` for failure states. This uses isolated preferences and sample quota/time data, bypassing normal usage, login-item and updater startup.
+
 ## Project layout
 
 ```
@@ -88,28 +120,29 @@ The app's Update button downloads the latest macOS app, including its matching b
 
 ```bash
 npm ci
-mac/Scripts/package-app.sh v0.2.55
+mac/Scripts/package-app.sh v0.2.66
 ```
 
-This builds a universal app, updater ZIP, drag-to-install DMG and `SHA256SUMS.txt` in `mac/.build/dist`. It freezes the CLI's production dependencies and a checksum-pinned universal Node 22.23.3 runtime. Only explicit build outputs/manifests are copied; local credentials and configuration are excluded. The original Node license and dependency licenses ship with the app.
+This builds a universal app, updater ZIP, drag-to-install DMG and `SHA256SUMS.txt` in `mac/.build/dist`. It freezes the CLI's production dependencies and a checksum-pinned universal Node 22.23.3 runtime. Only explicit build outputs/manifests are copied; local credentials and configuration are excluded. Watcher's `LICENSE` and `THIRD_PARTY_NOTICES.md`, including CodeBurn's original MIT notice, ship at `Contents/Resources/cli/`. The original Node license and dependency licenses also ship with the app.
 
 Local builds default to ad-hoc signing for development. To produce a public download:
 
 ```bash
 CODESIGN_IDENTITY='Developer ID Application: Your Name (TEAMID)' \
 NOTARY_PROFILE='your-existing-keychain-profile' \
-REQUIRE_NOTARIZATION=1 mac/Scripts/package-app.sh v0.2.55
+REQUIRE_NOTARIZATION=1 mac/Scripts/package-app.sh v0.2.66
 ```
 
 The release mode signs the runtime and app with hardened runtime, submits both app and DMG to Apple, staples their tickets, and verifies the app's Gatekeeper assessment. An unsigned or unnotarized package is a review build, not a public launch artifact. See [Apple's notarization documentation](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution).
 
 Releases are built and signed locally. The hosted `Release macOS Menubar` workflow is disabled: it has no signing secrets and only failed on each tag. To ship a version:
 
-1. Bump `package.json`, `package-lock.json` and `CHANGELOG.md`, open the PR, and merge it once CI passes.
-2. Package with the release command above. `BUILD-INFO.txt` must name a commit whose tree equals the merge commit (`git rev-parse <sha>^{tree}`), with zero modified files.
-3. Publish the release at the merge commit, attaching all four files from `mac/.build/dist`: `gh release create mac-vX.Y.Z --target <merge sha> --latest <dmg> <zip> SHA256SUMS.txt BUILD-INFO.txt`. The in-app updater reads the latest release, so this is what customers receive.
-4. Update the download on odd.community (`OddCommunity/odd-website`): the `/watcher/download` redirect in `vercel.json`, the version line and release-notes link in `public/watcher/index.html`, and the README note. Merge that PR, then deploy it. Merging does not publish the site: run `vercel deploy --prod` from a clean checkout of the merged commit.
-5. Verify as a customer: `curl -I https://odd.community/watcher/download` redirects to the new DMG, the downloaded DMG matches `SHA256SUMS.txt`, and `spctl` accepts it as Notarized Developer ID.
+1. Bump `package.json`, `package-lock.json` and `CHANGELOG.md`, open the PR, and merge it once CI passes. Publish from a clean checkout of the actual merged main with successful CI on that commit.
+2. Set `CODESIGN_IDENTITY` and `NOTARY_PROFILE` to the release Mac's existing identity and Keychain profile. Run `npm run release:mac`, or `npm publish --registry=https://registry.npmjs.org` to publish both app and npm. The npm prepublish hook requires the paired Mac release first. Keep the npm token in the release environment or Keychain, never in source.
+3. The release helper builds and notarizes the app and DMG, or reuses a verified package whose source tree matches merged main. It checks Gatekeeper, signatures, checksums and all four uploaded asset digests before publishing the latest GitHub release at the merge commit. `BUILD-INFO.txt` records the measured source revision and tree with zero modified tracked files. An existing matching public release is verified and reused for npm retries; an existing draft requires inspection rather than overwriting.
+4. The app checks GitHub's latest release and offers an Update button. npm users update their global CLI with `npm install -g exe-watcher@latest --registry=https://registry.npmjs.org`; `exe-watcher menubar --force` installs the matching latest native app. The paired release hook runs only when publishing, not when customers install npm.
+5. After the release resolver is deployed in `OddCommunity/odd-website`, `/watcher/release` and `/watcher/download` follow the same latest stable Mac release with a five-minute CDN cache. Future releases need no website version-pin edits. Website changes still require a merged PR and `vercel deploy --prod` from its clean merged main.
+6. Verify as a customer: the website version and download resolve to the new release, the downloaded DMG matches `SHA256SUMS.txt`, and `spctl` accepts the app as Notarized Developer ID. Exercise `exe-watcher menubar --force` and confirm the installed version and real timing totals.
 
 ## Owl artwork and review
 

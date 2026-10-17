@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=512, height=512"><title>Watcher owl — quiet watch</title><script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script><style>html,body{margin:0;width:512px;height:512px;background:#191527;overflow:hidden}#root{position:relative;width:512px;height:512px}.clip{position:absolute;inset:0}svg{display:block}</style></head><body>
+<div data-hf-id="hf-ocn1" id="root" data-composition-id="watcher-owl" data-width="512" data-height="512" data-duration="6" data-start="0"><svg data-hf-id="hf-hfp1" id="owl-scene" class="clip" data-start="0" data-duration="6" data-track-index="0" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="Watcher by EXE — centered black eye circles, yellow on black"><rect data-hf-id="hf-50id" width="512" height="512" fill="#191527" /><g data-hf-id="hf-1s0v" transform="translate(90 55) scale(3.32)"><g data-hf-id="hf-sqy6" id="owl-motion"><defs data-hf-id="hf-mh0t"><mask data-hf-id="hf-bjwp" id="face"><rect data-hf-id="hf-iq0y" width="100" height="100" fill="white" /><g data-hf-id="hf-2cnw" fill="black"><ellipse data-hf-id="hf-hz0f" class="socket" cx="37" cy="39" rx="11" ry="12" /><ellipse data-hf-id="hf-z66w" class="socket" cx="63" cy="39" rx="11" ry="12" /><path data-hf-id="hf-wkx6" d="M 47 54 Q 50 53 53 54 L 50 61 Z" /><path data-hf-id="hf-3jp4" d="M 29 69 Q 28 79 37 86 Q 36 77 29 69 Z" /><path data-hf-id="hf-rtpd" d="M 71 69 Q 72 79 63 86 Q 64 77 71 69 Z" /></g></mask></defs><g data-hf-id="hf-01fh" fill="#F5D76E"><g data-hf-id="hf-jipm" mask="url(#face)"><path data-hf-id="hf-te49" d="M 17 8 Q 26 12 33 21 Q 50 14 67 21 Q 74 12 83 8 L 79 37 Q 81 51 70 60 C 80 72 75 87 64 92 Q 72 94 68 97 Q 61 100 54 95 L 46 95 Q 39 100 32 97 Q 28 94 36 92 C 25 87 20 72 30 60 Q 19 51 21 37 Z" /></g><g data-hf-id="hf-ksdj" class="iris"><ellipse data-hf-id="hf-cvyh" cx="38" cy="39" rx="4.8" ry="6" /><ellipse data-hf-id="hf-f87s" cx="62" cy="39" rx="4.8" ry="6" /><circle data-hf-id="hf-wtj8" cx="38" cy="39" r="1.8" fill="#191527" /><circle data-hf-id="hf-9o8v" cx="62" cy="39" r="1.8" fill="#191527" /></g></g></g></g><text data-hf-id="hf-mngo" x="60" y="460" font-family="Futura, Avenir Next, Helvetica Neue, sans-serif" font-weight="bold" font-size="38" letter-spacing="7" fill="#F5D76E">EXE</text></svg></div>
+<script>
+const tl=gsap.timeline({paused:true});
+// Source geometry remains unchanged. Only the owl breathes; the EXE signature stays still.
+tl.to('#owl-motion',{y:-0.5,duration:1.5,ease:'sine.inOut'},0)
+  .to('#owl-motion',{y:0,duration:1.5,ease:'sine.inOut'},1.5)
+  .to('#owl-motion',{y:-0.5,duration:1.5,ease:'sine.inOut'},3)
+  .to('#owl-motion',{y:0,duration:1.5,ease:'sine.inOut'},4.5);
+tl.to('.iris',{x:-1.8,duration:0.32,ease:'power2.inOut'},0.65)
+  .to('.iris',{x:0,duration:0.35,ease:'power2.inOut'},1.9)
+  .to('.iris',{x:1.8,duration:0.32,ease:'power2.inOut'},3.1)
+  .to('.iris',{x:0,duration:0.38,ease:'power2.inOut'},4.25);
+// A shared eye-height change closes the socket and iris together like an eyelid.
+for (const at of [1.42,4.92]) {
+  tl.to('.socket,.iris',{scaleY:0.035,svgOrigin:'50 39',duration:0.075,ease:'power2.in'},at)
+    .to('.socket,.iris',{scaleY:1,svgOrigin:'50 39',duration:0.13,ease:'power2.out'},at+0.075);
+}
+window.__timelines=window.__timelines||{};window.__timelines['watcher-owl']=tl;tl.seek(0);
+</script></body></html>

@@ -7,6 +7,7 @@ typealias MenubarPayloadFetcher = @Sendable (Period, ProviderFilter, Bool) async
 typealias AppStoreDateProvider = @Sendable () -> Date
 typealias TimeSnapshotsFetcher = @Sendable (ProviderFilter) async throws -> TimeRecoverySnapshots
 typealias TimeRecoveryRest = @Sendable (TimeInterval) async throws -> Void
+typealias SubscriptionUsageFetcher = @Sendable (Bool) async throws -> SubscriptionUsage
 
 private struct BadgeSnapshot: Codable {
     let dateAnchor: String
@@ -36,6 +37,13 @@ private struct PeriodCacheSnapshot: Codable {
     let version: Int
     let dateAnchor: String
     let entries: [PersistedPeriod]
+}
+
+private struct TimingCacheSnapshot: Codable {
+    let version: Int
+    let dateAnchor: String
+    let fetchedAt: Date
+    let periods: [String: TimeBlock]
 }
 
 struct PayloadCacheKey: Hashable {
@@ -69,7 +77,24 @@ final class AppStore {
     private(set) var timeRecoveryMessage: String?
     var subscription: SubscriptionUsage?
     var subscriptionError: String?
+    var subscriptionConnectionMessage: String?
     var subscriptionLoadState: SubscriptionLoadState = .idle
+    private(set) var subscriptionNextRefreshAt: Date = .distantPast
+    private(set) var subscriptionRateLimitedUntil: Date = .distantPast
+    private var subscriptionLastAttempt: Date = .distantPast
+    @ObservationIgnored private var subscriptionTask: Task<SubscriptionUsage, Error>?
+    private let fetchSubscription: SubscriptionUsageFetcher
+    private let persistSubscriptionSnapshots: Bool
+    private var floatingTimeSnapshots: [Period: TimeBlock] = [:]
+    private var floatingTimeAnchor = ""
+    private var floatingTimeFetchedAt: Date?
+    @ObservationIgnored private var floatingTimeTask: Task<TimeRecoverySnapshots, Error>?
+    @ObservationIgnored private var floatingTimeRetryAt: Date = .distantPast
+    private(set) var floatingTimeError: String?
+    private(set) var isLoadingFloatingTime = false
+    var providerQuotaStates: [QuotaProviderID: ProviderQuotaState] = [:]
+    @ObservationIgnored private var providerQuotaTasks: [QuotaProviderID: Task<ProviderQuotaSnapshot, Error>] = [:]
+    private let fetchProviderQuota: ProviderQuotaFetcher
     var capacityEstimates: [String: CapacityEstimate] = [:]
 
     /// Lightweight self-diagnostics for the menubar refresh loop. These make stale-counter bugs
@@ -93,6 +118,9 @@ final class AppStore {
     private var periodCacheURL: URL? {
         badgeCacheURL?.deletingLastPathComponent().appendingPathComponent("period-snapshots.json")
     }
+    private var timingCacheURL: URL? {
+        badgeCacheURL?.deletingLastPathComponent().appendingPathComponent("native-time-snapshots.json")
+    }
     private var cache: [PayloadCacheKey: CachedPayload] = [:]
     private var errorsByKey: [PayloadCacheKey: String] = [:]
     private var retryAfter: [PayloadCacheKey: Date] = [:]
@@ -112,11 +140,17 @@ final class AppStore {
         now: @escaping AppStoreDateProvider = Date.init,
         badgeCacheURL: URL? = nil,
         fetchTimeSnapshots: @escaping TimeSnapshotsFetcher = { try await DataClient.fetchTimeSnapshots(provider: $0) },
-        restForTimeRecovery: @escaping TimeRecoveryRest = { try await Task.sleep(for: .seconds($0)) }
+        restForTimeRecovery: @escaping TimeRecoveryRest = { try await Task.sleep(for: .seconds($0)) },
+        fetchSubscription: @escaping SubscriptionUsageFetcher = { try await SubscriptionClient.fetch(allowKeychainPrompt: $0) },
+        persistSubscriptionSnapshots: Bool = true,
+        fetchProviderQuota: @escaping ProviderQuotaFetcher = { try await ProviderQuotaClient.fetch($0, allowKeychainPrompt: $1) }
     ) {
         self.fetchPayload = fetchPayload
         self.fetchTimeSnapshots = fetchTimeSnapshots
         self.restForTimeRecovery = restForTimeRecovery
+        self.fetchProviderQuota = fetchProviderQuota
+        self.fetchSubscription = fetchSubscription
+        self.persistSubscriptionSnapshots = persistSubscriptionSnapshots
         self.now = now
         self.badgeCacheURL = badgeCacheURL
         let todayKey = PayloadCacheKey(period: .today, provider: .all, now: now())
@@ -145,6 +179,25 @@ final class AppStore {
                 cache[target] = CachedPayload(payload: entry.payload, fetchedAt: entry.fetchedAt,
                                               historicalValidatedAt: entry.historicalValidatedAt)
             }
+        }
+        if let url = timingCacheURL,
+           let data = try? SafeFile.read(from: url.path, maxBytes: 2 * 1024 * 1024),
+           let saved = try? JSONDecoder().decode(TimingCacheSnapshot.self, from: data),
+           saved.version == 1, saved.fetchedAt <= now() {
+            floatingTimeAnchor = todayKey.dateAnchor
+            floatingTimeFetchedAt = saved.fetchedAt
+            for period in Period.allCases where saved.dateAnchor == todayKey.dateAnchor || period == .all {
+                floatingTimeSnapshots[period] = saved.periods[period.cliArg]
+            }
+        }
+    }
+
+    private func persistTiming() {
+        guard let url = timingCacheURL, let fetchedAt = floatingTimeFetchedAt else { return }
+        let periods = Dictionary(uniqueKeysWithValues: floatingTimeSnapshots.map { ($0.key.cliArg, $0.value) })
+        let saved = TimingCacheSnapshot(version: 1, dateAnchor: floatingTimeAnchor, fetchedAt: fetchedAt, periods: periods)
+        if let data = try? JSONEncoder().encode(saved), data.count <= 2 * 1024 * 1024 {
+            try? SafeFile.write(data, to: url.path)
         }
     }
 
@@ -187,18 +240,65 @@ final class AppStore {
         for (scope, periods) in slices {
             for period in Period.allCases {
                 let target = key(period: period, provider: scope, includeOptimize: false)
-                guard let time = periods[period.cliArg], let saved = cache[target] else { continue }
+                guard let time = periods[period.cliArg] else { continue }
+                if scope == .all {
+                    if floatingTimeAnchor != dateAnchor { floatingTimeSnapshots = [:] }
+                    floatingTimeAnchor = dateAnchor
+                    floatingTimeFetchedAt = now()
+                    floatingTimeSnapshots[period] = Self.newerTime(floatingTimeSnapshots[period], time)
+                }
+                guard let saved = cache[target] else { continue }
                 var payload = saved.payload
                 payload.time = Self.newerTime(payload.time, time)
                 cache[target] = CachedPayload(payload: payload, fetchedAt: saved.fetchedAt,
                     historicalValidatedAt: saved.historicalValidatedAt)
             }
         }
+        // Save independent timing even while recovery is pending and no financial
+        // All Time payload exists. Never write or refresh cost timestamps here.
+        persistTiming()
         // Source progress is already durable per step. Avoid rewriting full financial
         // snapshots every chunk; persist the display once the known queue is drained.
         if fresh.recovery.runnableFiles == 0 {
             timeRecoveryMessage = nil
             persistPeriods(); persistBadge()
+        }
+    }
+
+    /// All-provider timing does not depend on which financial view the popover has loaded.
+    func floatingTime(for period: Period) -> TimeBlock? {
+        let anchor = key(period: .today, provider: .all, includeOptimize: false).dateAnchor
+        let separate = floatingTimeAnchor == anchor || period == .all ? floatingTimeSnapshots[period] : nil
+        return Self.newerTime(mergedPayload(period: period, provider: .all)?.time, separate)
+    }
+
+    func loadFloatingTimeIfNeeded(for period: Period, force: Bool = false) async {
+        if !force, floatingTimeAnchor == key(period: .today, provider: .all, includeOptimize: false).dateAnchor,
+           floatingTimeSnapshots[period] != nil, floatingTimeSnapshots[.all] != nil,
+           let fetchedAt = floatingTimeFetchedAt, fetchedAt <= now(), now().timeIntervalSince(fetchedAt) < 5 * 60 {
+            scheduleTimeRecovery(floatingTimeSnapshots[period]?.recovery)
+            return
+        }
+        if !force, now() < floatingTimeRetryAt { return }
+        if let task = floatingTimeTask { _ = try? await task.value; return }
+        let anchor = key(period: .today, provider: .all, includeOptimize: false).dateAnchor
+        let fetch = fetchTimeSnapshots
+        let task = Task { try await fetch(.all) }
+        floatingTimeTask = task
+        isLoadingFloatingTime = true
+        defer { floatingTimeTask = nil; isLoadingFloatingTime = false }
+        do {
+            let snapshots = try await task.value
+            try Task.checkCancellation()
+            guard anchor == key(period: .today, provider: .all, includeOptimize: false).dateAnchor else { return }
+            floatingTimeError = nil
+            floatingTimeRetryAt = .distantPast
+            applyTimeSnapshots(snapshots, dateAnchor: anchor)
+            scheduleTimeRecovery(snapshots.recovery)
+        } catch is CancellationError {
+        } catch {
+            floatingTimeRetryAt = now().addingTimeInterval(5 * 60)
+            floatingTimeError = "Timing unavailable. Open the report to recover retained history."
         }
     }
 
@@ -242,6 +342,7 @@ final class AppStore {
     }
 
     func cancelTimeRecovery() {
+        floatingTimeTask?.cancel()
         timeRecoveryTask?.cancel()
         timeRecoveryPacer.reset()
         timeRecoveryMessage = nil
@@ -597,26 +698,148 @@ final class AppStore {
 
     }
 
-    /// Fetch Claude subscription usage. Sets subscription = nil on missing creds (API users / unauthenticated).
-    /// Triggered lazily when the user opens the Usage tab.
-    func refreshSubscription() async {
-        subscriptionLoadState = .loading
+    func floatingQuota(for provider: QuotaProviderID) -> FloatingQuota {
+        if provider == .claude {
+            var quota = FloatingQuota(usage: subscription, state: subscriptionLoadState)
+            quota.message = subscriptionConnectionMessage
+            return quota
+        }
+        return FloatingQuota(provider: provider, state: providerQuotaStates[provider] ?? ProviderQuotaState())
+    }
+
+    func quotaRateLimitedUntil(_ provider: QuotaProviderID) -> Date {
+        provider == .claude ? subscriptionRateLimitedUntil : providerQuotaStates[provider]?.rateLimitedUntil ?? .distantPast
+    }
+
+    func nextQuotaRefresh(for providers: Set<QuotaProviderID>) -> Date {
+        providers.map { $0 == .claude ? subscriptionNextRefreshAt : providerQuotaStates[$0]?.nextRefreshAt ?? .distantPast }.min() ?? .distantFuture
+    }
+
+    func refreshFloatingQuotas(_ providers: Set<QuotaProviderID>) async {
+        await withTaskGroup(of: Void.self) { group in
+            for provider in providers {
+                group.addTask { await self.refreshFloatingQuota(provider, allowKeychainPrompt: false) }
+            }
+        }
+    }
+
+    func refreshFloatingQuota(_ provider: QuotaProviderID, allowKeychainPrompt: Bool = true) async {
+        if provider == .claude { await refreshSubscription(allowKeychainPrompt: allowKeychainPrompt); return }
+        if let task = providerQuotaTasks[provider] { _ = try? await task.value; return }
+        var state = providerQuotaStates[provider] ?? ProviderQuotaState()
+        let current = now()
+        guard current >= state.rateLimitedUntil else { return }
+        if !allowKeychainPrompt { guard current >= state.nextRefreshAt else { return } }
+        else if state.loadState != .noCredentials { guard current.timeIntervalSince(state.lastAttempt) >= 30 else { return } }
+        state.lastAttempt = current
+        state.loadState = .loading
+        providerQuotaStates[provider] = state
+        let fetch = fetchProviderQuota
+        let task = Task { try await fetch(provider, allowKeychainPrompt) }
+        providerQuotaTasks[provider] = task
+        defer { providerQuotaTasks[provider] = nil }
         do {
-            let usage = try await SubscriptionClient.fetch()
+            let snapshot = try await task.value
+            guard snapshot.provider == provider else { throw ProviderQuotaFailure(kind: .invalidResponse) }
+            state.snapshot = snapshot
+            state.loadState = .loaded
+            state.message = nil
+            state.nextRefreshAt = now().addingTimeInterval(5 * 60)
+            state.rateLimitedUntil = .distantPast
+        } catch is CancellationError {
+            state.loadState = state.snapshot == nil ? .idle : .loaded
+        } catch {
+            let failure = error as? ProviderQuotaFailure ?? ProviderQuotaFailure(kind: .unavailable)
+            state.nextRefreshAt = now().addingTimeInterval(15 * 60)
+            state.loadState = .failed
+            state.message = failure.message
+            switch failure.kind {
+            case .missing:
+                state.snapshot = nil; state.loadState = .noCredentials
+            case .signIn, .unsupported:
+                state.snapshot = nil
+                state.message = failure.message ?? provider.signInHelp
+            case .unavailable, .invalidResponse, .rateLimited:
+                if state.snapshot?.identity != failure.identity { state.snapshot = nil }
+                state.message = failure.message ?? "Unable to update this provider. Last known readings, when available, are marked stale."
+                if failure.kind == .rateLimited {
+                    let delay = max(900, failure.retryAfter ?? 900)
+                    state.rateLimitedUntil = now().addingTimeInterval(delay)
+                    state.nextRefreshAt = state.rateLimitedUntil
+                    state.message = "This provider rate-limited the request. Watcher will retry after its cooldown."
+                }
+            }
+        }
+        providerQuotaStates[provider] = state
+    }
+
+    /// Fetch Claude subscription usage. Sets subscription = nil on missing creds (API users / unauthenticated).
+    /// Shared by Plan and the optional floating display.
+    func refreshSubscription(allowKeychainPrompt: Bool = true) async {
+        if let task = subscriptionTask { _ = try? await task.value; return }
+        let current = now()
+        guard current >= subscriptionRateLimitedUntil else { return }
+        if !allowKeychainPrompt {
+            guard current >= subscriptionNextRefreshAt else { return }
+        } else if subscriptionLoadState != .noCredentials {
+            guard current.timeIntervalSince(subscriptionLastAttempt) >= 30 else { return }
+        }
+        subscriptionLastAttempt = current
+        subscriptionLoadState = .loading
+        let fetch = fetchSubscription
+        let task = Task { try await fetch(allowKeychainPrompt) }
+        subscriptionTask = task
+        defer { subscriptionTask = nil }
+        do {
+            let usage = try await task.value
             subscription = usage
             subscriptionError = nil
+            subscriptionConnectionMessage = nil
             subscriptionLoadState = .loaded
-            await captureSnapshots(for: usage)
+            subscriptionNextRefreshAt = now().addingTimeInterval(5 * 60)
+            if persistSubscriptionSnapshots { await captureSnapshots(for: usage) }
         } catch SubscriptionError.noCredentials {
             subscription = nil
             subscriptionError = nil
+            subscriptionConnectionMessage = nil
             subscriptionLoadState = .noCredentials
+            subscriptionNextRefreshAt = now().addingTimeInterval(15 * 60)
         } catch {
-            subscription = nil
+            // A network failure leaves the last reading visible, explicitly stale.
+            // Rejected/malformed credentials must not leave another account's reading visible.
+            subscriptionConnectionMessage = nil
+            switch error {
+            case SubscriptionError.keychainAccessRequired:
+                subscription = nil
+                subscriptionConnectionMessage = "Select Refresh to allow Watcher to read your Claude Code sign-in from Keychain. You can also sign in again below."
+            case SubscriptionError.credentialsInvalid,
+                 SubscriptionError.usageFetchFailed(401, _),
+                 SubscriptionError.usageFetchFailed(403, _),
+                 SubscriptionError.refreshFailed(400, _),
+                 SubscriptionError.refreshFailed(401, _),
+                 SubscriptionError.refreshFailed(403, _):
+                subscription = nil
+                subscriptionConnectionMessage = "Your Claude sign-in needs to be renewed. Select Sign in with Claude, finish in your browser, then Refresh here."
+            case SubscriptionError.usageFetchFailed(429, _), SubscriptionError.refreshFailed(429, _):
+                subscriptionRateLimitedUntil = now().addingTimeInterval(15 * 60)
+            default: break
+            }
             subscriptionError = String(describing: error)
-            subscriptionLoadState = .failed
+            if case SubscriptionError.keychainAccessRequired = error {
+                // Explicit Refresh must be able to request access immediately after
+                // a silent startup read; retain the passive fifteen-minute cooldown.
+                subscriptionLoadState = .noCredentials
+            } else {
+                subscriptionLoadState = .failed
+            }
+            subscriptionNextRefreshAt = now().addingTimeInterval(15 * 60)
             NSLog("Exe Watcher: subscription fetch failed: \(error)")
         }
+    }
+
+    func cancelSubscriptionRefresh() {
+        subscriptionTask?.cancel()
+        for task in providerQuotaTasks.values { task.cancel() }
     }
 
     /// Persist one snapshot per window so we can answer "what did the prior cycle end at?"

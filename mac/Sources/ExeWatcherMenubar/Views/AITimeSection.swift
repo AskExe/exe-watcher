@@ -10,6 +10,7 @@ struct AITimeSection: View {
                     Text(message).foregroundStyle(.secondary)
                     Spacer()
                     Button("Retry") { store.retryTimeRecovery() }
+                        .noFocusRing()
                 }
                 .font(.system(size: 10))
                 .padding(.horizontal, 14).padding(.bottom, 12)
@@ -50,9 +51,10 @@ struct AITimeContent: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .noFocusRing()
             if showDetails {
                 if let time {
-                    ForEach(time.providers) { provider in
+                    ForEach(time.providers.filter { TimeBlock.duration($0.aiRunningMs) != "Unknown" }) { provider in
                         HStack {
                             Text(provider.name)
                             Spacer()

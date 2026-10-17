@@ -41,16 +41,39 @@ enum TerminalLauncher {
         argv.map { "'" + $0.replacingOccurrences(of: "'", with: "'\\''") + "'" }.joined(separator: " ")
     }
 
-    /// Launches `claude login` in Terminal.app so the user can complete the OAuth flow
-    /// without leaving Exe Watcher. The command is a hardcoded literal -- no user input is
-    /// interpolated, so there's no injection surface.
-    static func openClaudeLogin() -> Bool {
-        guard terminalPaths.contains(where: FileManager.default.fileExists(atPath:)) else {
-            NSLog("Exe Watcher: Terminal.app not present; user must run `claude login` manually")
+    /// Let Claude Code own its browser login and credential writes. Opening a private
+    /// command file avoids asking for permission to automate the user's Terminal.
+    @MainActor static func openClaudeLogin() async -> Bool {
+        guard let terminal = terminalPaths.first(where: FileManager.default.fileExists(atPath:)) else { return false }
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("watcher-claude-login-" + UUID().uuidString)
+        let scriptURL = directory.appendingPathComponent("Sign in with Claude.command")
+        let script = """
+        #!/bin/zsh
+        export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
+        if ! command -v claude >/dev/null 2>&1; then
+            printf '%s\\n' 'Install Claude Code first, then select Sign in with Claude in Watcher.'
+            /usr/bin/open 'https://code.claude.com/docs/en/setup'
+            exit 1
+        fi
+        claude auth login --claudeai
+        printf '%s\\n' '' 'Return to Watcher and select Refresh after signing in.'
+        """
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+            try Data(script.utf8).write(to: scriptURL, options: .atomic)
+            try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: scriptURL.path)
+            let configuration = NSWorkspace.OpenConfiguration()
+            configuration.activates = true
+            _ = try await NSWorkspace.shared.open([scriptURL], withApplicationAt: URL(fileURLWithPath: terminal), configuration: configuration)
+            Task {
+                try? await Task.sleep(for: .seconds(1800))
+                try? FileManager.default.removeItem(at: directory)
+            }
+            return true
+        } catch {
+            try? FileManager.default.removeItem(at: directory)
             return false
         }
-        runInTerminal(command: "claude login", preValidated: true)
-        return true
     }
 
     private static func runInTerminal(command: String, preValidated: Bool) {

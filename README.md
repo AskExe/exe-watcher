@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="assets/owl-header.png" alt="Exe Watcher banner" width="520" />
+  <img src="assets/owls/readme-owl.gif" alt="Watcher owl glancing and blinking above the EXE wordmark" width="280" />
 </p>
 
-<p align="center"><strong>The owl watching your AI coding spend — tokens, cost, models, agents, and projects in one beautiful terminal + macOS menu bar.</strong></p>
+<p align="center"><strong>The owl watching your AI team — spend, AI work time, and memory per employee, in your terminal and macOS menu bar.</strong></p>
 
 <p align="center">
   <a href="https://www.npmjs.com/package/exe-watcher"><img src="https://img.shields.io/npm/v/exe-watcher.svg" alt="npm version" /></a>
@@ -16,7 +16,9 @@
   <img src="assets/exe-watcher-readme.png" alt="Exe Watcher macOS menu bar spend dashboard" width="401" />
 </p>
 
-Exe Watcher turns your local AI coding sessions into a live spend cockpit: today's burn, provider/model mix, activity breakdown, one-shot rate, token trends, optimization hints, and project cost — without API keys, cloud sync, or wrappers around your tools.
+Exe Watcher shows what your AI coding work costs, how long the agents run, and how each Exe OS employee's memory grows. Track nine coding clients, models, projects, tokens, and optimization findings from local usage files. Spend and time tracking need no API keys, account, proxy, or wrappers around your tools; employee memory and spend appear when Exe OS supplies its local agent stats.
+
+**Forked from [CodeBurn by AgentSeal](https://github.com/getagentseal/codeburn) on April 24, 2026.** Since then, Exe AI has developed Watcher for AI employee teams and parallel agent workflows. [Development timeline and comparison](#development-since-the-codeburn-fork) · [Origin and MIT attribution](#origin--attribution)
 
 **macOS app:** Download the universal DMG from [Releases](https://github.com/AskExe/exe-watcher/releases/latest), drag **Watcher by EXE** into **Applications**, and open it. macOS 14+ on Apple Silicon or Intel. From 0.2.55, Node and the CLI are included.
 
@@ -24,18 +26,60 @@ Exe Watcher turns your local AI coding sessions into a live spend cockpit: today
 
 ```bash
 npm install -g exe-watcher
+exe-watcher report
+```
+
+Version 0.2.66 brings AI time, automatic timing catch-up and the floating quota display to the packaged app. All Time timing survives restarts and refreshes independently of cost history. Download the matching app from [Releases](https://github.com/AskExe/exe-watcher/releases/latest) or [odd.community/watcher](https://odd.community/watcher). To run the current CLI from source:
+
+```bash
+git clone https://github.com/AskExe/exe-watcher.git
+cd exe-watcher
+npm ci
+npm run build
+node dist/cli.js report
 ```
 
 ---
 
-## What makes it cool
+## Built for AI employee teams
 
-- **Local-first spend tracking** — reads session data already on your machine; no telemetry service, no account, no proxy.
-- **Terminal + native macOS menu bar** — run the full TUI in your terminal or keep today's spend visible in the menu bar.
-- **Multi-provider view** — Claude Code, Codex, Cursor, Cursor Agent, Copilot, OpenCode, Kimi Code, OMP, and Pi are auto-detected.
-- **Actually useful metrics** — cost, calls, sessions, tokens, cache hit %, one-shot rate, activity type, model split, tools, MCP servers, shell commands, and top sessions.
-- **Optimization built in** — finds token waste and gives copy-paste fixes for bloated prompts, repeated file reads, uncapped shell output, unused MCP servers, and ghost agents.
-- **Exe OS aware** — when Exe OS is present, Watcher adds AI employee memory growth and per-agent spend.
+- **Floating display** — a compact on-screen quota display for Claude, Codex, Kimi, Cursor, GitHub Copilot and Gemini, with **You + AI ≈** (your estimated interaction time) and **AI Time** (work time added across all agents). Quota rings show **quota left**, default to **Weekly**, and have a **Weekly / 5h** toggle. Click either time button for its explanation. Time totals default to Today; switch to Week, Month or All Time. Enable it from the menu bar footer’s **Display settings → Floating quota display**. [Details](mac/README.md#floating-display).
+- **AI running time** — adds recorded work across agents, so parallel work is counted as agent-hours.
+- **Elapsed busy time** — merges overlapping runs to show how long at least one agent was working.
+- **Your time ≈** — estimates interaction from short reply-to-next-prompt gaps, with known subagents excluded. It is not an attention or productivity measurement.
+- **Memory per employee** — shows persistent memory counts and growth over 24 hours, 7 days, and 30 days from Exe OS. These are saved memories, not RAM usage.
+- **Spend per employee** — puts model-aware 24-hour, 7-day, and 30-day cost beside the same Exe OS employee identities.
+- **Bounded background work** — coalesces usage-file events, reuses cached periods, resumes historical recovery, and rests between scans.
+- **Visible data limits** — distinguishes unknown timing, missing historical call counts, recovered usage, and models whose costs cannot be priced.
+- **One local view** — Claude Code, Codex, Cursor, Cursor Agent, Copilot, OpenCode, Kimi Code, OMP, and Pi, with no usage-data upload service.
+
+## Development since the CodeBurn fork
+
+Watcher started as an import of CodeBurn 0.8.9 on **April 24, 2026**. By this review on **October 16, 2026**, it had **175 days of independent development—nearly six months**.
+
+| Date (2026) | Watcher development milestone |
+| --- | --- |
+| April 24 | Imported the CodeBurn foundation and began the Exe rebrand as exe-fuelbar. |
+| April 27–28 | Added Exe OS memory integration and the AI Employees section with per-agent memory growth and spend. |
+| April 30 | Renamed the product to Watcher. |
+| May–June | Improved accounting, period consistency, wake/recovery behavior, provider isolation, and model presentation. |
+| October 3 | Added bounded event-driven usage refreshes, retained-history recovery, and pricing/accounting corrections. |
+| October 14–15 | Added self-contained universal macOS packaging, the chosen owl artwork and animation, native Kimi usage, and clearer historical call coverage. |
+| October 16 | Added the three AI time totals, provider coverage, a resumable timing index, automatic timing catch-up, and the floating quota/time display. |
+
+### Where Watcher differs today
+
+Comparison checked against [CodeBurn 0.9.27, revision 9a40cc6](https://github.com/getagentseal/codeburn/tree/9a40cc603fcd194caca9daa8c5134a61ea7e0e2b) on October 16, 2026.
+
+| Capability | Watcher | CodeBurn at the reviewed revision |
+| --- | --- | --- |
+| Three separate time totals across supported clients | AI running, overlap-adjusted elapsed busy, and estimated interaction time, filtered by period/provider/project | Session-duration and Codex generation-timing metrics exist; no equivalent three-total report was found. |
+| Persistent memory per AI employee | Exe OS memory count plus 24h / 7d / 30d growth | No equivalent employee-memory ledger was found. |
+| Exe OS employee integration | Memory and spend use Exe OS employee IDs and local daemon stats; includes agent-pipeline diagnostics | Agent/subagent spend views exist; no Exe OS employee/stats integration was found. |
+
+Our subsequent work also includes accounting fixes, bounded history recovery, event-driven native refreshes, current API pricing, Kimi support, self-contained packaging, and Watcher's visual identity. These are documented improvements to our imported baseline; some capabilities also exist in today's CodeBurn. [Detailed evidence and adoption backlog](docs/codeburn-upstream-review.md) · [Changelog](CHANGELOG.md)
+
+Watcher’s floating display takes inspiration from CodeBurn’s **Capacity Dock** and adds our two time totals. It supports six quota providers, including Claude and Codex, with Weekly as their default and a 5-hour toggle. OS threshold notifications and additional adapters remain in the [adoption backlog](docs/codeburn-upstream-review.md).
 
 ---
 
@@ -46,7 +90,7 @@ npm install -g exe-watcher
 ```bash
 exe-watcher menubar            # install + launch
 exe-watcher menubar --force    # reinstall latest
-exe-watcher menubar --version v0.2.38  # install a specific version
+exe-watcher menubar --version v0.2.60  # install a specific version
 exe-watcher                    # on macOS: prompts to install menubar app
 ```
 
@@ -60,24 +104,79 @@ A Swift/SwiftUI popover that lives in your menu bar. Today's spend is always vis
 - **Activity breakdown** — Research, Building, Debugging, DevOps, Testing, and Planning with cost, turns, and one-shot rate.
 - **Model breakdown** — See which models are driving spend and call volume.
 - **Project spend** — Per-project cost across today / 7d / 30d.
+- **AI time** — AI running, elapsed busy, and estimated interaction time for the selected period, with timing coverage details.
+- **AI Employees** — Exe OS memory growth and employee spend, when local daemon data is available.
 - **Optimization findings** — Menubar links open the full optimizer or report directly in Terminal.
-- **Subscription tracking** — Claude Pro ($20/mo), Claude Max ($200/mo), Cursor Pro ($20/mo), or custom monthly budgets.
+- **Plan budgets** — Compare API-equivalent spend with built-in monthly budget presets or a custom budget.
+- **Live Claude capacity** — Five-hour and weekly utilization, reset times, and projections from the signed-in Claude account. This optional view uses provider credentials and may request macOS Keychain access.
 - **Capacity estimation** — Derives likely token limits from usage patterns when hard caps aren't published.
 - **Multi-currency** — USD, GBP, EUR, JPY, AUD, CAD, CHF, CNY, SEK, NOK, DKK, NZD, SGD, HKD, KRW, INR, BRL.
+- **Animated owl** — Glances and blinks while the popover is visible, with Reduce Motion support.
 
 macOS pushes usage-log change notifications to Watcher; there is no repeating background usage scan. Rapid writes are combined, with at least two minutes of rest after a scan and longer after slow scans (nine times the scan duration). A failed notification gets at most two spaced retries before waiting for new data or a user action. Watcher also catches up on launch/wake and explicit user actions. Only one CLI child runs at a time, at low scheduling priority, with a 256 MiB V8 heap limit and a 60-second timeout. Historical and provider detail views load on demand. Failed scans retain the last successful total, including across app restarts on the same date; missing data after midnight displays a dash until a scan succeeds.
+
+### AI time
+
+The menu bar dashboard and full terminal report show three times beneath the spending overview. They follow the selected day, 7 days, 30 days, month or all-time view, with the same provider and project filters:
+
+- **AI running:** recorded run time added across agents. Two agents running for one hour add two hours. Duplicate run IDs copied into forks count once.
+- **Elapsed busy:** time when at least one agent was running. Those two parallel agents count as one elapsed hour.
+- **Your time ≈:** an interaction estimate from reply-to-next-prompt gaps of up to five minutes, merged across chats. Known subagents and longer idle gaps are excluded. This does not measure attention, typing or time reading while an agent runs; unidentified automation may be included.
+
+Timing recovery starts July 1, 2025 and uses retained local evidence. **Partial history** stays visible; missing timing is **Unknown**, never zero. Recorded durations may include tool execution and waiting, rather than only time generating tokens. Open runs are not extended to the present.
+
+| Client | Available timing evidence |
+|--------|---------------------------|
+| Claude Code | Recorded turn durations; older prompt/reply clocks are inferred |
+| Codex | Completed/interrupted run boundaries or durations; older reply clocks are inferred |
+| Cursor IDE | Saved conversation message start/end clocks, when retained |
+| Cursor Agent | Timestamped CLI result durations; ordinary text transcripts lack clocks |
+| Copilot | Saved assistant turn start/end pairs |
+| OpenCode | Completed message clocks, including archived sessions and subagents; late/missing completions use short inferred spans from saved parts |
+| Kimi Code | Native saved step boundaries, including separate agents |
+| Pi / OMP | Inferred prompt-to-final-reply spans |
+
+Inferred spans are capped at 30 minutes; longer unmeasured gaps remain unknown. Deleted logs, unsupported formats and sessions without complete clocks cannot supply a full lifetime total. Provider details show how many files have usable timing in the selected period.
+
+Timing uses a separate private index and leaves financial history intact. Existing usage-file events trigger small bounded updates; no extra polling service is installed. Historical recovery advances saved byte cursors in bounded passes, without rereading unchanged transcripts.
+
+The menu bar continues known unfinished timing work in separate timing-only steps, without waiting for another file change or rerunning cost scans. Only one CLI child runs at a time; each step rests for at least nine times its elapsed runtime. Catch-up stops when the queue clears, an incomplete final record needs more data, a step fails, or two steps make no progress. Cost freshness timestamps stay unchanged. Provider file counts mean files with timing **in the selected view**, out of all discovered files.
+
+```bash
+exe-watcher time --period all                  # saved/recent timing and coverage
+exe-watcher time --period week --format json
+exe-watcher time --recover --period all        # one bounded historical pass
+```
+
+Repeat a recovery pass while files remain pending and progress advances. Automatic parsing is capped at 16 MiB per update; explicit historical parsing at 256 MiB per pass. Incomplete or unreadable records remain clearly marked.
+
+### Memory and spend per AI employee
+
+When [Exe OS](https://github.com/AskExe/exe-os) supplies local agent stats, Watcher adds an **AI Employees** section to the menu bar with two panels:
+
+- **Memory** — Persistent memory count for each employee, with 24h / 7d / 30d growth columns. This tracks saved knowledge records, not runtime memory consumption or memory quality.
+- **Employee Spend** — Per-employee cost across 24h / 7d / 30d, using the model-aware cost buckets supplied by Exe OS.
+
+How it works:
+
+1. Exe OS maps Claude Code sessions to employee IDs through its session-start integration.
+2. Its daemon publishes employee memory/growth and model-aware spend buckets to `~/.exe-os/agent-stats.json`.
+3. Watcher reads that local stats file; it does not open Exe OS's memory database or fetch memory contents.
+4. The CLI's project view also groups recognized agent worktree paths under their parent project.
+
+The section shows a waiting state when Exe OS is detected without stats, and marks data older than five minutes as stale. `exe-watcher agent-status` reports whether the local directory, daemon PID file, stats format and file freshness are available. Spend/time tracking works independently of Exe OS.
 
 ### Interactive TUI dashboard
 
 ```bash
-exe-watcher                    # default: 7 days
+exe-watcher report             # 7-day terminal dashboard, including on macOS
 exe-watcher today              # today only
 exe-watcher month              # this calendar month
 ```
 
 Full-screen terminal dashboard with gradient charts, responsive panels, and keyboard navigation. Breaks down spend by day, project, model, activity type, tools, MCP servers, and shell commands. Auto-refreshes every 30 seconds.
 
-**Keys:** `1`-`5` switch periods (Today / 7d / 30d / Month / All). `p` toggle providers. `c` compare mode. `o` optimize view. `q` quit.
+**Keys:** `1`-`5` switch periods (Today / 7d / 30d / Month / All); left/right arrows or Tab cycle periods. `p` switches providers. `r` refreshes. `c` opens comparison and `o` opens Optimize when available. Escape or `b` returns from Optimize; `q` quits.
 
 ### Optimize
 
@@ -124,48 +223,13 @@ Models are independent of clients: GLM, Kimi, DeepSeek, Gemini and other known m
 
 This is not universal interception of every AI request. A client must retain a supported usage format with token counts. Deleted logs, cloud-only chats and unsupported formats (including Python Kimi CLI's `~/.kimi/` Wire events and older OpenCode JSON storage) cannot be recovered automatically. Copilot's saved data currently provides output tokens only; Cursor Auto mode uses an estimate. See the table for coverage before treating a total as complete.
 
-### AI time
-
-The menu bar dashboard and full terminal report show three times beneath the spending overview. They follow the selected day, 7 days, 30 days, month or all-time view, with the same provider and project filters:
-
-- **AI running:** recorded run time added across agents. Two agents running for one hour add two hours. Duplicate run IDs copied into forks count once.
-- **Elapsed busy:** time when at least one agent was running. Those two parallel agents count as one elapsed hour.
-- **Your time ≈:** an interaction estimate from reply-to-next-prompt gaps of up to five minutes, merged across chats. Known subagents and longer idle gaps are excluded. This does not measure attention, typing or time reading while an agent runs; unidentified automation may be included.
-
-Timing recovery starts July 1, 2025 and uses retained local evidence. **Partial history** stays visible; missing timing is **Unknown**, never zero. Recorded durations may include tool execution and waiting, rather than only time generating tokens. Open runs are not extended to the present.
-
-| Client | Available timing evidence |
-|--------|---------------------------|
-| Claude Code | Recorded turn durations; older prompt/reply clocks are inferred |
-| Codex | Completed/interrupted run boundaries or durations; older reply clocks are inferred |
-| Cursor IDE | Saved conversation message start/end clocks, when retained |
-| Cursor Agent | Timestamped CLI result durations; ordinary text transcripts lack clocks |
-| Copilot | Saved assistant turn start/end pairs |
-| OpenCode | Completed message clocks, including archived sessions and subagents; late/missing completions use short inferred spans from saved parts |
-| Kimi Code | Native saved step boundaries, including separate agents |
-| Pi / OMP | Inferred prompt-to-final-reply spans |
-
-Inferred spans are capped at 30 minutes; longer unmeasured gaps remain unknown. Deleted logs, unsupported formats and sessions without complete clocks cannot supply a full lifetime total. Provider details show how many files have usable timing in the selected period.
-
-Timing uses a separate private index and leaves financial history intact. Existing usage-file events trigger small bounded updates; no extra polling service is installed. Historical recovery advances saved byte cursors in bounded passes, without rereading unchanged transcripts:
-
-The menu bar continues known unfinished timing work in separate timing-only steps, without waiting for another file change or rerunning cost scans. Only one CLI child runs at a time; each step rests for at least nine times its elapsed runtime. Catch-up stops when the queue clears, an incomplete final record needs more data, a step fails, or two steps make no progress. Cost freshness timestamps stay unchanged. Provider file counts mean files with timing **in the selected view**, out of all discovered files.
-
-```bash
-exe-watcher time --period all                  # saved/recent timing and coverage
-exe-watcher time --period week --format json
-exe-watcher time --recover --period all        # one bounded historical pass
-```
-
-Repeat a recovery pass while files remain pending and progress advances. Automatic parsing is capped at 16 MiB per update; explicit historical parsing at 256 MiB per pass. Incomplete or unreadable records remain clearly marked.
-
 ---
 
 ## CLI reference
 
 ```bash
 # Dashboard
-exe-watcher                                    # interactive (default: 7 days)
+exe-watcher report                             # interactive (default: 7 days)
 exe-watcher today                              # today only
 exe-watcher month                              # this month
 
@@ -174,7 +238,7 @@ exe-watcher report -p 30days                   # rolling 30-day window
 exe-watcher report -p all                      # everything on disk
 exe-watcher report --from 2026-04-01 --to 2026-04-10
 exe-watcher report --format json               # structured JSON to stdout
-exe-watcher status                             # compact one-liner (today + month)
+exe-watcher status                             # compact spending status
 
 # Menubar data (used by the Swift app)
 exe-watcher status --format menubar-json --period today --provider all
@@ -190,9 +254,14 @@ exe-watcher optimize -p week                   # scope to last 7 days
 exe-watcher compare                            # interactive model picker
 exe-watcher export                             # CSV (today, 7d, 30d)
 exe-watcher export -f json                     # JSON export
+
+# AI time and employee diagnostics
+exe-watcher time --period week --format json
+exe-watcher time --recover --period all
+exe-watcher agent-status                       # diagnose Exe OS stats freshness
 ```
 
-**Flags work everywhere:** `--provider`, `--project`, `--exclude`, `--from`, `--to`, and `--format json` combine freely across all commands.
+`report` supports period, provider, project, exclusion, date-range and JSON options. `today`, `month`, `status` and `export` support provider/project/exclusion filters; Optimize and Compare accept period/provider options. `time` has period/provider/project/exclusion filters and text/JSON output. Use `<command> --help` for the options each command accepts.
 
 ---
 
@@ -209,21 +278,21 @@ Supported: USD, GBP, EUR, JPY, AUD, CAD, CHF, CNY, SEK, NOK, DKK, NZD, SGD, HKD,
 
 ### Plans
 
-Track spend against your subscription quota:
+Track API-equivalent spend against a configured monthly budget:
 
 ```bash
-exe-watcher plan set claude-max        # $200/month
-exe-watcher plan set claude-pro        # $20/month
-exe-watcher plan set cursor-pro        # $20/month
+exe-watcher plan set claude-max        # built-in $200 monthly budget
+exe-watcher plan set claude-pro        # built-in $20 monthly budget
+exe-watcher plan set cursor-pro        # built-in $20 monthly budget
 exe-watcher plan set custom --monthly-usd 150 --provider claude
 exe-watcher plan set none              # disable
 ```
 
-The menubar shows a usage bar against your plan limit when a plan is active.
+These are Watcher's budget presets, not a live price list or a measurement of subscription capacity. The menu bar shows spend against the configured budget. Live Claude five-hour/weekly utilization is a separate provider-reported view.
 
 ### Model aliases
 
-If a model shows `$0.00`, your provider's model name doesn't match LiteLLM pricing data. Map it:
+If a recorded model has no verified price, Watcher keeps its tokens and warns that cost is excluded. When an alias refers to a known underlying model, map it explicitly:
 
 ```bash
 exe-watcher model-alias "my-proxy-model" "claude-opus-4-6"
@@ -231,25 +300,7 @@ exe-watcher model-alias --list
 exe-watcher model-alias --remove "my-proxy-model"
 ```
 
-Stored in `~/.config/exe-watcher/config.json`. User aliases override built-ins.
-
----
-
-## Exe OS integration
-
-When [Exe OS](https://github.com/AskExe/exe-os) is installed, Watcher auto-detects it and adds an **AI Employees** section to the menubar with two panels:
-
-- **Memory** — Per-agent memory count with 24h / 7d / 30d growth columns
-- **Employee Spend** — Per-agent cost across 24h / 7d / 30d, using model-aware pricing (Opus, Sonnet, Haiku rates applied per-model)
-
-How it works:
-
-1. Exe OS's SessionStart hook maps Claude Code sessions to agents via `~/.exe-os/session-cache/`
-2. The daemon computes `getAgentSpend()` with per-model pricing and writes `~/.exe-os/agent-stats.json` every 60 seconds
-3. Watcher reads the stats file — zero coupling, no auth, no direct database access
-4. Worktree-aware: agent worktree paths collapse into parent project names
-
-The section appears automatically when exe-os is present and hides when it's not. Also shows daemon uptime and agent memory growth trends.
+Stored in `~/.config/exe-watcher/config.json` (or beneath `XDG_CONFIG_HOME`). User aliases override built-ins. Only alias models whose identity you know; an alias supplies pricing, not proof of the underlying model.
 
 ---
 
@@ -261,6 +312,7 @@ Two components, loosely coupled via CLI output:
 Provider usage files
        ↓
 CLI: deduplicate → price tokens → cache daily totals → JSON
+     timing evidence → separate bounded timing index → time totals
        ↓
 macOS app: file notifications → one bounded CLI worker → menu bar
 ```
@@ -268,6 +320,8 @@ macOS app: file notifications → one bounded CLI worker → menu bar
 **CLI pipeline:** Parse provider session files from disk → deduplicate by message ID → compute cost per token type (input, output, cache write, cache read, web search) → aggregate by period, project, model, activity → output as TUI, JSON, or CSV.
 
 **Menubar app:** Calls `exe-watcher status --format menubar-json --period <period> --provider <provider>` → decodes JSON → renders SwiftUI popover. Usage-file notifications trigger coalesced refreshes, with catch-up on launch and wake. Period and provider views load when selected. A single CLI worker has memory, runtime, and output limits; failed scans preserve the last successful total. There is no periodic background usage scan. Security: no shell injection — validated argv arrays are passed directly to child processes, not through a shell.
+
+**Employee data:** Reads Exe OS's local summary file alongside the usage payload. The memory/spend panels use daemon-supplied employee identities and do not transmit memory records.
 
 **Deduplication** per provider: API message ID (Claude), cumulative token cross-check (Codex), conversation/timestamp (Cursor), session+message ID (OpenCode), responseId (Pi/OMP).
 
@@ -314,7 +368,7 @@ swift test --package-path mac --filter ExeWatcherUITests
 | Low 1-shot rate (Coding 30%) | Agent struggling, retry loops |
 | Opus on small turns | Overpowered model for simple tasks |
 | Bash dominated by `git status`, `ls` | Agent exploring instead of executing |
-| Conversation category dominant | Agent talking instead of doing |
+| Research dominant | Investigating, discussing approaches, or reading without edits |
 
 Starting points, not verdicts. A single experimental session with 60% cache hit is fine. That same number across weeks of work is a config issue.
 
@@ -354,10 +408,15 @@ src/
   cli.ts            Entry point (Commander.js)
   dashboard.tsx     TUI (Ink — React for terminals)
   parser.ts         Session reader, dedup, date filter
-  models.ts         LiteLLM pricing engine
+  models.ts         Pricing catalog and verified model aliases
+  official-pricing.ts  Official provider pricing overrides
   classifier.ts     Activity classifier (6 categories)
   compare-stats.ts  Model comparison engine
-  menubar-json.ts   Menubar payload builder (agent spend, project spend)
+  menubar-json.ts   Menu bar payload, employee stats and project spend
+  resource-budget.ts  Scan memory, runtime and output limits
+  history-build.ts  Resumable historical accounting
+  time-tracking.ts  AI running, elapsed busy and interaction estimates
+  time-index.ts     Separate bounded timing index and recovery
   export.ts         CSV/JSON export
   config.ts         Config management
   currency.ts       Currency conversion
@@ -370,27 +429,17 @@ tests/              CLI data integrity tests (Vitest)
 
 ## Origin & attribution
 
-Watcher is forked from [codeburn](https://github.com/getagentseal/codeburn) by [AgentSeal](https://github.com/getagentseal) (MIT license). We forked rather than contributed upstream because our roadmap diverges significantly:
+Watcher is an independently developed derivative of [CodeBurn](https://github.com/getagentseal/codeburn) by [AgentSeal](https://github.com/getagentseal), used under the MIT license. It began as a source import into a new repository on **April 24, 2026 at 14:40 Asia/Makassar (06:40 UTC)**, initially named exe-fuelbar. It is a fork in the development sense; GitHub does not list this repository as a fork.
 
-**What we changed:**
-- Rebranded to Watcher with the Exe Foundry Bold design system
-- 8 provider support (added Cursor Agent, Copilot, OMP, Pi, OpenCode)
-- Native macOS menubar app with multi-period views, provider tabs, project spend, and subscription tracking
-- Exe OS integration — per-agent spend and memory tracking for AI employee teams
-- Daily cache system (v8) with atomic writes and cold-start/progressive full-history backfill
-- Capacity estimation from usage patterns
-- Multi-currency support (17 currencies)
-- Test coverage across CLI, Swift state, resource limits, and UI smoke layers
-- Consolidated activity categories from 13 to 6
-- Fixed double-counting bugs in the menubar JSON pipeline
-- Performance: 7-day and 30-day queries from 2-5s down to ~1s via daily cache
+The [initial import](https://github.com/AskExe/exe-watcher/commit/8545e35633958ab3fd12600c1ac89c528c867904) contains 112 files identical to the corresponding files in [CodeBurn commit d3c4de0](https://github.com/getagentseal/codeburn/commit/d3c4de03759f0ded38052874fa829709d27fe7c6), whose package version was 0.8.9. Upstream's commit history was not imported.
 
-**Why we forked:**
-- Full control over the data pipeline to integrate with exe-os (our AI employee operating system)
-- Our classification model, provider support, and UI direction serve a different user base (AI-first teams running multi-agent workflows)
-- MIT license allows this — we give full credit to AgentSeal for the foundation
+**The inherited foundation** includes the CLI/TUI, eight provider integrations, the native macOS menu bar app, subscription tracking (including Claude's five-hour and weekly windows), capacity estimation, currency support, model comparisons, and optimization analysis. These were already present at import and belong in CodeBurn's credit.
 
-Thank you to AgentSeal for building the original. If you want a clean cost tracker without exe-os integration, [codeburn](https://github.com/getagentseal/codeburn) is excellent.
+**Watcher's subsequent work** includes its Exe branding and owl artwork, Exe OS agent/memory integration, bounded event-driven refreshes and history recovery, accounting and pricing corrections, native Kimi Code support, self-contained macOS packaging, and AI running/elapsed/interaction time reporting. The roadmap serves our AI employee teams and multi-agent workflows.
+
+AgentSeal's original copyright notice and the full MIT terms are preserved in [LICENSE](LICENSE) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). The notices ship with the npm package and packaged macOS app. See the [dated upstream comparison and adoption backlog](docs/codeburn-upstream-review.md) for evidence and features to evaluate.
+
+Thank you to AgentSeal and CodeBurn's contributors for the foundation.
 
 ---
 
@@ -408,7 +457,7 @@ Thank you to AgentSeal for building the original. If you want a clean cost track
 
 ## License
 
-MIT
+MIT. Includes CodeBurn by AgentSeal; see [LICENSE](LICENSE) and [third-party notices](THIRD_PARTY_NOTICES.md).
 
 ---
 

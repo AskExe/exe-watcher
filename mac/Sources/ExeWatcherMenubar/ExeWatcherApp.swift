@@ -66,8 +66,10 @@ struct ExeWatcherApp: App {
 final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private var statusItem: NSStatusItem!
     private var popover: NSPopover!
-    private let store = AppStore(badgeCacheURL: FileManager.default.homeDirectoryForCurrentUser
+    private let store = AppStore(badgeCacheURL: FloatingQuotaPreview.isEnabled ? nil : FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent(".cache/exe-watcher/native-badge.json"))
+    private let quotaPreferences = FloatingQuotaPreferences(defaults: FloatingQuotaPreview.defaults)
+    private var floatingQuota: FloatingQuotaController?
     let updateChecker = UpdateChecker()
     /// Drives the popover owl: animated only between popoverWillShow and popoverDidClose.
     private let owlPresence = OwlPresence()
@@ -84,6 +86,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         NSApp.setActivationPolicy(.accessory)
         registerBundledFonts()
 
+        // Isolated visual review: no usage scans, login registration, credential reads or
+        // updater requests. Only the real floating-panel implementation uses sample data.
+        if FloatingQuotaPreview.isEnabled {
+            if FloatingQuotaPreview.showTimePreviewIfRequested() { return }
+            FloatingQuotaPreview.configure(store: store, preferences: quotaPreferences)
+            startFloatingQuota()
+            return
+        }
+
         ProcessInfo.processInfo.automaticTerminationSupportEnabled = false
         ProcessInfo.processInfo.disableSuddenTermination()
         backgroundActivity = ProcessInfo.processInfo.beginActivity(
@@ -94,6 +105,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         restorePersistedCurrency()
         setupStatusItem()
         setupPopover()
+        startFloatingQuota()
         observeStore()
         loadInitialBadge()
         startUsageLogWatcher()
@@ -212,6 +224,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        floatingQuota?.stop()
+        store.cancelSubscriptionRefresh()
         store.cancelTimeRecovery()
         healthMonitor?.stop()
         RefreshTracer.shared.instant(name: "app_terminating", category: "lifecycle", tid: .lifecycle)
@@ -410,6 +424,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
     // MARK: - Popover
 
+    private func startFloatingQuota() {
+        let controller = FloatingQuotaController(store: store, preferences: quotaPreferences, preview: FloatingQuotaPreview.isEnabled)
+        floatingQuota = controller
+        controller.start()
+    }
+
     private func setupPopover() {
         popover = NSPopover()
         popover.contentSize = NSSize(width: popoverWidth, height: popoverHeight)
@@ -421,6 +441,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             .environment(store)
             .environment(updateChecker)
             .environment(owlPresence)
+            .environment(quotaPreferences)
             .frame(width: popoverWidth)
             .preferredColorScheme(.dark)
 

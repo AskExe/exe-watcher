@@ -1,0 +1,22 @@
+{
+  "category": "logo-reveal",
+  "duration": 6,
+  "width": 512,
+  "height": 512,
+  "asset_needs": [],
+  "source": "assets/watcher-source.svg",
+  "palette": [
+    "#191527",
+    "#F5D76E"
+  ],
+  "layout": "Source logo at exact 512 square coordinates; EXE remains fixed.",
+  "motion": {
+    "body": "1.66px sine breathing; two 3s cycles",
+    "eyes": "two \u00b15.98px glances; centered black pupil holes retained",
+    "blinks": [
+      1.42,
+      4.92
+    ]
+  },
+  "catalog": "Searched logo owl character eyes blink glance (words tier). Logo-outro is a reveal rather than a character loop; hand-author the SVG-specific eye rig to preserve logo geometry."
+}

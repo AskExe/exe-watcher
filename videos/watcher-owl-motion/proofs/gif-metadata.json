@@ -1,0 +1,19 @@
+{
+  "width": 512,
+  "height": 512,
+  "frames": 90,
+  "durationMs": 6000,
+  "loop": 0,
+  "bytes": 225514,
+  "seamMeanChannelDelta": [
+    0.0065155029296875,
+    0.005832672119140625,
+    0.00222015380859375
+  ],
+  "seamChangedPixelBounds": [
+    177,
+    82,
+    364,
+    381
+  ]
+}

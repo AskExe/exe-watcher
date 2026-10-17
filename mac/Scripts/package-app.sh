@@ -101,7 +101,7 @@ cat > "${BUNDLE}/Contents/Info.plist" <<PLIST
     <key>NSHighResolutionCapable</key>
     <true/>
     <key>NSHumanReadableCopyright</key>
-    <string>© Exe AI</string>
+    <string>© 2026 Exe AI. Includes CodeBurn © 2026 AgentSeal (MIT).</string>
 </dict>
 </plist>
 PLIST
@@ -173,6 +173,9 @@ Watcher lives in your menu bar. Click the owl to see your local AI coding usage.
 Node and the Watcher CLI are included. No npm install or account is required.
 Costs are API-equivalent estimates, not subscription invoices.
 
+Includes code from CodeBurn by AgentSeal (MIT).
+License and attribution notices: Watcher by EXE.app/Contents/Resources/cli/
+
 Support: https://github.com/AskExe/exe-watcher/issues
 README
 DMG_PATH="${DIST_DIR}/Watcher-${VERSION}-universal.dmg"
@@ -190,6 +193,7 @@ fi
 cat > "${DIST_DIR}/BUILD-INFO.txt" <<INFO
 Watcher ${APP_VERSION}
 Source base revision: $(git -C "${ROOT}" rev-parse HEAD)
+Source tree: $(git -C "${ROOT}" rev-parse 'HEAD^{tree}')
 Modified tracked files: $(git -C "${ROOT}" status --porcelain --untracked-files=no | wc -l | tr -d ' ')
 Local source additions may also be included; this is not a merge receipt.
 Signing identity: ${IDENTITY}

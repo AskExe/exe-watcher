@@ -1,0 +1,1 @@
+{"duration":6,"assertions":[{"kind":"staysInFrame","selector":"#owl-motion"},{"kind":"keepsMoving","withinSelector":"#owl-motion","maxStaticSec":2}]}

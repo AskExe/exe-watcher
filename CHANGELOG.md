@@ -1,13 +1,31 @@
 # Changelog
 
+## 0.2.66 (2026-10-17)
+
+- Publish the floating quota display and AI timing work from 0.2.61–0.2.65. Claude and Codex default to Weekly with a shared 5-hour toggle; percentages show capacity **left**. Compact metric buttons, clearer numbers, an aligned animated owl, Claude sign-in, hidden unknown timing rows and suppressed focus rectangles polish the display.
+- Load real all-agent You + AI interaction estimates and AI Time independently of financial history. Persist all timing periods across restarts, retain All Time across day changes, and keep recorded totals visible during an offline refresh. AI Time includes parallel agent work; coverage depends on retained timing records.
+- Pair npm publication with a matching signed, notarized Mac release and verified source provenance. The app updater and odd.community/watcher follow the latest stable release.
+- Include CodeBurn attribution and its MIT notice in the app, npm package and README, with the documented import date and subsequent Watcher improvements.
+
 ## 0.2.65 (unreleased)
 
+- Make the floating display smaller with compact provider rings and a period pill. Turn You + AI and AI Time into metric buttons that open their explanations, with the same buttons in the detailed card.
+- Add a Claude sign-in button to the floating display and prefer Claude Code's current macOS Keychain login over old credential files. Hide provider timing rows without recorded time.
 - Add `c` to copy all optimizer recommendations and `e` to save a private Markdown file, ready to share with Claude Code. Include complete fixes and partial-analysis warnings, reuse displayed results without another scan, and show copy/save confirmation or a recoverable error.
 
 ## 0.2.64 (unreleased)
 
 - Keep the full-report optimizer useful on large histories with bounded, explicitly partial recommendations from the newest selected sessions. Retain the original hard resource limits and leave interrupted files uncached.
 - Omit unused-configuration cleanup suggestions and overall health grades when analysis is partial. Pause automatic report refresh while reading optimizer results; manual retry and period changes remain available.
+
+- Expand the floating display to six quota providers: Claude, Codex, Kimi, Cursor, GitHub Copilot and Gemini. Show multiple rings at once, switch provider details and save visibility choices, with Claude/Codex as defaults.
+- Add read-only quota adapters with independent request coalescing and cooldowns, account-scoped stale readings, tenant-bound Copilot requests and bounded HTTP responses without redirects. Never rotate or copy credentials in the new adapters; missing/unlimited allowances stay explicit.
+
+- Suppress the blue macOS focus outline on AI-time details and retry controls, matching the other popover controls.
+- Add an optional native floating display, inspired by CodeBurn's Capacity Dock, with Claude five-hour/weekly quota rings, reset timing, hover details, pinning, edge snapping and saved placement.
+- Show estimated You + AI interaction time and total AI work time across agents. Default to Today, with Week, Month and All Time controls independent of the main popover filters.
+- Share quota requests with Plan, keep stale/missing readings explicit, and use passive credential reads with rate-limit backoff. Preserve the existing bounded usage/timing workers.
+- Adopt the supplied owl's centered pupil cutouts across native artwork and app icons, and add a small looping owl GIF to the README with editable animation source.
 
 ## 0.2.63 (unreleased)
 

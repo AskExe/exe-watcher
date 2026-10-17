@@ -27,7 +27,8 @@ lipo -create "${CACHE}/node-v${NODE_VERSION}-darwin-arm64/bin/node" \
   "${CACHE}/node-v${NODE_VERSION}-darwin-x64/bin/node" -output "${CONTENTS}/Helpers/node"
 chmod 755 "${CONTENTS}/Helpers/node"
 cp "${CACHE}/node-v${NODE_VERSION}-darwin-arm64/LICENSE" "${CONTENTS}/Resources/Node-LICENSE"
-cp "${ROOT}/package.json" "${ROOT}/package-lock.json" "${ROOT}/LICENSE" "${CONTENTS}/Resources/cli/"
+cp "${ROOT}/package.json" "${ROOT}/package-lock.json" "${ROOT}/LICENSE" \
+  "${ROOT}/THIRD_PARTY_NOTICES.md" "${CONTENTS}/Resources/cli/"
 cp -R "${ROOT}/dist" "${CONTENTS}/Resources/cli/"
 find "${CONTENTS}/Resources/cli/dist" -name '*.map' -delete
 # A new directory with only explicit manifests; no .env, .npmrc, user config or development deps.
