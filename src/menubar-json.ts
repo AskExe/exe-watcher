@@ -43,7 +43,7 @@ function getCliVersion(): string {
  * Minimum menubar app version required for this CLI's JSON schema.
  * Bump when older apps would misinterpret the payload, including call coverage.
  */
-const MIN_APP_VERSION = '0.2.59'
+const MIN_APP_VERSION = '0.2.67'
 
 const TOP_ACTIVITIES_LIMIT = 20
 const TOP_MODELS_LIMIT = 20

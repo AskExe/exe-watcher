@@ -46,6 +46,80 @@ private func bundledPayload(now: Date, cost: Double = 20) -> MenubarPayload {
     return payload
 }
 
+@Suite("Resilient saved totals")
+struct SavedTotalsTests {
+    @Test("All hydrates before a slow refresh and survives its failure and next-day restart")
+    @MainActor
+    func savedBeforeSlowRefresh() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let badge = root.appendingPathComponent("badge.json")
+        let clock = TestClock(Date())
+        let gate = Gate()
+        var value = makePayload(label: "All Time", cost: 42, providers: ["claude": 42])
+        value.savedHistory = SavedHistoryStatus(through: "2026-10-15", message: "Saved history")
+        let saved = value
+        let store = AppStore(fetchPayload: { _, _, _ in
+            await gate.wait(); throw DataClientError.timeout()
+        }, now: { clock.now }, badgeCacheURL: badge, fetchSavedPayload: { _, _, _ in saved })
+        #expect(store.selectedPeriodSummaryPayload == nil)
+        #expect(store.headerStatus == "Loading…")
+        store.selectedPeriod = .all
+        let refresh = Task { await store.refresh(includeOptimize: false) }
+        await gate.waitUntilBlocked()
+        #expect(store.payload.current.cost == 42)
+        #expect(store.headerStatus == "Updating…")
+        await gate.open()
+        await refresh.value
+        #expect(store.payload.current.cost == 42)
+        #expect(store.hasCachedData)
+        #expect(store.headerStatus == "Update paused")
+        clock.now = clock.now.addingTimeInterval(86400)
+        let restarted = AppStore(fetchPayload: { _, _, _ in throw DataClientError.timeout() },
+                                 now: { clock.now }, badgeCacheURL: badge)
+        restarted.selectedPeriod = .all
+        #expect(restarted.payload.current.cost == 42)
+        #expect(restarted.hasCachedData)
+        #expect(restarted.todayPayload == nil)
+    }
+
+    @Test("smaller incomplete responses cannot erase a larger known All total")
+    @MainActor
+    func incompleteFloor() async throws {
+        let count = CallCounter()
+        let good = makePayload(label: "All Time", cost: 100_000, providers: ["claude": 100_000])
+        var value = makePayload(label: "All Time", cost: 1_049, providers: ["claude": 1_049])
+        value.savedHistory = SavedHistoryStatus(through: "2026-10-15", message: "Missing history")
+        let partial = value
+        let store = AppStore(fetchPayload: { _, _, _ in await count.next() == 1 ? good : partial })
+        store.selectedPeriod = .all
+        await store.refresh(includeOptimize: false)
+        await store.refresh(includeOptimize: false)
+        #expect(store.payload.current.cost == 100_000)
+        #expect(store.payload.savedHistory != nil)
+    }
+
+    @Test("history recovery continues advancing work and stops when progress stalls")
+    @MainActor
+    func recoveryStopsOnStall() async throws {
+        let count = CallCounter()
+        let store = AppStore(fetchPayload: { _, _, _ in
+            let step = await count.next()
+            var payload = makePayload(label: "All Time", cost: 42, providers: ["claude": 42])
+            payload.savedHistory = SavedHistoryStatus(through: "2026-10-15", message: "Missing history",
+                                                      progressToken: step == 1 ? "one" : "two")
+            return payload
+        }, restForTimeRecovery: { _ in await Task.yield() })
+        store.selectedPeriod = .all
+        await store.refresh(includeOptimize: false)
+        for _ in 0..<1000 { if await count.value() >= 3 { break }; await Task.yield() }
+        try await Task.sleep(nanoseconds: 20_000_000)
+        #expect(await count.value() == 3)
+        #expect(store.payload.current.cost == 42)
+        store.cancelTimeRecovery()
+    }
+}
+
 @Suite("Shared period snapshots")
 struct SharedPeriodSnapshotsTests {
     @Test("one daily scan supplies every period and survives restart")
@@ -489,7 +563,7 @@ struct AppStoreProviderPrefetchTests {
         await store.refreshQuietly(period: .today)
 
         #expect(store.payload.diagnostics?.warnings.isEmpty == false)
-        #expect(store.dataMayBeStale == false)
+        #expect(store.headerStatus == nil)
     }
 
     @Test("header stays anchored to the all-provider total when a provider tab is selected")

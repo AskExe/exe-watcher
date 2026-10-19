@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.67 (unreleased)
+
+- Open saved All totals before scanning, retain them through failures, restarts and midnight, and continue bounded recovery only while it advances. Show loading before the first result and specific update states instead of a misleading zero/stale warning.
+- Keep counted API-equivalent dollar amounts fixed when pricing feeds refresh. Preserve committed daily totals, cancel obsolete automatic repricing, and retain hashed usage prices separately from temporary parsing caches. Latest rates apply to newly counted accounting records; unknown costs remain distinct from free usage.
+- Use “Watcher” in launch and timeout messages.
+
 ## 0.2.66 (2026-10-17)
 
 - Publish the floating quota display and AI timing work from 0.2.61–0.2.65. Claude and Codex default to Weekly with a shared 5-hour toggle; percentages show capacity **left**. Compact metric buttons, clearer numbers, an aligned animated owl, Claude sign-in, hidden unknown timing rows and suppressed focus rectangles polish the display.

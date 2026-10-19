@@ -7,6 +7,7 @@ import { calculateCost, getShortModelName } from './models.js'
 import { parseHistoryStartDate } from './history-start.js'
 import type { DailyEntry } from './daily-cache.js'
 import type { PeriodData } from './menubar-json.js'
+import { lockRecordedCosts } from './recorded-costs.js'
 
 export type RecoveryTokens = { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number }
 export type ClaudeUsageSnapshot = {
@@ -20,6 +21,17 @@ export type HistoricalRecovery = RecoveryTokens & {
   costUSD: number
   models: Array<RecoveryTokens & { name: string; model: string; costUSD: number }>
   note: string
+}
+
+/** Undated recovered counters are estimates, but an unchanged estimate must not
+ * fluctuate just because the pricing feed refreshed. */
+export function lockClaudeRecovery(recovery: HistoricalRecovery | null): HistoricalRecovery | null {
+  if (!recovery) return null
+  const rows = recovery.models.map(row => ({ ...row, provider: 'claude', deduplicationKey: 'claude-stats-recovery',
+    cacheCreationInputTokens: row.cacheWriteTokens, cacheReadInputTokens: row.cacheReadTokens }))
+  lockRecordedCosts(rows)
+  const models = recovery.models.map((row, index) => ({ ...row, costUSD: rows[index]!.costUSD }))
+  return { ...recovery, models, costUSD: models.reduce((sum, row) => sum + row.costUSD, 0) }
 }
 const fields = ['inputTokens', 'outputTokens', 'cacheReadTokens', 'cacheWriteTokens'] as const
 const emptyTokens = (): RecoveryTokens => ({ inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 })
@@ -129,7 +141,7 @@ export function recoverClaudeUsage(snapshot: ClaudeUsageSnapshot | null, recorde
   return {
     source: 'claude-stats-cache', throughDate: snapshot.lastComputedDate, ...totals,
     costUSD: models.reduce((sum, row) => sum + row.costUSD, 0), models,
-    note: 'Includes historical Claude token counters missing from retained transcripts, reconciled per model and token type to avoid double-counting. Their dates, calls, projects, request sizes, cache TTL and speed are unavailable; recovered cost uses latest standard API rates, short-context rates and 5-minute cache writes. Time-based discounts cannot be reconstructed. Earlier usage without logs or counters remains unknown.',
+    note: 'Includes historical Claude token counters missing from retained transcripts, reconciled per model and token type to avoid double-counting. Their dates, calls, projects, request sizes, cache TTL and speed are unavailable; recovered cost uses the standard rates available when counted, short-context rates and 5-minute cache writes. Saved estimates are not revalued on pricing refresh. Time-based discounts cannot be reconstructed. Earlier usage without logs or counters remains unknown.',
   }
 }
 
@@ -149,5 +161,5 @@ export async function getClaudeRecoveryForRange(range: { start: Date; end: Date 
       recorded.set(model, total)
     }
   }
-  return recoverClaudeUsage(snapshot, recorded, range.start)
+  return lockClaudeRecovery(recoverClaudeUsage(snapshot, recorded, range.start))
 }

@@ -42,13 +42,14 @@ describe('period snapshots', () => {
   })
   it('does not claim missing or incomplete dates are complete totals', () => {
     const cache = fixture(); cache.days = cache.days.filter(d => d.date !== '2026-10-13')
-    expect(Object.keys(build(cache))).toEqual(['today'])
+    expect(Object.keys(build(cache))).toEqual(['today', 'all'])
+    expect(build(cache).all!.savedHistory?.message).toContain('not the complete All total')
     const partial = fixture(); partial.partialDates = ['2026-10-13']
-    expect(Object.keys(build(partial))).toEqual(['today'])
+    expect(Object.keys(build(partial))).toEqual(['today', 'all'])
     const repricing = fixture(); repricing.needsRepricing = true
-    expect(Object.keys(build(repricing))).toEqual(['today'])
+    expect(Object.keys(build(repricing))).toEqual(['today', 'all'])
     const missingProvider = fixture(); missingProvider.missingProviders = ['kimi']
-    expect(Object.keys(build(missingProvider))).toEqual(['today'])
+    expect(Object.keys(build(missingProvider))).toEqual(['today', 'all'])
   })
   it('rejects incomplete selected history while allowing Today and complete windows', () => {
     const cache = fixture()
@@ -62,9 +63,16 @@ describe('period snapshots', () => {
     ]) {
       expect(() => assertHistoryComplete(incomplete, '2026-07-01', '2026-10-14')).toThrow('Historical usage is incomplete')
       expect(() => assertHistoryComplete(incomplete, '2026-10-14', '2026-10-14')).not.toThrow()
-      expect(build(incomplete).all).toBeUndefined()
+      if (incomplete.days.length) expect(build(incomplete).all!.savedHistory).toBeDefined()
+      else expect(build(incomplete).all).toBeUndefined()
     }
     expect(() => assertHistoryComplete({ ...cache, partialDates: ['2026-07-01'] }, '2026-10-01', '2026-10-14')).not.toThrow()
+  })
+  it('never presents Today alone or empty placeholder days as saved All history', () => {
+    const empty = fixture(); empty.days = []
+    expect(build(empty).all).toBeUndefined()
+    empty.days = fillMissingDays(date('2026-10-01'), date('2026-10-02'), [])
+    expect(build(empty).all).toBeUndefined()
   })
   it('uses the same provider buckets for aggregates and filtered views', () => {
     const cache = fixture()

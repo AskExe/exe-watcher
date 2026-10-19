@@ -20,6 +20,7 @@ struct CachedPayload {
     let fetchedAt: Date
     var historicalValidatedAt: Date? = nil
     func isFresh(now: Date, period: Period) -> Bool {
+        if payload.savedHistory != nil { return false }
         let ttl = period == .today ? todayCacheTTLSeconds : historicalCacheTTLSeconds
         let timestamp = period == .today ? fetchedAt : historicalValidatedAt ?? fetchedAt
         return now.timeIntervalSince(timestamp) < ttl
@@ -113,6 +114,8 @@ final class AppStore {
     private let restForTimeRecovery: TimeRecoveryRest
     @ObservationIgnored private var timeRecoveryTask: Task<Void, Never>?
     @ObservationIgnored private var timeRecoveryPacer = TimeRecoveryPacer()
+    @ObservationIgnored private var historyRecoveryTask: Task<Void, Never>?
+    private var pausedHistoryToken: String?
     private let now: AppStoreDateProvider
     private let badgeCacheURL: URL?
     private var periodCacheURL: URL? {
@@ -129,6 +132,7 @@ final class AppStore {
     /// Same-key requests share ownership; the process runner admits one child globally.
     private let badgeAdmission = FetchAdmission(limit: 1)
     private let detailAdmission = FetchAdmission(limit: 1)
+    private let fetchSavedPayload: MenubarPayloadFetcher?
     private var fetchTasks: [PayloadCacheKey: Task<MenubarPayload, Error>] = [:]
     /// Incremented when macOS resumes/unlocks and we intentionally discard stale in-flight
     /// bookkeeping. Fetches that started before the generation changed are ignored on return so
@@ -139,6 +143,7 @@ final class AppStore {
         fetchPayload: @escaping MenubarPayloadFetcher = DataClient.fetch,
         now: @escaping AppStoreDateProvider = Date.init,
         badgeCacheURL: URL? = nil,
+        fetchSavedPayload: MenubarPayloadFetcher? = nil,
         fetchTimeSnapshots: @escaping TimeSnapshotsFetcher = { try await DataClient.fetchTimeSnapshots(provider: $0) },
         restForTimeRecovery: @escaping TimeRecoveryRest = { try await Task.sleep(for: .seconds($0)) },
         fetchSubscription: @escaping SubscriptionUsageFetcher = { try await SubscriptionClient.fetch(allowKeychainPrompt: $0) },
@@ -146,6 +151,7 @@ final class AppStore {
         fetchProviderQuota: @escaping ProviderQuotaFetcher = { try await ProviderQuotaClient.fetch($0, allowKeychainPrompt: $1) }
     ) {
         self.fetchPayload = fetchPayload
+        self.fetchSavedPayload = fetchSavedPayload
         self.fetchTimeSnapshots = fetchTimeSnapshots
         self.restForTimeRecovery = restForTimeRecovery
         self.fetchProviderQuota = fetchProviderQuota
@@ -168,15 +174,21 @@ final class AppStore {
         if let url = periodCacheURL,
            let data = try? SafeFile.read(from: url.path, maxBytes: 20 * 1024 * 1024),
            let saved = try? JSONDecoder().decode(PeriodCacheSnapshot.self, from: data),
-           saved.version == 1, saved.dateAnchor == todayKey.dateAnchor {
+           saved.version == 1 {
             for entry in saved.entries {
                 guard let period = Period(rawValue: entry.period),
                       let provider = ProviderFilter(rawValue: entry.provider),
                       entry.fetchedAt <= now(),
+                      (saved.dateAnchor == todayKey.dateAnchor || period == .all),
                       (try? DataClient.validate(entry.payload)) != nil else { continue }
                 let target = PayloadCacheKey(period: period, provider: provider, now: now())
                 if cache[target].map({ $0.fetchedAt > entry.fetchedAt }) == true { continue }
-                cache[target] = CachedPayload(payload: entry.payload, fetchedAt: entry.fetchedAt,
+                var payload = entry.payload
+                if saved.dateAnchor != todayKey.dateAnchor && payload.savedHistory == nil {
+                    payload.savedHistory = SavedHistoryStatus(through: saved.dateAnchor,
+                        message: "Showing the saved All total from \(saved.dateAnchor). Updating newer history.")
+                }
+                cache[target] = CachedPayload(payload: payload, fetchedAt: entry.fetchedAt,
                                               historicalValidatedAt: entry.historicalValidatedAt)
             }
         }
@@ -346,6 +358,7 @@ final class AppStore {
         timeRecoveryTask?.cancel()
         timeRecoveryPacer.reset()
         timeRecoveryMessage = nil
+        historyRecoveryTask?.cancel()
     }
 
     func retryTimeRecovery() {
@@ -359,12 +372,25 @@ final class AppStore {
         for period in Period.allCases {
             guard let snapshot = snapshots[period.cliArg] else { continue }
             let target = key(period: period, provider: provider, includeOptimize: false)
+            if snapshot.savedHistory != nil, let existing = cache[target],
+               existing.payload.current.cost > snapshot.current.cost {
+                // An incomplete rollup must not replace a larger previously known total.
+                var retained = existing.payload
+                retained.savedHistory = snapshot.savedHistory
+                cache[target] = CachedPayload(payload: retained, fetchedAt: existing.fetchedAt,
+                    historicalValidatedAt: existing.historicalValidatedAt)
+                errorsByKey.removeValue(forKey: target)
+                retryAfter.removeValue(forKey: target)
+                failureCounts.removeValue(forKey: target)
+                continue
+            }
             let payload = MenubarPayload(
                 generated: fresh.generated, cliVersion: fresh.cliVersion, minAppVersion: fresh.minAppVersion,
                 current: snapshot.current, optimize: MenubarPayload.empty.optimize, history: fresh.history,
                 diagnostics: snapshot.diagnostics, agentStats: fresh.agentStats,
                 exeOsDetected: fresh.exeOsDetected, statsFileAge: fresh.statsFileAge, projectSpend: snapshot.projectSpend,
-                time: Self.newerTime(cache[target]?.payload.time, snapshot.time)
+                time: Self.newerTime(cache[target]?.payload.time, snapshot.time),
+                savedHistory: snapshot.savedHistory
             )
             cache[target] = CachedPayload(payload: payload, fetchedAt: now(),
                 historicalValidatedAt: Date(timeIntervalSince1970: snapshot.historyValidatedAt / 1000))
@@ -411,7 +437,8 @@ final class AppStore {
                 exeOsDetected: body.exeOsDetected,
                 statsFileAge: body.statsFileAge,
                 projectSpend: body.projectSpend,
-                time: Self.newerTime(basePayload.payload.time, optimizedPayload.payload.time)
+                time: Self.newerTime(basePayload.payload.time, optimizedPayload.payload.time),
+                savedHistory: body.savedHistory
             )
         }
     }
@@ -477,14 +504,16 @@ final class AppStore {
         payload.optimize.findingCount
     }
 
-    /// An idle day does not need a fresh scan. Age only matters when the OS has
-    /// notified us of usage that has not yet been refreshed.
-    private static let staleAgeLimitSeconds: TimeInterval = 600
-    var dataMayBeStale: Bool {
-        if baseLastError != nil || lastBadgeRefreshError != nil { return true }
-        guard let lastSuccess = lastBadgeRefreshSuccessAt else { return false }
-        guard let changed = lastUsageChangeAt, changed > lastSuccess else { return false }
-        return now().timeIntervalSince(changed) > Self.staleAgeLimitSeconds
+    /// Loading is not zero spend. Only actual work is labelled as updating;
+    /// failures remain actionable without suggesting recorded charges expired.
+    var headerStatus: String? {
+        let summaryKey = key(period: selectedPeriod, provider: .all, includeOptimize: false)
+        if selectedPeriodSummaryPayload == nil {
+            return errorsByKey[summaryKey] == nil ? "Loading…" : "Update unavailable"
+        }
+        if inFlightKeys.contains(summaryKey) { return "Updating…" }
+        if errorsByKey[summaryKey] != nil { return "Update paused" }
+        return selectedPeriodSummaryPayload?.savedHistory != nil ? "Saved total" : nil
     }
 
     func noteUsageChange() { lastUsageChangeAt = now() }
@@ -560,6 +589,18 @@ final class AppStore {
 
     @discardableResult
     private func refreshKey(_ key: PayloadCacheKey, includeOptimize: Bool, allowCached: Bool = false) async -> Bool {
+        // All is an absolute accumulated amount. Keep it across day rollover;
+        // date-relative windows still expire normally.
+        for (previous, saved) in Array(cache) where previous.period == .all && !previous.includeOptimize && previous.dateAnchor != key.dateAnchor {
+            let target = self.key(period: .all, provider: previous.provider, includeOptimize: false)
+            if cache[target] == nil {
+                var retained = saved.payload
+                retained.savedHistory = retained.savedHistory ?? SavedHistoryStatus(through: previous.dateAnchor,
+                    message: "Showing the saved All total from \(previous.dateAnchor). Updating newer history.")
+                cache[target] = CachedPayload(payload: retained, fetchedAt: saved.fetchedAt,
+                    historicalValidatedAt: saved.historicalValidatedAt)
+            }
+        }
         // Date-scoped data never accumulates indefinitely as the app stays open.
         cache = cache.filter { $0.key.dateAnchor == key.dateAnchor }
         errorsByKey = errorsByKey.filter { $0.key.dateAnchor == key.dateAnchor }
@@ -596,6 +637,17 @@ final class AppStore {
                 if allowCached && self.isFresh(key) { throw CancellationError() }
                 self.activeFetchCount += 1
                 defer { self.activeFetchCount -= 1 }
+                // Hydrate All before a potentially slow history scan. The CLI reads
+                // only its small committed rollup, with no provider or price I/O.
+                if key.period == .all && !includeOptimize && self.cache[key] == nil,
+                   let fetchSaved = self.fetchSavedPayload,
+                   let saved = try? await fetchSaved(key.period, key.provider, false),
+                   generation == self.refreshGeneration, !Task.isCancelled {
+                    try DataClient.validate(saved)
+                    self.cache[key] = CachedPayload(payload: saved, fetchedAt: self.now())
+                    self.persistPeriods()
+                }
+                try Task.checkCancellation()
                 let result = try await fetcher(key.period, key.provider, includeOptimize)
                 try Task.checkCancellation()
                 if generation == self.refreshGeneration && !includeOptimize {
@@ -633,6 +685,11 @@ final class AppStore {
             fresh.time = Self.newerTime(cache[key]?.payload.time, fresh.time)
             failureCounts.removeValue(forKey: key)
             retryAfter.removeValue(forKey: key)
+            if fresh.savedHistory != nil, let existing = cache[key], existing.payload.current.cost > fresh.current.cost {
+                var retained = existing.payload
+                retained.savedHistory = fresh.savedHistory
+                fresh = retained
+            }
             cache[key] = CachedPayload(payload: fresh, fetchedAt: now())
             if !includeOptimize {
                 ingestPeriods(from: fresh, provider: key.provider, dateAnchor: key.dateAnchor)
@@ -643,6 +700,7 @@ final class AppStore {
             RefreshTracer.shared.endSpan(spanId, args: ["result": .string("success")])
             healthMonitor?.recordFetchResult(success: true)
             if !includeOptimize { scheduleTimeRecovery(fresh.time?.recovery) }
+            if !includeOptimize { scheduleHistoryRecovery() }
             return true
         } catch {
             if error is CancellationError {
@@ -669,6 +727,38 @@ final class AppStore {
 
     private func isFresh(_ key: PayloadCacheKey) -> Bool {
         cache[key]?.isFresh(now: now(), period: key.period) ?? false
+    }
+
+    /// Continue only known, advancing history work. Share the normal child gate,
+    /// rest for nine times the previous work duration, and stop on any stall/error.
+    private func scheduleHistoryRecovery() {
+        let target = key(period: .all, provider: .all, includeOptimize: false)
+        guard historyRecoveryTask == nil,
+              let token = cache[target]?.payload.savedHistory?.progressToken,
+              token != pausedHistoryToken else { return }
+        let generation = refreshGeneration
+        historyRecoveryTask = Task(priority: .utility) { [weak self] in
+            guard let self else { return }
+            defer { self.historyRecoveryTask = nil }
+            var previous = token
+            var delay: TimeInterval = 2
+            do {
+                while !Task.isCancelled {
+                    try await self.restForTimeRecovery(delay)
+                    try Task.checkCancellation()
+                    guard generation == self.refreshGeneration,
+                          target.dateAnchor == self.currentBaseKey.dateAnchor else { return }
+                    let started = ProcessInfo.processInfo.systemUptime
+                    guard await self.refreshKey(target, includeOptimize: false) else {
+                        self.pausedHistoryToken = previous; return
+                    }
+                    guard let next = self.cache[target]?.payload.savedHistory?.progressToken else { return }
+                    guard next != previous else { self.pausedHistoryToken = next; return }
+                    previous = next
+                    delay = max(2, (ProcessInfo.processInfo.systemUptime - started) * 9)
+                }
+            } catch { /* Cancellation leaves saved amounts and scan progress intact. */ }
+        }
     }
 
     /// Refresh payload for key only when missing or stale.

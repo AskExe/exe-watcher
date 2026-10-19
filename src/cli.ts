@@ -1,6 +1,6 @@
 import { getCacheDir } from './cache-dir.js'
 import { acquireFileLock } from './file-lock.js'
-import { ResourceBudgetError } from './resource-budget.js'
+import { ResourceBudgetError, withScanBudget, withScanSlice } from './resource-budget.js'
 import { existsSync, readFileSync, statSync } from 'fs'
 import { join } from 'path'
 import { homedir } from 'os'
@@ -27,8 +27,9 @@ import { clampResetDay, getPlanUsageOrNull, type PlanUsage } from './plan-usage.
 import { getPresetPlan, isPlanId, isPlanProvider, planDisplayName } from './plans.js'
 import { MAX_BLOCKED_CHUNK_ATTEMPTS, computeProgressiveBackfillStart, nextBackfillCursor, planBackfillChunks, resolveColdStartHistoryDays, shouldSkipBlockedChunk } from './progressive-backfill.js'
 import { parseHistoryStartDate, resolveHistoryStart } from './history-start.js'
-import { applyClaudeRecovery, readClaudeUsageSnapshot, recoverClaudeUsage, sumClaudeModelTokens, getClaudeRecoveryForRange } from './claude-recovery.js'
-import { assertHistoryComplete, buildPeriodSnapshots } from './period-snapshots.js'
+import { applyClaudeRecovery, readClaudeUsageSnapshot, recoverClaudeUsage, lockClaudeRecovery, sumClaudeModelTokens, getClaudeRecoveryForRange } from './claude-recovery.js'
+import { assertHistoryComplete, buildPeriodSnapshots, hasRecordedHistory } from './period-snapshots.js'
+import { buildSavedHistory } from './saved-history.js'
 import { completeHistoryBuild } from './history-build.js'
 import { createInterface } from 'node:readline'
 import { createRequire } from 'node:module'
@@ -182,14 +183,14 @@ const program = new Command()
   .version(version)
   .option('--verbose', 'print warnings to stderr on read failures and skipped files')
 
-program.hook('preAction', async (thisCommand) => {
+program.hook('preAction', async (thisCommand, command) => {
   const config = await readConfig()
   setModelAliases(config.modelAliases ?? {})
   configuredHistoryStart = parseHistoryStartDate(config.historyStartDate)
   if (thisCommand.opts<{ verbose?: boolean }>().verbose) {
     process.env['EXE_WATCHER_VERBOSE'] = '1'
   }
-  await loadCurrency()
+  if (!command.opts().cachedOnly) await loadCurrency()
 })
 
 function buildJsonReport(projects: ProjectSummary[], period: string, periodKey: string) {
@@ -420,7 +421,14 @@ program
   .option('--exclude <name>', 'Exclude projects matching name (repeatable)', collect, [])
   .option('--period <period>', 'Primary period for menubar-json: today, week, 30days, month, all', 'today')
   .option('--no-optimize', 'Skip optimize findings (menubar-json only, faster)')
+  .option('--cached-only', 'Read saved All totals without scanning or networking (menubar-json only)')
   .action(async (opts) => {
+    if (opts.cachedOnly) {
+      if (opts.format !== 'menubar-json' || opts.period !== 'all' || opts.optimize !== false) throw new Error('--cached-only requires menubar-json, --period all and --no-optimize')
+      const cache = await loadDailyCache(buildDailyCacheScopeKey(opts.project, opts.exclude))
+      console.log(JSON.stringify(buildSavedHistory(cache, toDateString(new Date()), opts.provider)))
+      return
+    }
     await loadPricing()
     const pf = opts.provider
     const fp = (p: ProjectSummary[]) => filterProjectsByName(p, opts.project, opts.exclude)
@@ -512,7 +520,7 @@ program
         return true
       }
 
-      const cache = await withDailyCacheLock(async () => {
+      const cache = await withScanBudget(() => withScanSlice(() => withDailyCacheLock(async () => {
         let c = await loadDailyCache(dailyCacheScope)
 
         // The always-visible badge must not rebuild or revalidate history on every
@@ -538,11 +546,8 @@ program
           if (pausedHistory(c)) return c
         }
 
-        // Reprice retained history in one compact scan per provider, preserving
-        // request-level context tiers and cache TTLs. Aggregated daily tokens
-        // alone cannot reproduce those prices. Fall back to resumable slices
-        // if a large corpus exceeds its scan budget.
-        if (c.needsRepricing || (opts.period === 'all' && c.days.length === 0)) {
+        // Recover missing history, without revaluing previously counted usage.
+        if (opts.period === 'all' && c.days.length === 0) {
           const start = parseHistoryStartDate(c.previousHistoryStart) ?? historyStart
           if (start <= yesterdayEnd) {
             c = await buildHistory(c, start, yesterdayEnd)
@@ -550,13 +555,8 @@ program
           }
         }
 
-        // Revalidate late-arriving historical usage at most once every five minutes.
-        const hadYesterday = c.days.some(d => d.date >= yesterdayStr)
-        if (hadYesterday && (!c.revalidatedAt || Date.now() - c.revalidatedAt >= 5 * 60_000)) {
-          const freshDays = c.days.filter(d => d.date < yesterdayStr)
-          const latestFresh = freshDays.length > 0 ? freshDays[freshDays.length - 1]?.date ?? null : null
-          c = { ...c, days: freshDays, lastComputedDate: latestFresh }
-        }
+        // Closed days are committed amounts, not a live-price projection. Fill new
+        // dates and missing providers below; never evict a priced day on a timer.
 
         // --- FORWARD GAP: fill from lastComputedDate through yesterday ---
         const oldestCachedDate = c.days.length > 0 ? c.days[0]?.date ?? null : null
@@ -595,9 +595,13 @@ program
         }
 
         return c
-      })
+      }), { maxMs: 10_000, maxBytes: 8 * 1024 ** 3, maxRecords: 2_000_000 }), 2_000_000, undefined, 8 * 1024 ** 3)
 
-      assertHistoryComplete(cache, toDateString(periodInfo.range.start), toDateString(todayStart))
+      // Explicitly labelled saved All history is useful even if newer slices
+      // could not finish. Other periods still require their full date window.
+      if (!(opts.period === 'all' && opts.optimize === false && hasRecordedHistory(cache, toDateString(todayStart)))) {
+        assertHistoryComplete(cache, toDateString(periodInfo.range.start), toDateString(todayStart))
+      }
 
       // CURRENT PERIOD DATA
       // - .all provider: assemble from cache + today (fast)
@@ -694,7 +698,7 @@ program
       let historicalRecovery = null as ReturnType<typeof recoverClaudeUsage>
       if ((opts.period === 'all' || opts.optimize === false) && (isAllProviders || pf === 'claude') && !opts.project.length && !opts.exclude.length && !cache.partialDates?.length && !cache.backfill) {
         const snapshot = await readClaudeUsageSnapshot()
-        historicalRecovery = recoverClaudeUsage(snapshot, sumClaudeModelTokens([...cache.days, ...todayDays], snapshot?.lastComputedDate ?? ''), historyStart)
+        historicalRecovery = lockClaudeRecovery(recoverClaudeUsage(snapshot, sumClaudeModelTokens([...cache.days, ...todayDays], snapshot?.lastComputedDate ?? ''), historyStart))
         if (historicalRecovery && opts.period === 'all') {
           applyClaudeRecovery(currentData, historicalRecovery)
           const claudeProvider = providers.find(p => p.name.toLowerCase() === 'claude')
@@ -850,7 +854,9 @@ program
       if (periodSnapshots) for (const [key, snapshot] of Object.entries(periodSnapshots)) {
         snapshot.time = summarizeTime(timeIndex, getDateRange(key, now).range, pf, opts.project, opts.exclude)
       }
-      const json = JSON.stringify({ ...payload, time, periodSnapshots, costBasis: 'api-equivalent', pricing: getPricingMetadata(), historicalRecovery: opts.period === 'all' ? historicalRecovery : null })
+      const json = JSON.stringify({ ...payload, time, periodSnapshots,
+        ...(opts.period === 'all' && periodSnapshots?.all?.savedHistory ? { savedHistory: periodSnapshots.all.savedHistory } : {}),
+        costBasis: 'api-equivalent', pricing: getPricingMetadata(), historicalRecovery: opts.period === 'all' ? historicalRecovery : null })
       console.log(json)
       return
     }
@@ -1297,7 +1303,7 @@ program
 let releaseScan: (() => Promise<void>) | undefined
 const stopParentWatch = watchMenubarParent(Number(process.env['EXE_WATCHER_PARENT_PID']))
 program.hook('preAction', async (_root, command) => {
-  if (command.name() === 'status') releaseScan = await acquireFileLock(join(getCacheDir(), 'scan.lock'))
+  if (command.name() === 'status' && !command.opts().cachedOnly) releaseScan = await acquireFileLock(join(getCacheDir(), 'scan.lock'))
 })
 program.hook('postAction', async () => { await releaseScan?.(); releaseScan = undefined; stopParentWatch() })
 

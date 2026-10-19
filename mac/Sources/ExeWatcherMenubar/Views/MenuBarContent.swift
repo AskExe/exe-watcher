@@ -55,6 +55,27 @@ struct MenuBarContent: View {
                     Divider().opacity(0.5)
                     PeriodSegmentedControl()
                     Divider().opacity(0.5)
+                    if let saved = store.payload.savedHistory {
+                        Text(saved.message)
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(.orange)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 8)
+                    }
+                    if store.hasCachedData, let error = store.baseLastError {
+                        HStack {
+                            Text("Update paused. Your saved total is kept.")
+                                .help(error)
+                            Spacer()
+                            Button("Retry update") { Task { await store.refresh(includeOptimize: false) } }
+                                .buttonStyle(.borderless)
+                        }
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
+                    }
                     AITimeSection()
                     Divider().opacity(0.5)
                     if isFilteredEmpty {
@@ -245,13 +266,13 @@ private struct Header: View {
             }
             Spacer()
             VStack(alignment: .trailing, spacing: 3) {
-                Text(store.headerPayload.current.cost.asCurrency())
+                Text(store.selectedPeriodSummaryPayload.map { $0.current.cost.asCurrency() } ?? "—")
                     .font(.system(size: 22, weight: .semibold, design: .rounded))
                     .monospacedDigit()
                     .tracking(-0.5)
                     .foregroundStyle(Theme.brandAccent)
-                if store.dataMayBeStale {
-                    Text("Data may be stale")
+                if let status = store.headerStatus {
+                    Text(status)
                         .font(.system(size: 9, weight: .medium))
                         .foregroundStyle(.orange.opacity(0.8))
                 }

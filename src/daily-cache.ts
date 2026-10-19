@@ -8,7 +8,7 @@ import type { BackfillCursor } from './progressive-backfill.js'
 import { getPricingFingerprint } from './models.js'
 
 // v9 includes native Kimi Code logs. Valid v8 rows are retained while the
-// missing provider is indexed; prices still invalidate all affected rows.
+// missing provider is indexed. Recorded dollar amounts survive price updates.
 export const DAILY_CACHE_VERSION = 9
 export const DEFAULT_DAILY_CACHE_SCOPE = 'global'
 const DAILY_CACHE_FILENAME = 'daily-cache.json'
@@ -145,11 +145,16 @@ export async function loadDailyCache(scopeKey = DEFAULT_DAILY_CACHE_SCOPE): Prom
     const parsed: unknown = JSON.parse(raw)
     if (!isValidCache(parsed)) return emptyCache(scopeKey)
     if (parsed.scopeKey !== scopeKey) return emptyCache(scopeKey)
-    if ((parsed.days.length || parsed.historyBuild) && parsed.pricingFingerprint !== getPricingFingerprint()) {
-      // Keep the committed baseline until its replacement is complete. These rows
-      // are explicitly stale, never advertised as current-price period snapshots.
-      return { ...parsed, version: DAILY_CACHE_VERSION, historyBuild: undefined,
-        needsRepricing: true, previousHistoryStart: parsed.days[0]?.date ?? parsed.historyBuild?.start }
+    // Recorded amounts are final. Price feeds affect newly observed usage only.
+    // Cancel an old automatic repricing stage without touching committed rows.
+    if (parsed.needsRepricing) {
+      const repricing = parsed.historyBuild
+      if (parsed.days.length) {
+        parsed.historyBuild = undefined
+        parsed.backfill = repricing?.previousBackfill ?? null
+      }
+      delete parsed.needsRepricing
+      delete parsed.previousHistoryStart
     }
     if (parsed.version !== DAILY_CACHE_VERSION) {
       return { ...parsed, version: DAILY_CACHE_VERSION, historyBuild: undefined,

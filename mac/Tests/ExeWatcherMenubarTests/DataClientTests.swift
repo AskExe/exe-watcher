@@ -45,18 +45,18 @@ struct DataClientErrorMessageTests {
     @Test("CLI not found gets a human-readable message")
     func cliNotFoundMessage() {
         let error = DataClientError.nonZeroExit(code: 127, stderr: "env: exe-watcher: No such file or directory\n")
-        #expect(error.errorDescription == "The exe-watcher CLI was not found. Reinstall it (`npm install -g exe-watcher`) or set EXE_WATCHER_BIN.")
+        #expect(error.errorDescription == "Watcher's bundled command was not found. Reinstall Watcher or set EXE_WATCHER_BIN.")
     }
 
     @Test("timeout gets a retryable message with default duration")
     func timeoutMessage() {
         let error = DataClientError.timeout()
-        #expect(error.errorDescription == "exe-watcher timed out after 60 seconds. Retry once the machine is idle.")
+        #expect(error.errorDescription == "Watcher timed out after 60 seconds. Your saved totals are kept; retry when the Mac is less busy.")
     }
 
     @Test("badge timeout gets a retryable message with shorter duration")
     func badgeTimeoutMessage() {
         let error = DataClientError.timeout(seconds: 15)
-        #expect(error.errorDescription == "exe-watcher timed out after 15 seconds. Retry once the machine is idle.")
+        #expect(error.errorDescription == "Watcher timed out after 15 seconds. Your saved totals are kept; retry when the Mac is less busy.")
     }
 }
