@@ -1,10 +1,11 @@
 # Changelog
 
-## 0.2.67 (unreleased)
+## 0.2.67 (2026-10-19)
 
 - Open saved All totals before scanning, retain them through failures, restarts and midnight, and continue bounded recovery only while it advances. Show loading before the first result and specific update states instead of a misleading zero/stale warning.
 - Keep counted API-equivalent dollar amounts fixed when pricing feeds refresh. Preserve committed daily totals, cancel obsolete automatic repricing, and retain hashed usage prices separately from temporary parsing caches. Latest rates apply to newly counted accounting records; unknown costs remain distinct from free usage.
 - Use “Watcher” in launch and timeout messages.
+- Require Node 22.13 or newer for terminal installs and test both the minimum supported runtime and current Node 22. The Mac app includes its own compatible runtime.
 
 ## 0.2.66 (2026-10-17)
 

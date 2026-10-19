@@ -8,7 +8,7 @@
   <a href="https://www.npmjs.com/package/exe-watcher"><img src="https://img.shields.io/npm/v/exe-watcher.svg" alt="npm version" /></a>
   <a href="https://www.npmjs.com/package/exe-watcher"><img src="https://img.shields.io/npm/dt/exe-watcher.svg" alt="total downloads" /></a>
   <a href="https://github.com/AskExe/exe-watcher/blob/main/LICENSE"><img src="https://img.shields.io/npm/l/exe-watcher.svg" alt="license" /></a>
-  <a href="https://github.com/AskExe/exe-watcher"><img src="https://img.shields.io/badge/node-%3E%3D22.5.0-brightgreen.svg" alt="node version" /></a>
+  <a href="https://github.com/AskExe/exe-watcher"><img src="https://img.shields.io/badge/node-%3E%3D22.13.0-brightgreen.svg" alt="node version" /></a>
   <a href="https://discord.gg/pJ2DMWvtAx"><img src="https://img.shields.io/badge/discord-join-5865F2?logo=discord&logoColor=white" alt="Discord" /></a>
 </p>
 
@@ -22,14 +22,16 @@ Exe Watcher shows what your AI coding work costs, how long the agents run, and h
 
 **macOS app:** Download the universal DMG from [Releases](https://github.com/AskExe/exe-watcher/releases/latest), drag **Watcher by EXE** into **Applications**, and open it. macOS 14+ on Apple Silicon or Intel. From 0.2.55, Node and the CLI are included.
 
-**Terminal CLI** (Node 22.5+):
+**Terminal CLI** (Node 22.13+):
+
+Node 23.0–23.3 require an upgrade to 23.4 or newer; SQLite is unavailable by default on those older versions.
 
 ```bash
 npm install -g exe-watcher
 exe-watcher report
 ```
 
-Version 0.2.66 brings AI time, automatic timing catch-up and the floating quota display to the packaged app. All Time timing survives restarts and refreshes independently of cost history. Download the matching app from [Releases](https://github.com/AskExe/exe-watcher/releases/latest) or [odd.community/watcher](https://odd.community/watcher). To run the current CLI from source:
+Version 0.2.67 preserves recorded API-equivalent costs and keeps saved All totals available through refresh failures, restarts and day changes. AI time and the floating quota display are included. Terminal installs require Node 22.13 or newer; the Mac app includes its own compatible runtime. Download the matching app from [Releases](https://github.com/AskExe/exe-watcher/releases/latest) or [odd.community/watcher](https://odd.community/watcher). To run the current CLI from source:
 
 ```bash
 git clone https://github.com/AskExe/exe-watcher.git

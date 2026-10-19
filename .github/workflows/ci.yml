@@ -10,10 +10,11 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        # Must match engines.node in package.json (>=22.5.0). ink@7 requires
+        # Test the minimum supported SQLite runtime and latest Node 22.
+        # Match the Node 22 floor in engines.node (22.13.0). ink@7 requires
         # node >=22 and tsup builds for target node22, so 18 and 20 cannot run
         # the CLI at all — testing them was testing something we do not ship.
-        node-version: [22]
+        node-version: [22.13.0, 22]
     steps:
       - uses: actions/checkout@v4
 
