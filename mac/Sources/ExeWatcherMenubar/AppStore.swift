@@ -647,6 +647,7 @@ final class AppStore {
                     self.cache[key] = CachedPayload(payload: saved, fetchedAt: self.now())
                     self.persistPeriods()
                 }
+                try Task.checkCancellation()
                 let result = try await fetcher(key.period, key.provider, includeOptimize)
                 try Task.checkCancellation()
                 if generation == self.refreshGeneration && !includeOptimize {

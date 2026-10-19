@@ -1,6 +1,6 @@
 import { getCacheDir } from './cache-dir.js'
 import { acquireFileLock } from './file-lock.js'
-import { ResourceBudgetError, withScanSlice } from './resource-budget.js'
+import { ResourceBudgetError, withScanBudget, withScanSlice } from './resource-budget.js'
 import { existsSync, readFileSync, statSync } from 'fs'
 import { join } from 'path'
 import { homedir } from 'os'
@@ -520,7 +520,7 @@ program
         return true
       }
 
-      const cache = await withScanSlice(() => withDailyCacheLock(async () => {
+      const cache = await withScanBudget(() => withScanSlice(() => withDailyCacheLock(async () => {
         let c = await loadDailyCache(dailyCacheScope)
 
         // The always-visible badge must not rebuild or revalidate history on every
@@ -595,7 +595,7 @@ program
         }
 
         return c
-      }), { maxMs: 10_000, maxBytes: 1024 * 1024 * 1024, maxRecords: 200_000 })
+      }), { maxMs: 10_000, maxBytes: 8 * 1024 ** 3, maxRecords: 2_000_000 }), 2_000_000, undefined, 8 * 1024 ** 3)
 
       // Explicitly labelled saved All history is useful even if newer slices
       // could not finish. Other periods still require their full date window.

@@ -511,7 +511,8 @@ function applyContextTier(costs: ModelCosts | null, inputTokens: number): ModelC
 let fingerprintPricing: Map<string, ModelCosts> | null | undefined
 let fingerprintAliases: typeof userAliases
 let fingerprintValue = ''
-/** Parsed result caches must not survive pricing or alias changes. */
+/** Identifies rates for new calculations and retrying previously unpriced usage.
+ * Already priced file snapshots and committed dollar amounts remain valid. */
 export function getPricingFingerprint(): string {
   if (!fingerprintValue || fingerprintPricing !== pricingCache || fingerprintAliases !== userAliases) {
     fingerprintPricing = pricingCache
