@@ -155,9 +155,9 @@ export function getPricingLastUpdated(): number | null {
 }
 
 export function getPricingMetadata() {
-  return { basis: 'latest-rates' as const, currency: 'USD', refreshedAt: _pricingLastUpdated ? new Date(_pricingLastUpdated).toISOString() : null,
+  return { basis: 'recorded-rates' as const, currency: 'USD', refreshedAt: _pricingLastUpdated ? new Date(_pricingLastUpdated).toISOString() : null,
     fallbackVerifiedOn: verifiedPricing.verifiedOn, sources: OFFICIAL_PRICING_SOURCES,
-    note: 'Historical and current usage are valued at the latest available API list rates. This is an API-equivalent estimate, not a reconstruction of past invoices.' }
+    note: 'Counted usage keeps its recorded API-equivalent cost. Latest available rates apply to newly observed usage; price refreshes do not revalue saved history. This is an estimate, not a reconstruction of invoices.' }
 }
 
 function getCachePath(): string {

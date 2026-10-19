@@ -67,7 +67,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private var statusItem: NSStatusItem!
     private var popover: NSPopover!
     private let store = AppStore(badgeCacheURL: FloatingQuotaPreview.isEnabled ? nil : FileManager.default.homeDirectoryForCurrentUser
-        .appendingPathComponent(".cache/exe-watcher/native-badge.json"))
+        .appendingPathComponent(".cache/exe-watcher/native-badge.json"), fetchSavedPayload: DataClient.fetchSaved)
     private let quotaPreferences = FloatingQuotaPreferences(defaults: FloatingQuotaPreview.defaults)
     private var floatingQuota: FloatingQuotaController?
     let updateChecker = UpdateChecker()

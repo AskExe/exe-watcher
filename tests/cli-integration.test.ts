@@ -1,4 +1,5 @@
 import { DAILY_CACHE_VERSION } from '../src/daily-cache.js'
+import { fillMissingDays } from '../src/day-aggregator.js'
 import { execSync } from 'child_process'
 import { join } from 'path'
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync } from 'fs'
@@ -58,6 +59,24 @@ describe('exe-watcher --help', () => {
 })
 
 describe('exe-watcher status', () => {
+  it('reads saved All without scanning, price requests, or waiting for the ingestion lock', () => {
+    const dir = join(testHome, '.cache/exe-watcher')
+    mkdirSync(dir, { recursive: true })
+    const days = fillMissingDays(new Date('2025-07-01T00:00:00'), new Date('2025-07-01T00:00:00'), [])
+    days[0]!.cost = 42; days[0]!.calls = 10
+    const old = JSON.stringify({ version: DAILY_CACHE_VERSION, scopeKey: 'global', days,
+      lastComputedDate: '2025-07-01', needsRepricing: true })
+    writeFileSync(join(dir, 'daily-cache.json'), old)
+    // A live process owns the scanner. Reading atomic committed data needs no writer lease.
+    writeFileSync(join(dir, 'scan.lock'), `${process.pid}:fixture`)
+    try {
+      const result = run('status --format menubar-json --period all --no-optimize --cached-only', { EXE_WATCHER_MAX_SCAN_BYTES: '1' })
+      expect(result.status).toBe(0)
+      expect(JSON.parse(result.stdout).current.cost).toBe(42)
+      expect(JSON.parse(result.stdout).savedHistory.through).toBe('2025-07-01')
+      expect(readFileSync(join(dir, 'daily-cache.json'), 'utf8')).toBe(old)
+    } finally { rmSync(join(dir, 'scan.lock'), { force: true }) }
+  })
   it('returns failure instead of successful zero when the current scan exceeds its budget', { timeout: 15_000 }, () => {
     const result = run('status --format menubar-json --period today --no-optimize', { EXE_WATCHER_MAX_SCAN_BYTES: '1' })
     expect(result.status).not.toBe(0)
@@ -89,7 +108,7 @@ describe('exe-watcher status', () => {
     expect(saved.backfill).toBeNull()
     expect(saved.partialDates).toEqual([])
     expect(saved.days.length).toBeGreaterThan(0)
-    expect(JSON.parse(result.stdout).pricing.basis).toBe('latest-rates')
+    expect(JSON.parse(result.stdout).pricing.basis).toBe('recorded-rates')
   })
   it('outputs Today/Month line with cost and exits 0', { timeout: 15_000 }, () => {
     const { stdout, status } = run('status')

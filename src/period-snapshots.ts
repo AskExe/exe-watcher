@@ -4,8 +4,10 @@ import { buildPeriodDataFromDays, filterDaysToProvider } from './day-aggregator.
 import { buildMenubarPayload, buildProjectSpendFromDays, type MenubarPayload } from './menubar-json.js'
 import { getModelCosts } from './models.js'
 import type { TimeReport } from './time-tracking.js'
+import { createHash } from 'node:crypto'
 
 export type PeriodSnapshot = {
+  savedHistory?: { through: string; message: string; progressToken?: string }
   time?: TimeReport
   current: MenubarPayload['current']
   projectSpend: MenubarPayload['projectSpend']
@@ -13,6 +15,10 @@ export type PeriodSnapshot = {
   historyValidatedAt: number
 }
 export type SnapshotWindow = { key: string; start: string; label: string }
+
+export function hasRecordedHistory(cache: DailyCache, today: string): boolean {
+  return cache.days.some(day => day.date < today && (day.cost > 0 || day.calls > 0 || day.inputTokens > 0 || day.outputTokens > 0))
+}
 
 /** A staged provider scan is not a complete replacement for committed history. */
 export function assertHistoryComplete(cache: DailyCache, start: string, today: string): void {
@@ -45,7 +51,17 @@ export function buildPeriodSnapshots(
   for (const window of windows) {
     const required = Math.max(0, Math.round((Date.parse(today) - Date.parse(window.start)) / 86_400_000))
     const covered = [...dates].filter(d => d >= window.start && !partial.has(d)).length
-    if (window.key !== 'today' && (cache.needsRepricing || cache.historyBuild || cache.missingProviders?.length || covered !== required)) continue
+    const incomplete = window.key !== 'today' && (cache.needsRepricing || cache.historyBuild || cache.missingProviders?.length || covered !== required)
+    // An All view can show committed amounts while newer dates are recovered.
+    // Never manufacture a historical total from today's usage alone.
+    const committed = closed.filter(day => day.date >= window.start).sort((a, b) => a.date.localeCompare(b.date))
+    const savedHistory = incomplete && window.key === 'all' && committed.some(day => day.cost > 0 || day.calls > 0 || day.inputTokens > 0 || day.outputTokens > 0)
+      ? { through: committed.at(-1)!.date,
+        progressToken: createHash('sha256').update(JSON.stringify([cache.lastComputedDate, cache.days.length,
+          cache.historyBuild?.completedProviders, cache.historyBuild?.chunked, cache.missingProviders, cache.partialDates])).digest('hex'),
+        message: `Saved history through ${committed.at(-1)!.date}${live.length ? ', plus today' : ''}. Some history is still missing; this is not the complete All total.` }
+      : undefined
+    if (incomplete && !savedHistory) continue
     const selected = periodDays(window.start)
     const scoped = provider === 'all' ? selected : filterDaysToProvider(selected, provider)
     const data = buildPeriodDataFromDays(scoped, window.label)
@@ -69,6 +85,7 @@ export function buildPeriodSnapshots(
       : [{ name: names.get(provider) ?? provider, cost: data.cost }]
     const built = buildMenubarPayload(data, providers, null)
     result[window.key] = {
+      ...(savedHistory ? { savedHistory } : {}),
       current: built.current,
       projectSpend: buildProjectSpendFromDays(selected, live, periodDays(week.start), periodDays(month.start)),
       diagnostics: { daysCount: selected.length, parseTimeMs, warnings: notes },

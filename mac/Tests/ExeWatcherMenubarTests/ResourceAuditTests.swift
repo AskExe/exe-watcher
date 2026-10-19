@@ -48,7 +48,7 @@ struct ResourceAuditTests {
         await store.refreshTodayBadge()
         #expect(store.todayPayload?.current.cost == 300)
         #expect(store.lastBadgeRefreshError != nil)
-        #expect(store.dataMayBeStale)
+        #expect(store.headerStatus == "Update paused")
         await store.refreshTodayBadge()
         #expect(await responses.count == 2)
     }

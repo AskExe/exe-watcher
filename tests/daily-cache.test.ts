@@ -61,18 +61,18 @@ describe('loadDailyCache', () => {
     expect(cache.days[0]!.cost).toBe(10); expect(cache.needsRepricing).toBeUndefined()
     expect(cache.missingProviders).toEqual(['kimi'])
   })
-  it('invalidates uncommitted repricing progress when prices change again', async () => {
+  it('keeps cold historical recovery progress without requiring repricing', async () => {
     await saveDailyCache({ version: DAILY_CACHE_VERSION, scopeKey: DEFAULT_DAILY_CACHE_SCOPE,
       lastComputedDate: null, days: [], needsRepricing: true,
       historyBuild: { start: '2026-04-01', end: '2026-04-10', completedProviders: ['claude'], days: [emptyDay('2026-04-10', 10)] } })
     expect((await loadDailyCache()).historyBuild?.days).toHaveLength(1)
     setModelAliases({ 'custom-model': 'gpt-6-astra' })
     const cache = await loadDailyCache()
-    expect(cache.historyBuild).toBeUndefined()
-    expect(cache.needsRepricing).toBe(true)
-    expect(cache.previousHistoryStart).toBe('2026-04-01')
+    expect(cache.historyBuild?.days).toHaveLength(1)
+    expect(cache.needsRepricing).toBeUndefined()
+    expect(cache.previousHistoryStart).toBeUndefined()
   })
-  it('preserves committed history as stale until repricing finishes', async () => {
+  it('preserves committed history as final when pricing changes', async () => {
     await saveDailyCache({ version: DAILY_CACHE_VERSION, scopeKey: DEFAULT_DAILY_CACHE_SCOPE,
       lastComputedDate: '2026-04-10', days: [emptyDay('2026-04-10', 10)] })
     expect((await loadDailyCache()).days).toHaveLength(1)
@@ -80,9 +80,23 @@ describe('loadDailyCache', () => {
     const stale = await loadDailyCache()
     expect(stale.days).toHaveLength(1)
     expect(stale.days[0]!.cost).toBe(10)
-    expect(stale.needsRepricing).toBe(true)
+    expect(stale.needsRepricing).toBeUndefined()
     await saveDailyCache(stale)
-    expect((await loadDailyCache()).needsRepricing).toBe(true)
+    expect((await loadDailyCache()).needsRepricing).toBeUndefined()
+  })
+  it('cancels an old automatic repricing stage without replacing committed amounts', async () => {
+    const days = [emptyDay('2026-04-10', 10)]
+    await saveDailyCache({ version: DAILY_CACHE_VERSION, scopeKey: DEFAULT_DAILY_CACHE_SCOPE,
+      lastComputedDate: '2026-04-10', days, needsRepricing: true, previousHistoryStart: '2026-04-01',
+      backfill: { blockedDate: '2026-04-01', attempts: 1 },
+      historyBuild: { start: '2026-04-01', end: '2026-04-10', completedProviders: ['claude'],
+        days: [emptyDay('2026-04-10', 90)], previousBackfill: null } })
+    const restored = await loadDailyCache()
+    expect(restored.days).toEqual(days)
+    expect(restored.lastComputedDate).toBe('2026-04-10')
+    expect(restored.needsRepricing).toBeUndefined()
+    expect(restored.historyBuild).toBeUndefined()
+    expect(restored.backfill).toBeNull()
   })
   it('returns an empty cache when the file does not exist', async () => {
     const cache = await loadDailyCache()

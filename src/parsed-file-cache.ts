@@ -9,8 +9,9 @@ import { chargeRead, ResourceBudgetError } from './resource-budget.js'
 import { acquireFileLock } from './file-lock.js'
 import { readDiscoveryFact, rememberDiscoveryFact } from './discovery-cache.js'
 import type { DateRange } from './types.js'
+import { lockRecordedCosts } from './recorded-costs.js'
 
-const VERSION = 3
+const VERSION = 4
 const compress = promisify(gzip)
 const decompress = promisify(gunzip)
 const MAX_ENTRY = 16 * 1024 * 1024
@@ -29,11 +30,13 @@ async function fingerprint(path: string): Promise<string | null> {
  */
 export async function cachedFileParse<T>(path: string, kind: string, parse: () => Promise<T[]>, warnings?: string[], range?: DateRange): Promise<T[]> {
   const dir = join(getCacheDir(), 'parsed-files')
-  const key = createHash('sha256').update(`${VERSION}:${kind}:${path}:${getPricingFingerprint()}`).digest('hex')
+  const key = createHash('sha256').update(`${VERSION}:${kind}:${path}`).digest('hex')
   const cachePath = join(dir, `v${VERSION}-${key}.json.gz`)
+  const legacyKey = createHash('sha256').update(`3:${kind}:${path}:${getPricingFingerprint()}`).digest('hex')
+  const legacyPath = join(dir, `v3-${legacyKey}.json.gz`)
   const fingerprintPath = kind === 'opencode' ? path.slice(0, path.lastIndexOf(':')) : path
   const before = await fingerprint(fingerprintPath)
-  const rangeKind = `usage-range:${VERSION}:${kind}`
+  const rangeKind = `usage-range:3:${kind}` // Existing verified date bounds do not depend on prices.
   const bounds = range && before
     ? await readDiscoveryFact<{ first: number; last: number; warnings?: string[] }>(rangeKind, path, before) : undefined
   if (range && bounds && (bounds.last < range.start.getTime() || bounds.first > range.end.getTime())) {
@@ -53,26 +56,36 @@ export async function cachedFileParse<T>(path: string, kind: string, parse: () =
     // Empty files have no billable records in any window. JSON cannot store Infinity.
     await rememberDiscoveryFact(rangeKind, path, before, { first: data.length ? first : 0, last: data.length ? last : -1, warnings })
   }
+  let migrated: T[] | undefined
   if (before) {
-    try {
-      const s = await stat(cachePath)
-      if (s.size <= MAX_ENTRY) {
-        chargeRead(s.size)
-        const saved = JSON.parse((await decompress(await readFile(cachePath), { maxOutputLength: MAX_ENTRY })).toString('utf8'))
-        if (saved.v === VERSION && saved.fingerprint === before && Array.isArray(saved.data)) {
-          if (Array.isArray(saved.warnings)) warnings?.push(...saved.warnings.filter((w: unknown) => typeof w === 'string'))
-          await rememberRange(saved.data)
-          return saved.data as T[]
+    for (const candidate of [cachePath, legacyPath]) {
+      try {
+        const s = await stat(candidate)
+        if (s.size <= MAX_ENTRY) {
+          chargeRead(s.size)
+          const saved = JSON.parse((await decompress(await readFile(candidate), { maxOutputLength: MAX_ENTRY })).toString('utf8'))
+          if ((saved.v === VERSION || saved.v === 3) && saved.fingerprint === before && Array.isArray(saved.data)) {
+            if (Array.isArray(saved.warnings)) warnings?.push(...saved.warnings.filter((w: unknown) => typeof w === 'string'))
+            await rememberRange(saved.data)
+            if (saved.v === VERSION && saved.pricesLocked === true) {
+              if (!saved.hasUnpricedUsage || saved.pricingFingerprint === getPricingFingerprint()) return saved.data as T[]
+              continue // Only previously unknown prices need another parse.
+            }
+            migrated = saved.data as T[]
+            break
+          }
         }
-      }
-    } catch (err) { if (err instanceof ResourceBudgetError) throw err }
+      } catch (err) { if (err instanceof ResourceBudgetError) throw err }
+    }
   }
-  const data = await parse()
+  const data = migrated ?? await parse()
+  const hasUnpricedUsage = lockRecordedCosts(data)
   if (!before || await fingerprint(fingerprintPath) !== before) return data
   await rememberRange(data)
   // No cache can describe a moving snapshot as current. Stable files only; appends
   // invalidate by size/mtime/ctime and preserve incomplete final lines for reparse.
-  const payload = JSON.stringify({ v: VERSION, fingerprint: before, data, warnings })
+  const payload = JSON.stringify({ v: VERSION, fingerprint: before, data, warnings, pricesLocked: true,
+    hasUnpricedUsage, pricingFingerprint: getPricingFingerprint() })
   if (Buffer.byteLength(payload) > MAX_ENTRY) return data
   await mkdir(dir, { recursive: true })
   const encoded = await compress(Buffer.from(payload))
@@ -97,7 +110,7 @@ export async function cachedFileParse<T>(path: string, kind: string, parse: () =
       for (const name of files) {
         if (!name.endsWith('.json') && !name.endsWith('.json.gz') && !name.endsWith('.tmp')) continue
         // Obsolete parser versions can never be replayed; reclaim their quota.
-        if (!name.startsWith(`v${VERSION}-`)) { await unlink(join(dir, name)).catch(() => {}); continue }
+        if (!name.startsWith(`v${VERSION}-`) && !name.startsWith('v3-')) { await unlink(join(dir, name)).catch(() => {}); continue }
         const p = join(dir, name), s = await stat(p).catch(() => null)
         if (s) rows.push({ path: p, size: s.size, mtime: s.mtimeMs })
       }

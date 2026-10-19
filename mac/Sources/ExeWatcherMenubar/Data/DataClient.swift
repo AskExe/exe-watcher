@@ -10,8 +10,7 @@ private let maxStderrBytes = 256 * 1024
 private let spawnTimeoutSeconds: UInt64 = 60
 /// Badge-only fetches must tolerate large local session corpora. If this is shorter than the
 /// real `status --format menubar-json --period today --provider all --no-optimize` runtime, the
-/// always-visible badge keeps showing the last cached value and the popover warns "Data may be
-/// stale" until the user manually refreshes through the 60s detail path.
+/// always-visible badge keeps showing the last cached value until another update succeeds.
 private let badgeTimeoutSeconds: UInt64 = spawnTimeoutSeconds
 
 enum DataClientError: Error {
@@ -30,25 +29,25 @@ extension DataClientError: LocalizedError {
         case let .spawn(message):
             let cleaned = message.trimmingCharacters(in: .whitespacesAndNewlines)
             if cleaned.localizedCaseInsensitiveContains("no such file or directory") {
-                return "Couldn't launch exe-watcher. Reinstall the CLI or set EXE_WATCHER_BIN to a working binary."
+                return "Couldn't launch Watcher. Reinstall the app or set EXE_WATCHER_BIN to a working binary."
             }
-            return cleaned.isEmpty ? "Couldn't launch exe-watcher." : cleaned
+            return cleaned.isEmpty ? "Couldn't launch Watcher." : cleaned
         case let .nonZeroExit(code, stderr):
             let cleaned = stderr.trimmingCharacters(in: .whitespacesAndNewlines)
             if code == 127 || cleaned.localizedCaseInsensitiveContains("exe-watcher: no such file or directory") {
-                return "The exe-watcher CLI was not found. Reinstall it (`npm install -g exe-watcher`) or set EXE_WATCHER_BIN."
+                return "Watcher's bundled command was not found. Reinstall Watcher or set EXE_WATCHER_BIN."
             }
             if code == 126 {
-                return "The exe-watcher CLI exists but isn't executable. Reinstall it or fix its permissions."
+                return "Watcher's bundled command couldn't run. Reinstall Watcher or fix its permissions."
             }
             if cleaned.isEmpty {
-                return "exe-watcher exited with status \(code)."
+                return "Watcher stopped with status \(code)."
             }
             return cleaned
         case .decode:
             return "Watcher couldn't decode the CLI response."
         case let .timeout(seconds):
-            return "exe-watcher timed out after \(seconds) seconds. Retry once the machine is idle."
+            return "Watcher timed out after \(seconds) seconds. Your saved totals are kept; retry when the Mac is less busy."
         case .outputTooLarge:
             return "Watcher received an unexpectedly large CLI response and refused to render it."
         case let .incompleteScan(message):
@@ -62,6 +61,14 @@ extension DataClientError: LocalizedError {
 /// Runs the CLI via argv (no shell interpretation). See `ExeWatcherCLI` for why we never route
 /// commands through `/bin/zsh -c` anymore.
 struct DataClient {
+    static func fetchSaved(period: Period, provider: ProviderFilter, includeOptimize: Bool) async throws -> MenubarPayload {
+        let result = try await runCLI(subcommand: subcommand(period: .all, provider: provider, includeOptimize: false) + ["--cached-only"], timeoutSeconds: 10)
+        guard result.exitCode == 0 else {
+            throw DataClientError.nonZeroExit(code: result.exitCode, stderr: result.stderr)
+        }
+        do { return try JSONDecoder().decode(MenubarPayload.self, from: result.stdout) }
+        catch { throw DataClientError.decode(error) }
+    }
     static func fetchTimeSnapshots(provider: ProviderFilter) async throws -> TimeRecoverySnapshots {
         // Same process permit, niceness, output bounds, parent watcher and cancellation
         // as a normal fetch. This command never reparses financial usage.
@@ -121,10 +128,11 @@ struct DataClient {
     static func validate(_ payload: MenubarPayload) throws {
         if let warning = payload.diagnostics?.warnings.first(where: {
             $0.hasPrefix("parseAllSessions failed:") ||
-            $0.hasPrefix("History rebuild paused at ") ||
-            $0.hasPrefix("History repricing will resume ") ||
-            $0.hasPrefix("history backfill paused at ") ||
-            ($0.hasPrefix("history for ") && $0.contains("recorded as incomplete"))
+            (payload.savedHistory == nil && (
+                $0.hasPrefix("History rebuild paused at ") ||
+                $0.hasPrefix("History repricing will resume ") ||
+                $0.hasPrefix("history backfill paused at ") ||
+                ($0.hasPrefix("history for ") && $0.contains("recorded as incomplete"))))
         }) { throw DataClientError.incompleteScan(warning) }
     }
 

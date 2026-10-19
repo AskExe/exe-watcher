@@ -16,6 +16,7 @@ struct MenubarPayload: Codable, Sendable {
     let projectSpend: [ProjectSpendEntry]?
     var periodSnapshots: [String: PeriodSnapshot]? = nil
     var time: TimeBlock? = nil
+    var savedHistory: SavedHistoryStatus? = nil
 
     // Old same-day snapshots have no coverage fields. Their recovery warning
     // still prevents an unknown count from appearing as an exact zero or total.
@@ -39,6 +40,13 @@ struct PeriodSnapshot: Codable, Sendable {
     let diagnostics: DiagnosticsBlock?
     let historyValidatedAt: Double
     var time: TimeBlock? = nil
+    var savedHistory: SavedHistoryStatus? = nil
+}
+
+struct SavedHistoryStatus: Codable, Sendable {
+    let through: String
+    let message: String
+    var progressToken: String? = nil
 }
 
 struct TimeBlock: Codable, Sendable {
