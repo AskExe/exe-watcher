@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.70 (2026-10-20)
+
+- Track active time in supported AI apps on this Mac, with idle, lock and sleep gaps excluded. Keep a small private daily ledger, an off switch, and day, week, month, all-time and provider views. Terminal/editor attribution stays a clearly marked estimate; no Terminal control, typing, screen or Accessibility access is required.
+- Estimate historical personal time from retained main-chat sessions, merge overlapping chats once and show a 10–30 minute sensitivity range. Reuse the existing timing index, exclude subagents and long idle gaps, and clearly mark missing history.
+- Include the resumable historical usage recovery and first-time setup guidance from 0.2.68–0.2.69. Preserve recorded dollar amounts and saved totals.
+
 ## 0.2.69 (2026-10-20)
 
 - Explain during initial loading and history recovery that first-time setup can take 10 minutes or more for large AI histories, and that progress is saved automatically. Keep the existing recovery progress and incomplete-data details visible.
