@@ -29,7 +29,7 @@ fi
 for tool in swift node npm lipo codesign hdiutil curl; do
   command -v "${tool}" >/dev/null || { echo "Missing ${tool}" >&2; exit 1; }
 done
-node -e 'const [major, minor] = process.versions.node.split(".").map(Number); if (major < 22 || (major === 22 && minor < 5)) process.exit(1)'
+node -e 'const [major, minor] = process.versions.node.split(".").map(Number); if (major < 22 || (major === 22 && minor < 13) || (major === 23 && minor < 4)) process.exit(1)'
 plutil -lint "${MAC_DIR}/Scripts/node-entitlements.plist"
 bash -n "${MAC_DIR}/Scripts/bundle-runtime.sh"
 if [[ "${IDENTITY}" != - ]]; then

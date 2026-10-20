@@ -33,7 +33,7 @@
     "developer-tools"
   ],
   "engines": {
-    "node": ">=22.5.0"
+    "node": ">=22.13.0 <23 || >=23.4.0"
   },
   "author": "Exe AI <hello@askexe.com>",
   "license": "MIT",
