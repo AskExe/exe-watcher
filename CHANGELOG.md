@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.68 (2026-10-20)
+
+- Resume large Claude transcripts at the last completed record after a bounded scan, instead of rereading the same prefix on every retry.
+- Keep historical recovery moving while individual files are being indexed, and retry days that older versions left incomplete. Completed historical dollar amounts stay unchanged.
+- Store unfinished parser state separately from spending totals, within the existing cache quota. Changed source files invalidate checkpoints, and genuinely stalled scans still pause within the existing resource limits.
+
 ## 0.2.67 (2026-10-20)
 
 - Keep 7 Days and monthly views usable during incomplete history recovery, load saved period totals first, and clearly distinguish unknown totals from zero. Continue bounded recovery for the selected period and retain larger saved amounts.

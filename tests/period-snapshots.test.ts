@@ -95,6 +95,16 @@ describe('period snapshots', () => {
     expect(next.current.cost).toBe(first.current.cost)
     expect(next.savedHistory!.progressToken).not.toBe(first.savedHistory!.progressToken)
   })
+  it('keeps recovery running when a file advances before its day is complete', () => {
+    const cache = fixture(); cache.days = []
+    cache.backfill = { blockedDate: '2026-10-08', attempts: 0 }
+    const first = build(cache).week!
+    cache.historyScanProgress = 1
+    const next = build(cache).week!
+    expect(next.current.cost).toBe(first.current.cost)
+    expect(next.savedHistory!.progressToken).not.toBe(first.savedHistory!.progressToken)
+    expect(build(cache).week!.savedHistory!.progressToken).toBe(next.savedHistory!.progressToken)
+  })
   it('uses the same provider buckets for aggregates and filtered views', () => {
     const cache = fixture()
     expect(build(cache).all!.current.providers.claude).toBe(build(cache, 2, 'claude').all!.current.cost)

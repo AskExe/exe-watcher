@@ -31,7 +31,7 @@ npm install -g exe-watcher
 exe-watcher report
 ```
 
-Version 0.2.67 preserves recorded API-equivalent costs and keeps saved All totals available through refresh failures, restarts and day changes. AI time and the floating quota display are included. Terminal installs require Node 22.13 or newer; the Mac app includes its own compatible runtime. Download the matching app from [Releases](https://github.com/AskExe/exe-watcher/releases/latest) or [odd.community/watcher](https://odd.community/watcher). To run the current CLI from source:
+Version 0.2.68 resumes large Claude history scans and repairs previously skipped days within the existing resource limits. Recorded API-equivalent costs and saved totals are preserved through refresh failures, restarts and day changes. AI time and the floating quota display are included. Terminal installs require Node 22.13 or newer; the Mac app includes its own compatible runtime. Download the matching app from [Releases](https://github.com/AskExe/exe-watcher/releases/latest) or [odd.community/watcher](https://odd.community/watcher). To run the current CLI from source:
 
 ```bash
 git clone https://github.com/AskExe/exe-watcher.git
