@@ -133,6 +133,7 @@ final class PersonalActivityStore {
             cursor = finish
         }
         guard saved.recordedThrough > history!.recordedThrough else { return }
+        saved.updatedAt = ActivityHistory.stamp(now)
         history = saved
         dirty = true
         if now.timeIntervalSince(lastSave) >= 300 { flush(now: now) }
@@ -175,6 +176,6 @@ final class PersonalActivityStore {
         }
         return AppActivityBlock(activeMs: rows.reduce(0) { $0 + total($1.active) },
             contextualMs: rows.reduce(0) { $0 + total($1.contextual) }, startedAt: saved.startedAt,
-            updatedAt: ActivityHistory.stamp(now), enabled: saved.enabled)
+            updatedAt: saved.updatedAt, enabled: saved.enabled)
     }
 }

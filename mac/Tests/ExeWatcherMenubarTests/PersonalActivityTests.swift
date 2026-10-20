@@ -61,6 +61,7 @@ struct PersonalActivityTests {
         #expect(restored.error == nil)
         let summary = restored.summary(period: .all, provider: .all, now: base.addingTimeInterval(60))
         #expect(summary?.totalMs == 60_000)
+        #expect(restored.summary(period: .all, provider: .all, now: base.addingTimeInterval(3600))?.updatedAt == summary?.updatedAt)
         #expect(restored.summary(period: .all, provider: .codex, now: base.addingTimeInterval(60))?.activeMs == 30_000)
         let files = try FileManager.default.contentsOfDirectory(atPath: path.deletingLastPathComponent().path)
         #expect(files.sorted() == ["personal-activity-v1.json", "personal-activity-v1.json.lock"])
