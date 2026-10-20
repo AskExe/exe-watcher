@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.69 (2026-10-20)
+
+- Explain during initial loading and history recovery that first-time setup can take 10 minutes or more for large AI histories, and that progress is saved automatically. Keep the existing recovery progress and incomplete-data details visible.
+
 ## 0.2.68 (2026-10-20)
 
 - Resume large Claude transcripts at the last completed record after a bounded scan, instead of rereading the same prefix on every retry.
