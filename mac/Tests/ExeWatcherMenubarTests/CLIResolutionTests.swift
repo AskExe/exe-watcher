@@ -26,6 +26,26 @@ struct ExeWatcherCLIResolutionTests {
         #expect(TerminalLauncher.shellCommand(["/Applications/Henry's $Watcher.app/cli", "report"]) == "'/Applications/Henry'\\''s $Watcher.app/cli' 'report'")
     }
 
+    @Test("private report file runs literal arguments and deletes itself without Apple Events")
+    func commandFileExecutesSafely() throws {
+        let literal = "Henry's $HOME; $(echo should-not-run) \"report\""
+        let url = try TerminalLauncher.createCommandFile(argv: ["/usr/bin/printf", "%s", literal])
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        for path in [url, url.deletingLastPathComponent()] {
+            let attributes = try FileManager.default.attributesOfItem(atPath: path.path)
+            #expect((attributes[.posixPermissions] as? NSNumber)?.intValue == 0o700)
+        }
+        let output = Pipe()
+        let process = Process()
+        process.executableURL = url
+        process.standardOutput = output
+        try process.run()
+        process.waitUntilExit()
+        #expect(process.terminationStatus == 0)
+        #expect(String(data: output.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) == literal)
+        #expect(!FileManager.default.fileExists(atPath: url.path))
+    }
+
     @Test("skips broken latest NVM bins and falls back to the newest working install")
     func resolvesNewestWorkingNvmBinary() {
         let fs = ExeWatcherCLI.ResolverFilesystem(

@@ -373,10 +373,12 @@ final class AppStore {
             guard let snapshot = snapshots[period.cliArg] else { continue }
             let target = key(period: period, provider: provider, includeOptimize: false)
             if snapshot.savedHistory != nil, let existing = cache[target],
-               existing.payload.current.cost > snapshot.current.cost {
+               existing.payload.current.cost > snapshot.current.cost ||
+                (snapshot.savedHistory?.hasData == false && existing.payload.savedHistory?.hasData != false) {
                 // An incomplete rollup must not replace a larger previously known total.
                 var retained = existing.payload
                 retained.savedHistory = snapshot.savedHistory
+                retained.savedHistory?.hasData = true
                 cache[target] = CachedPayload(payload: retained, fetchedAt: existing.fetchedAt,
                     historicalValidatedAt: existing.historicalValidatedAt)
                 errorsByKey.removeValue(forKey: target)
@@ -511,6 +513,10 @@ final class AppStore {
         if selectedPeriodSummaryPayload == nil {
             return errorsByKey[summaryKey] == nil ? "Loading…" : "Update unavailable"
         }
+        if selectedPeriodSummaryPayload?.savedHistory?.hasData == false {
+            return errorsByKey[summaryKey] != nil || selectedPeriodSummaryPayload?.savedHistory?.progressToken == pausedHistoryToken
+                ? "Recovery paused" : "Recovering…"
+        }
         if inFlightKeys.contains(summaryKey) { return "Updating…" }
         if errorsByKey[summaryKey] != nil { return "Update paused" }
         return selectedPeriodSummaryPayload?.savedHistory != nil ? "Saved total" : nil
@@ -637,9 +643,9 @@ final class AppStore {
                 if allowCached && self.isFresh(key) { throw CancellationError() }
                 self.activeFetchCount += 1
                 defer { self.activeFetchCount -= 1 }
-                // Hydrate All before a potentially slow history scan. The CLI reads
+                // Hydrate historical tabs before a potentially slow history scan. The CLI reads
                 // only its small committed rollup, with no provider or price I/O.
-                if key.period == .all && !includeOptimize && self.cache[key] == nil,
+                if key.period != .today && !includeOptimize && self.cache[key] == nil,
                    let fetchSaved = self.fetchSavedPayload,
                    let saved = try? await fetchSaved(key.period, key.provider, false),
                    generation == self.refreshGeneration, !Task.isCancelled {
@@ -685,9 +691,12 @@ final class AppStore {
             fresh.time = Self.newerTime(cache[key]?.payload.time, fresh.time)
             failureCounts.removeValue(forKey: key)
             retryAfter.removeValue(forKey: key)
-            if fresh.savedHistory != nil, let existing = cache[key], existing.payload.current.cost > fresh.current.cost {
+            if fresh.savedHistory != nil, let existing = cache[key],
+               existing.payload.current.cost > fresh.current.cost ||
+                (fresh.savedHistory?.hasData == false && existing.payload.savedHistory?.hasData != false) {
                 var retained = existing.payload
                 retained.savedHistory = fresh.savedHistory
+                retained.savedHistory?.hasData = true
                 fresh = retained
             }
             cache[key] = CachedPayload(payload: fresh, fetchedAt: now())
@@ -732,7 +741,7 @@ final class AppStore {
     /// Continue only known, advancing history work. Share the normal child gate,
     /// rest for nine times the previous work duration, and stop on any stall/error.
     private func scheduleHistoryRecovery() {
-        let target = key(period: .all, provider: .all, includeOptimize: false)
+        let target = key(period: selectedPeriod == .today ? .all : selectedPeriod, provider: .all, includeOptimize: false)
         guard historyRecoveryTask == nil,
               let token = cache[target]?.payload.savedHistory?.progressToken,
               token != pausedHistoryToken else { return }

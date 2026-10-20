@@ -1,10 +1,8 @@
 import AppKit
 import Foundation
 
-/// Runs commands in the user's Terminal. Every string that reaches AppleScript `do script`
-/// is individually shell-quoted argv, OR a hardcoded literal defined here. The private
-/// `runInTerminal` re-validates any non-literal input defensively so a future caller can't
-/// bypass the invariant.
+/// Opens a private command file with Terminal, without controlling the app through
+/// Apple Events. Each argument is shell-quoted independently.
 /// Falls back to a detached headless spawn on machines without Terminal.app (iTerm/Ghostty/Warp
 /// users) so the subcommand still runs.
 enum TerminalLauncher {
@@ -13,16 +11,35 @@ enum TerminalLauncher {
         "/Applications/Utilities/Terminal.app",
     ]
 
-    static func open(subcommand: [String]) {
+    @MainActor private static var openingReport = false
+
+    @MainActor static func open(subcommand: [String]) {
         let argv = ExeWatcherCLI.baseArgv() + subcommand
         guard subcommand.allSatisfy(ExeWatcherCLI.isSafe) else {
             NSLog("Exe Watcher: refusing to open terminal with unsafe argv")
             return
         }
-        let command = shellCommand(argv)
-
-        if terminalPaths.contains(where: FileManager.default.fileExists(atPath:)) {
-            runInTerminal(command: command, preValidated: true)
+        if let terminal = terminalPaths.first(where: FileManager.default.fileExists(atPath:)) {
+            guard !openingReport else { return }
+            openingReport = true
+            Task {
+                defer { openingReport = false }
+                var scriptURL: URL?
+                do {
+                    let url = try createCommandFile(argv: argv)
+                    scriptURL = url
+                    let configuration = NSWorkspace.OpenConfiguration()
+                    configuration.activates = true
+                    _ = try await NSWorkspace.shared.open([url], withApplicationAt: URL(fileURLWithPath: terminal), configuration: configuration)
+                    Task {
+                        try? await Task.sleep(for: .seconds(1800))
+                        try? FileManager.default.removeItem(at: url.deletingLastPathComponent())
+                    }
+                } catch {
+                    if let scriptURL { try? FileManager.default.removeItem(at: scriptURL.deletingLastPathComponent()) }
+                    NSLog("Watcher: could not open report: \(error)")
+                }
+            }
             return
         }
 
@@ -39,6 +56,21 @@ enum TerminalLauncher {
     /// Each argument is quoted independently, including an app name containing spaces or quotes.
     static func shellCommand(_ argv: [String]) -> String {
         argv.map { "'" + $0.replacingOccurrences(of: "'", with: "'\\''") + "'" }.joined(separator: " ")
+    }
+
+    static func createCommandFile(argv: [String]) throws -> URL {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("watcher-report-" + UUID().uuidString)
+        let url = directory.appendingPathComponent("Watcher Report.command")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+        do {
+            let script = "#!/bin/zsh\n/bin/rm -f -- \"$0\"\nexec " + shellCommand(argv) + "\n"
+            try Data(script.utf8).write(to: url, options: .atomic)
+            try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: url.path)
+            return url
+        } catch {
+            try? FileManager.default.removeItem(at: directory)
+            throw error
+        }
     }
 
     /// Let Claude Code own its browser login and credential writes. Opening a private
@@ -76,28 +108,4 @@ enum TerminalLauncher {
         }
     }
 
-    private static func runInTerminal(command: String, preValidated: Bool) {
-        if !preValidated {
-            let tokens = command.split(separator: " ", omittingEmptySubsequences: true).map(String.init)
-            guard tokens.allSatisfy(ExeWatcherCLI.isSafe) else {
-                NSLog("Exe Watcher: refusing to run unvalidated command in Terminal")
-                return
-            }
-        }
-        // `activate` first asks a cold Terminal to create its default window; a
-        // subsequent untargeted `do script` creates a second one. Open our report
-        // before activating, without reusing a user's existing shell.
-        let script = """
-        on run argv
-        tell application "Terminal"
-            do script (item 1 of argv)
-            activate
-        end tell
-        end run
-        """
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-        process.arguments = ["-e", script, command]
-        try? process.run()
-    }
 }

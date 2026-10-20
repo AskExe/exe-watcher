@@ -59,6 +59,26 @@ describe('exe-watcher --help', () => {
 })
 
 describe('exe-watcher status', () => {
+  it('reads the saved weekly window offline without including older All usage', () => {
+    const dir = join(testHome, '.cache/exe-watcher')
+    mkdirSync(dir, { recursive: true })
+    const yesterday = new Date(); yesterday.setDate(yesterday.getDate() - 1)
+    const day = fillMissingDays(yesterday, yesterday, [])[0]!
+    day.cost = 7; day.calls = 2
+    const older = fillMissingDays(new Date('2025-07-01T00:00:00'), new Date('2025-07-01T00:00:00'), [])[0]!
+    older.cost = 100; older.calls = 5
+    const cache = JSON.stringify({ version: DAILY_CACHE_VERSION, scopeKey: 'global', days: [older, day], lastComputedDate: day.date })
+    writeFileSync(join(dir, 'daily-cache.json'), cache)
+    writeFileSync(join(dir, 'scan.lock'), `${process.pid}:fixture`)
+    try {
+      const result = run('status --format menubar-json --period week --no-optimize --cached-only', { EXE_WATCHER_MAX_SCAN_BYTES: '1' })
+      expect(result.status).toBe(0)
+      const payload = JSON.parse(result.stdout)
+      expect(payload.current.cost).toBe(7)
+      expect(payload.savedHistory.message).toContain('Last 7 Days')
+      expect(readFileSync(join(dir, 'daily-cache.json'), 'utf8')).toBe(cache)
+    } finally { rmSync(join(dir, 'scan.lock'), { force: true }) }
+  })
   it('reads saved All without scanning, price requests, or waiting for the ingestion lock', () => {
     const dir = join(testHome, '.cache/exe-watcher')
     mkdirSync(dir, { recursive: true })

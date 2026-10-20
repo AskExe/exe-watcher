@@ -108,7 +108,8 @@ struct MenuBarContent: View {
                     )
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else if showInitialLoadingOverlay {
-                    BurnLoadingOverlay(periodLabel: store.selectedPeriod.rawValue)
+                    BurnLoadingOverlay(periodLabel: store.selectedPeriod.rawValue,
+                        recoveryMessage: store.payload.savedHistory?.hasData == false ? store.payload.savedHistory?.message : nil)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .allowsHitTesting(false)
                 }
@@ -143,6 +144,7 @@ struct MenuBarContent: View {
     }
 
     private var showInitialLoadingOverlay: Bool {
+        if store.payload.savedHistory?.hasData == false { return true }
         guard !store.hasCachedData && store.payload.generated.isEmpty else { return false }
         return store.isCurrentSelectionLoading
     }
@@ -185,7 +187,9 @@ private struct EmptyProviderState: View {
 /// Translucent overlay that blurs whatever's behind it (the previous tab/period content)
 /// and centers an animated owl icon pulsing with the brand palette.
 private struct BurnLoadingOverlay: View {
+    @Environment(AppStore.self) private var store
     let periodLabel: String
+    var recoveryMessage: String? = nil
 
     private let iconSize: CGFloat = 48
 
@@ -195,13 +199,24 @@ private struct BurnLoadingOverlay: View {
                 .fill(.ultraThinMaterial)
 
             VStack(spacing: 14) {
-                AnimatedOwl(size: iconSize, color: .white)
-                    .opacity(0.82)
-                    .frame(width: iconSize, height: iconSize)
+                if recoveryMessage != nil && store.headerStatus == "Recovery paused" {
+                    OwlIcon(size: iconSize).opacity(0.82)
+                } else {
+                    AnimatedOwl(size: iconSize, color: .white)
+                        .opacity(0.82)
+                        .frame(width: iconSize, height: iconSize)
+                }
 
-                Text("Loading \(periodLabel)…")
+                Text(recoveryMessage == nil ? "Loading \(periodLabel)…" : "Recovering \(periodLabel)")
                     .font(.system(size: 11.5, weight: .medium))
                     .foregroundStyle(.secondary)
+                if let recoveryMessage {
+                    Text(recoveryMessage)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 28)
+                }
             }
         }
     }
@@ -266,7 +281,7 @@ private struct Header: View {
             }
             Spacer()
             VStack(alignment: .trailing, spacing: 3) {
-                Text(store.selectedPeriodSummaryPayload.map { $0.current.cost.asCurrency() } ?? "—")
+                Text(store.selectedPeriodSummaryPayload.flatMap { $0.savedHistory?.hasData == false ? nil : $0.current.cost.asCurrency() } ?? "—")
                     .font(.system(size: 22, weight: .semibold, design: .rounded))
                     .monospacedDigit()
                     .tracking(-0.5)

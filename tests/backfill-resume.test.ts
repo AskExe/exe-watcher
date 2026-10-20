@@ -13,7 +13,7 @@ import { describe, expect, it } from 'vitest'
  *
  * These tests drive the real CLI against an isolated corpus with the scan budget tightened
  * (EXE_WATCHER_MAX_SCAN_BYTES) so that one oversized transcript is unscannable at any budget.
- * Failed refreshes must preserve checkpoints without publishing partial totals as complete.
+ * Incomplete refreshes preserve checkpoints and label partial totals explicitly.
  */
 
 const CLI = join(process.cwd(), 'src', 'cli.ts')
@@ -130,13 +130,15 @@ function readCache(env: Env): CacheShape {
 }
 
 describe('backfill survives a resource-budget abort', { timeout: 300_000 }, () => {
-  it('rejects incomplete totals and parks a cursor without discarding progress', () => {
+  it('returns a pending week and parks a cursor without claiming a real zero', () => {
     const env = makeCorpus()
     const run = runStatus(env)
 
-    expect(run.status).not.toBe(0)
-    expect(run.stdout).toBe('')
-    expect(run.stderr).toContain('Historical usage is incomplete')
+    expect(run.status).toBe(0)
+    const payload = JSON.parse(run.stdout)
+    expect(payload.savedHistory.hasData).toBe(false)
+    expect(payload.savedHistory.message).toContain('Missing days are unknown')
+    expect(payload.diagnostics.warnings.some((w: string) => w.includes('history backfill paused'))).toBe(true)
 
     const after = readCache(env)
     expect(after.backfill?.blockedDate).toBe(dateKey(midday(3)))
@@ -151,8 +153,9 @@ describe('backfill survives a resource-budget abort', { timeout: 300_000 }, () =
     let previousDays = 0
     for (let i = 0; i < 4; i++) {
       const result = runStatus(env)
-      expect(result.status).not.toBe(0)
-      expect(result.stderr).toContain('Historical usage is incomplete')
+      expect(result.status).toBe(0)
+      const payload = JSON.parse(result.stdout)
+      expect(payload.savedHistory.message).toContain('Missing days are unknown')
       const c = readCache(env)
       // Days already resolved are never dropped by a later abort.
       expect(c.dates.length).toBeGreaterThanOrEqual(previousDays)
@@ -168,5 +171,8 @@ describe('backfill survives a resource-budget abort', { timeout: 300_000 }, () =
     expect(final.dates).toContain(yesterday)
     expect(final.lastComputedDate).toBe(yesterday)
     expect(final.backfill ?? null).toBeNull()
+    const loaded = JSON.parse(runStatus(env).stdout)
+    expect(loaded.current.cost).toBeGreaterThan(0)
+    expect(loaded.savedHistory.hasData).toBe(true)
   })
 })

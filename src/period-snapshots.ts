@@ -7,7 +7,7 @@ import type { TimeReport } from './time-tracking.js'
 import { createHash } from 'node:crypto'
 
 export type PeriodSnapshot = {
-  savedHistory?: { through: string; message: string; progressToken?: string }
+  savedHistory?: { through: string; message: string; progressToken?: string; hasData?: boolean }
   time?: TimeReport
   current: MenubarPayload['current']
   projectSpend: MenubarPayload['projectSpend']
@@ -52,14 +52,18 @@ export function buildPeriodSnapshots(
     const required = Math.max(0, Math.round((Date.parse(today) - Date.parse(window.start)) / 86_400_000))
     const covered = [...dates].filter(d => d >= window.start && !partial.has(d)).length
     const incomplete = window.key !== 'today' && (cache.needsRepricing || cache.historyBuild || cache.missingProviders?.length || covered !== required)
-    // An All view can show committed amounts while newer dates are recovered.
-    // Never manufacture a historical total from today's usage alone.
+    // Every historical tab can show known amounts while recovery continues.
+    // An empty, unfinished window is explicitly unavailable, never a real $0.
     const committed = closed.filter(day => day.date >= window.start).sort((a, b) => a.date.localeCompare(b.date))
-    const savedHistory = incomplete && window.key === 'all' && committed.some(day => day.cost > 0 || day.calls > 0 || day.inputTokens > 0 || day.outputTokens > 0)
-      ? { through: committed.at(-1)!.date,
-        progressToken: createHash('sha256').update(JSON.stringify([cache.lastComputedDate, cache.days.length,
-          cache.historyBuild?.completedProviders, cache.historyBuild?.chunked, cache.missingProviders, cache.partialDates])).digest('hex'),
-        message: `Saved history through ${committed.at(-1)!.date}${live.length ? ', plus today' : ''}. Some history is still missing; this is not the complete All total.` }
+    const recorded = (day: DailyEntry) => day.cost > 0 || day.calls > 0 || day.inputTokens > 0 || day.outputTokens > 0
+    const hasData = committed.some(recorded) || (window.key !== 'all' && live.some(recorded))
+    const savedHistory = incomplete && (window.key !== 'all' || hasData)
+      ? { through: committed.at(-1)?.date ?? today, hasData,
+        progressToken: createHash('sha256').update(JSON.stringify([window.start, cache.lastComputedDate, cache.days.length,
+          cache.historyBuild?.completedProviders, cache.historyBuild?.chunked, cache.missingProviders, cache.partialDates, cache.backfill])).digest('hex'),
+        message: window.key === 'all'
+          ? `Saved history through ${committed.at(-1)!.date}${live.length ? ', plus today' : ''}. Some history is still missing; this is not the complete All total.`
+          : `${hasData ? 'Showing known usage' : 'Recovering local usage'} for ${window.label}. ${covered} of ${required} historical days loaded${live.some(recorded) ? ', plus today' : ''}. Missing days are unknown; this total is incomplete.` }
       : undefined
     if (incomplete && !savedHistory) continue
     const selected = periodDays(window.start)

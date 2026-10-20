@@ -421,12 +421,14 @@ program
   .option('--exclude <name>', 'Exclude projects matching name (repeatable)', collect, [])
   .option('--period <period>', 'Primary period for menubar-json: today, week, 30days, month, all', 'today')
   .option('--no-optimize', 'Skip optimize findings (menubar-json only, faster)')
-  .option('--cached-only', 'Read saved All totals without scanning or networking (menubar-json only)')
+  .option('--cached-only', 'Read saved period totals without scanning or networking (menubar-json only)')
   .action(async (opts) => {
     if (opts.cachedOnly) {
-      if (opts.format !== 'menubar-json' || opts.period !== 'all' || opts.optimize !== false) throw new Error('--cached-only requires menubar-json, --period all and --no-optimize')
+      if (opts.format !== 'menubar-json' || !['week', '30days', 'month', 'all'].includes(opts.period) || opts.optimize !== false) throw new Error('--cached-only requires menubar-json, a historical period and --no-optimize')
       const cache = await loadDailyCache(buildDailyCacheScopeKey(opts.project, opts.exclude))
-      console.log(JSON.stringify(buildSavedHistory(cache, toDateString(new Date()), opts.provider)))
+      const window = getDateRange(opts.period)
+      console.log(JSON.stringify(buildSavedHistory(cache, toDateString(new Date()), opts.provider,
+        { start: opts.period === 'all' ? '0000-01-01' : toDateString(window.range.start), label: window.label })))
       return
     }
     await loadPricing()
@@ -597,9 +599,9 @@ program
         return c
       }), { maxMs: 10_000, maxBytes: 8 * 1024 ** 3, maxRecords: 2_000_000 }), 2_000_000, undefined, 8 * 1024 ** 3)
 
-      // Explicitly labelled saved All history is useful even if newer slices
-      // could not finish. Other periods still require their full date window.
-      if (!(opts.period === 'all' && opts.optimize === false && hasRecordedHistory(cache, toDateString(todayStart)))) {
+      // Historical tabs keep a labelled partial result while bounded recovery runs.
+      // Detailed/optimizer requests still require complete input.
+      if (opts.optimize !== false || (opts.period === 'all' && !hasRecordedHistory(cache, toDateString(todayStart)))) {
         assertHistoryComplete(cache, toDateString(periodInfo.range.start), toDateString(todayStart))
       }
 
@@ -855,7 +857,7 @@ program
         snapshot.time = summarizeTime(timeIndex, getDateRange(key, now).range, pf, opts.project, opts.exclude)
       }
       const json = JSON.stringify({ ...payload, time, periodSnapshots,
-        ...(opts.period === 'all' && periodSnapshots?.all?.savedHistory ? { savedHistory: periodSnapshots.all.savedHistory } : {}),
+        ...(periodSnapshots?.[opts.period]?.savedHistory ? { savedHistory: periodSnapshots[opts.period]!.savedHistory } : {}),
         costBasis: 'api-equivalent', pricing: getPricingMetadata(), historicalRecovery: opts.period === 'all' ? historicalRecovery : null })
       console.log(json)
       return

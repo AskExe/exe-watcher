@@ -1,7 +1,9 @@
 # Changelog
 
-## 0.2.67 (2026-10-19)
+## 0.2.67 (2026-10-20)
 
+- Keep 7 Days and monthly views usable during incomplete history recovery, load saved period totals first, and clearly distinguish unknown totals from zero. Continue bounded recovery for the selected period and retain larger saved amounts.
+- Open full reports through private command files instead of controlling Terminal. Tracking and report launch no longer require Terminal automation permission.
 - Open saved All totals before scanning, retain them through failures, restarts and midnight, and continue bounded recovery only while it advances. Show loading before the first result and specific update states instead of a misleading zero/stale warning.
 - Keep counted API-equivalent dollar amounts fixed when pricing feeds refresh. Preserve committed daily totals, cancel obsolete automatic repricing, and retain hashed usage prices separately from temporary parsing caches. Latest rates apply to newly counted accounting records; unknown costs remain distinct from free usage.
 - Use “Watcher” in launch and timeout messages.
