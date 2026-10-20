@@ -5,6 +5,7 @@ import { join } from 'path'
 
 import { parseAllSessions, clearParserCaches } from '../src/parser.js'
 import { loadPricing } from '../src/models.js'
+import { ResourceBudgetError, withScanBudget } from '../src/resource-budget.js'
 
 // parseAllSessions discovers sessions via the provider registry. The claude
 // provider reads CLAUDE_CONFIG_DIR (or ~/.claude) / projects / <name> / *.jsonl.
@@ -195,6 +196,34 @@ describe('parser pipeline via parseAllSessions', () => {
     // Duplicate msg_dup should be counted only once
     expect(session.apiCalls).toBe(1)
     expect(session.turns[0].assistantCalls.length).toBe(1)
+  })
+
+  it('resumes cumulative usage and turn state across a record-budget interruption', async () => {
+    const base = await setupTmpClaudeDir()
+    const cacheBefore = process.env.EXE_WATCHER_CACHE_DIR
+    process.env.EXE_WATCHER_CACHE_DIR = join(base, 'cache')
+    try {
+      await writeSessionFile(base, 'resume', 'session', [
+        userEntry('fix the bug', '2026-04-10T12:00:00Z', 'session'),
+        assistantEntry('msg_incremental', 'claude-opus-4-6', 100, 10, '2026-04-10T12:00:01Z'),
+        { type: 'system' },
+        assistantEntry('msg_incremental', 'claude-opus-4-6', 100, 50, '2026-04-10T12:00:02Z'),
+        userEntry('next task', '2026-04-10T12:01:00Z', 'session'),
+        assistantEntry('msg_next', 'claude-opus-4-6', 200, 100, '2026-04-10T12:01:01Z'),
+      ])
+      await expect(withScanBudget(() => parseOnce(), 2)).rejects.toBeInstanceOf(ResourceBudgetError)
+      clearParserCaches()
+      const session = (await parseOnce())[0]!.sessions[0]!
+      expect(session.apiCalls).toBe(2)
+      expect(session.totalInputTokens).toBe(300)
+      expect(session.totalOutputTokens).toBe(150)
+      expect(session.turns.map(turn => turn.userMessage)).toEqual(['fix the bug', 'next task'])
+      expect(session.totalCostUSD).toBeCloseTo(0.00525, 7)
+    } finally {
+      if (cacheBefore === undefined) delete process.env.EXE_WATCHER_CACHE_DIR
+      else process.env.EXE_WATCHER_CACHE_DIR = cacheBefore
+      clearParserCaches()
+    }
   })
 
   it('calculates cost correctly for known model', async () => {

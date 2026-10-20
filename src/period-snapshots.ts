@@ -60,7 +60,8 @@ export function buildPeriodSnapshots(
     const savedHistory = incomplete && (window.key !== 'all' || hasData)
       ? { through: committed.at(-1)?.date ?? today, hasData,
         progressToken: createHash('sha256').update(JSON.stringify([window.start, cache.lastComputedDate, cache.days.length,
-          cache.historyBuild?.completedProviders, cache.historyBuild?.chunked, cache.missingProviders, cache.partialDates, cache.backfill])).digest('hex'),
+          cache.historyBuild?.completedProviders, cache.historyBuild?.chunked, cache.missingProviders, cache.partialDates, cache.backfill,
+          cache.historyScanProgress])).digest('hex'),
         message: window.key === 'all'
           ? `Saved history through ${committed.at(-1)!.date}${live.length ? ', plus today' : ''}. Some history is still missing; this is not the complete All total.`
           : `${hasData ? 'Showing known usage' : 'Recovering local usage'} for ${window.label}. ${covered} of ${required} historical days loaded${live.some(recorded) ? ', plus today' : ''}. Missing days are unknown; this total is incomplete.` }

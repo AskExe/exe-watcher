@@ -56,12 +56,16 @@ struct MenuBarContent: View {
                     PeriodSegmentedControl()
                     Divider().opacity(0.5)
                     if let saved = store.payload.savedHistory {
-                        Text(saved.message)
-                            .font(.system(size: 10, weight: .medium))
-                            .foregroundStyle(.orange)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 8)
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text(saved.message)
+                                .foregroundStyle(.orange)
+                            Text(HistorySetupGuidance.message)
+                                .foregroundStyle(.secondary)
+                        }
+                        .font(.system(size: 10, weight: .medium))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
                     }
                     if store.hasCachedData, let error = store.baseLastError {
                         HStack {
@@ -184,6 +188,10 @@ private struct EmptyProviderState: View {
     }
 }
 
+private enum HistorySetupGuidance {
+    static let message = "First-time setup can take 10 minutes or more for large AI histories. Progress is saved automatically."
+}
+
 /// Translucent overlay that blurs whatever's behind it (the previous tab/period content)
 /// and centers an animated owl icon pulsing with the brand palette.
 private struct BurnLoadingOverlay: View {
@@ -217,6 +225,11 @@ private struct BurnLoadingOverlay: View {
                         .multilineTextAlignment(.center)
                         .padding(.horizontal, 28)
                 }
+                Text(HistorySetupGuidance.message)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 28)
             }
         }
     }
