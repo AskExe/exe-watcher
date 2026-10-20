@@ -66,6 +66,19 @@ struct TimeBlock: Codable, Sendable {
     let lastRecordedAt: String?
     let providers: [TimeProviderBlock]
     let notes: [String]
+    var sessionEstimate: SessionEstimateBlock? = nil
+    var appActivity: AppActivityBlock? = nil
+    var personalTimeVersion: Int? = nil
+
+    var personalTimeMs: Double? {
+        if personalTimeVersion != 1 && sessionEstimate == nil { return userActiveMs }
+        guard sessionEstimate != nil || appActivity != nil else { return nil }
+        return (sessionEstimate?.milliseconds ?? 0) + (appActivity?.totalMs ?? 0)
+    }
+
+    var personalTimeCaption: String {
+        personalTimeVersion != 1 && sessionEstimate == nil ? "Short reply gaps only" : "Sessions + app activity"
+    }
 
     static func duration(_ milliseconds: Double?) -> String {
         guard let value = milliseconds, value.isFinite, value >= 0, value < 315_576_000_000_000 else { return "Unknown" }
@@ -73,6 +86,23 @@ struct TimeBlock: Codable, Sendable {
         let minutes = Int(value / 60_000)
         return minutes >= 60 ? "\(minutes / 60)h \(minutes % 60)m" : "\(minutes)m"
     }
+}
+
+struct SessionEstimateBlock: Codable, Sendable {
+    let milliseconds: Double
+    let lowerMs: Double
+    let upperMs: Double
+    let method: String
+    let through: String
+}
+
+struct AppActivityBlock: Codable, Sendable {
+    let activeMs: Double
+    let contextualMs: Double
+    let startedAt: String
+    let updatedAt: String
+    let enabled: Bool
+    var totalMs: Double { activeMs + contextualMs }
 }
 
 struct TimeRecoveryProgress: Codable, Sendable {
@@ -96,6 +126,7 @@ struct TimeProviderBlock: Codable, Sendable, Identifiable {
     let timedFiles: Int
     let aiRunningMs: Double?
     let status: String
+    var recentMainTurnAt: Double? = nil
     var id: String { name }
 }
 

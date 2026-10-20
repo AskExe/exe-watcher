@@ -79,6 +79,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private var usageLogWatcher: UsageLogWatcher?
     private var usageLogDebounceWork: DispatchWorkItem?
     private var healthMonitor: HealthMonitor?
+    private var appActivityTracker: AppActivityTracker?
     /// Held for the lifetime of the app to prevent Automatic Termination.
     private var backgroundActivity: NSObjectProtocol?
 
@@ -108,6 +109,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         startFloatingQuota()
         observeStore()
         loadInitialBadge()
+        let activity = AppActivityTracker(ledger: store.personalActivity, recentTurns: { [weak self] in self?.store.recentMainTurns ?? [:] })
+        activity.start()
+        appActivityTracker = activity
+        observeActivityContext()
         startUsageLogWatcher()
         setupWakeObservers()
         cleanupLegacyLaunchAgent()
@@ -224,6 +229,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        appActivityTracker?.stop()
         floatingQuota?.stop()
         store.cancelSubscriptionRefresh()
         store.cancelTimeRecovery()
@@ -232,6 +238,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         RefreshTracer.shared.writeToDisk()
         usageLogDebounceWork?.cancel()
         usageLogWatcher?.stop()
+    }
+
+    private func observeActivityContext() {
+        withObservationTracking {
+            _ = store.recentMainTurns
+        } onChange: { [weak self] in
+            Task { @MainActor in
+                self?.appActivityTracker?.contextDidChange()
+                self?.observeActivityContext()
+            }
+        }
     }
 
     private func loadInitialBadge() {

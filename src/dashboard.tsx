@@ -20,7 +20,7 @@ import { planDisplayName } from './plans.js'
 import { owlFrame } from './owl-art.js'
 import { join } from 'path'
 import { getTimeReport } from './time-index.js'
-import { formatDuration, type TimeReport } from './time-tracking.js'
+import { formatDuration, personalTimeMs, type TimeReport } from './time-tracking.js'
 
 type Period = 'today' | 'week' | '30days' | 'month' | 'all'
 type View = 'dashboard' | 'optimize' | 'compare'
@@ -635,7 +635,9 @@ function TimePanel({ time, width }: { time?: TimeReport; width: number }) {
   return <Panel title="AI time" color={GOLD} width={width}>
     <Text><Text bold>AI running </Text>{formatDuration(time?.aiRunningMs ?? null)}<Text dimColor> · added across agents</Text></Text>
     <Text><Text bold>Elapsed busy </Text>{formatDuration(time?.elapsedBusyMs ?? null)}<Text dimColor> · overlapping time counted once</Text></Text>
-    <Text><Text bold>Your time ≈ </Text>{formatDuration(time?.userActiveMs ?? null)}<Text dimColor> · interaction-gap estimate, not attention</Text></Text>
+    <Text><Text bold>Your time ≈ </Text>{formatDuration(personalTimeMs(time))}<Text dimColor> · {time?.personalTimeVersion === 1 || time?.sessionEstimate ? 'historical sessions + tracked app activity' : 'legacy short reply gaps'}</Text></Text>
+    {time?.sessionEstimate && <Text dimColor>Historical range: {formatDuration(time.sessionEstimate.lowerMs)} – {formatDuration(time.sessionEstimate.upperMs)} (10–30 min session gaps)</Text>}
+    {time?.appActivity && <Text dimColor>App activity: {formatDuration(time.appActivity.activeMs + time.appActivity.contextualMs)} · {formatDuration(time.appActivity.contextualMs)} inferred terminal/editor context</Text>}
     <Text color={ORANGE}>{time?.aiRunningMs != null ? 'Partial history' : 'Timing unknown'}{time?.pendingFiles ? ` · ${time.pendingFiles} files awaiting recovery` : ''}{time?.estimatedAiMs ? ' · some AI time inferred' : ''}</Text>
     {time && <Text dimColor>Providers without timed records: {time.providers.filter(p => p.aiRunningMs === null).map(p => p.name).join(', ') || 'none detected'}. Missing time is unknown, not zero.</Text>}
   </Panel>

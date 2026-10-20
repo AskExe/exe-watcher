@@ -7,7 +7,7 @@ enum FloatingTimeMetric: String, CaseIterable {
     var symbol: String { self == .interaction ? "person.fill" : "sparkles" }
     var explanation: String {
         switch self {
-        case .interaction: "Estimated from short gaps between AI replies and your next message. Overlapping interaction time counts once."
+        case .interaction: "Historical sessions are estimated from nearby main-chat turns (15-minute gaps; 10–30-minute range). New app activity uses foreground and idle metadata on this Mac. Overlap counts once. Automation, missing records and unsupported apps limit accuracy; this does not measure attention."
         case .aiWork: "AI runtime added across agents, including simultaneous work. Parallel work can exceed elapsed clock time."
         }
     }
@@ -366,7 +366,7 @@ private struct FloatingTimeReadout: View {
 
     var body: some View {
         HStack(spacing: compact ? 4 : 8) {
-            metricButton(.interaction, label: "You + AI ≈", milliseconds: time?.userActiveMs)
+            metricButton(.interaction, label: "You + AI ≈", milliseconds: time?.personalTimeMs)
             metricButton(.aiWork, label: "AI Time\(time?.estimatedAiMs ?? 0 > 0 ? " ≈" : "")", milliseconds: time?.aiRunningMs)
         }
     }
