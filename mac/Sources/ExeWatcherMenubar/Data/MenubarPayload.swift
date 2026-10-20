@@ -47,6 +47,7 @@ struct SavedHistoryStatus: Codable, Sendable {
     let through: String
     let message: String
     var progressToken: String? = nil
+    var hasData: Bool? = nil
 }
 
 struct TimeBlock: Codable, Sendable {

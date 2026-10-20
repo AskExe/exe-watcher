@@ -42,14 +42,15 @@ describe('period snapshots', () => {
   })
   it('does not claim missing or incomplete dates are complete totals', () => {
     const cache = fixture(); cache.days = cache.days.filter(d => d.date !== '2026-10-13')
-    expect(Object.keys(build(cache))).toEqual(['today', 'all'])
+    expect(Object.keys(build(cache))).toHaveLength(5)
+    expect(build(cache).week!.savedHistory?.message).toContain('Missing days are unknown')
     expect(build(cache).all!.savedHistory?.message).toContain('not the complete All total')
     const partial = fixture(); partial.partialDates = ['2026-10-13']
-    expect(Object.keys(build(partial))).toEqual(['today', 'all'])
+    expect(build(partial).week!.savedHistory).toBeDefined()
     const repricing = fixture(); repricing.needsRepricing = true
-    expect(Object.keys(build(repricing))).toEqual(['today', 'all'])
+    expect(build(repricing).week!.savedHistory).toBeDefined()
     const missingProvider = fixture(); missingProvider.missingProviders = ['kimi']
-    expect(Object.keys(build(missingProvider))).toEqual(['today', 'all'])
+    expect(build(missingProvider).week!.savedHistory).toBeDefined()
   })
   it('rejects incomplete selected history while allowing Today and complete windows', () => {
     const cache = fixture()
@@ -73,6 +74,26 @@ describe('period snapshots', () => {
     expect(build(empty).all).toBeUndefined()
     empty.days = fillMissingDays(date('2026-10-01'), date('2026-10-02'), [])
     expect(build(empty).all).toBeUndefined()
+  })
+  it('distinguishes an unknown weekly total from a completed zero-usage week', () => {
+    const cache = fixture(); cache.days = []
+    const pending = buildPeriodSnapshots(cache, [], '2026-10-14', windows, 'all', new Map(), null, 0, [])
+    expect(pending.week!.savedHistory).toMatchObject({ hasData: false })
+    expect(pending.week!.savedHistory!.message).toContain('0 of 6 historical days loaded')
+    expect(pending.all).toBeUndefined()
+    cache.days = fillMissingDays(date('2026-10-08'), date('2026-10-13'), [])
+    const complete = buildPeriodSnapshots(cache, [], '2026-10-14', windows, 'all', new Map(), null, 0, [])
+    expect(complete.week!.current.cost).toBe(0)
+    expect(complete.week!.savedHistory).toBeUndefined()
+  })
+  it('exposes retry progress without changing known weekly amounts', () => {
+    const cache = fixture(); cache.partialDates = ['2026-10-13']
+    cache.backfill = { blockedDate: '2026-10-13', attempts: 1 }
+    const first = build(cache).week!
+    cache.backfill.attempts++
+    const next = build(cache).week!
+    expect(next.current.cost).toBe(first.current.cost)
+    expect(next.savedHistory!.progressToken).not.toBe(first.savedHistory!.progressToken)
   })
   it('uses the same provider buckets for aggregates and filtered views', () => {
     const cache = fixture()

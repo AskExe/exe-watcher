@@ -48,6 +48,49 @@ private func bundledPayload(now: Date, cost: Double = 20) -> MenubarPayload {
 
 @Suite("Resilient saved totals")
 struct SavedTotalsTests {
+    @Test("Week hydrates its own saved total before a failed scan")
+    @MainActor
+    func savedWeekBeforeFailure() async throws {
+        let gate = Gate()
+        let saved = makePayload(label: "Last 7 Days", cost: 7, providers: ["claude": 7])
+        let store = AppStore(fetchPayload: { _, _, _ in
+            await gate.wait(); throw DataClientError.timeout()
+        }, fetchSavedPayload: { period, _, _ in
+            #expect(period == .sevenDays)
+            return saved
+        })
+        store.selectedPeriod = .sevenDays
+        let refresh = Task { await store.refresh(includeOptimize: false) }
+        await gate.waitUntilBlocked()
+        #expect(store.payload.current.cost == 7)
+        await gate.open()
+        await refresh.value
+        #expect(store.payload.current.cost == 7)
+        #expect(store.headerStatus == "Update paused")
+    }
+
+    @Test("Unknown Week stays unavailable and recovery stops when its cursor stalls")
+    @MainActor
+    func pendingWeekRecoveryIsBounded() async throws {
+        let count = CallCounter()
+        let store = AppStore(fetchPayload: { period, _, _ in
+            #expect(period == .sevenDays)
+            _ = await count.next()
+            var value = makePayload(label: "Last 7 Days", cost: 0, providers: [:])
+            value.savedHistory = SavedHistoryStatus(through: "2026-10-15", message: "Recovering 7 Days",
+                progressToken: "blocked", hasData: false)
+            return value
+        }, restForTimeRecovery: { _ in await Task.yield() })
+        store.selectedPeriod = .sevenDays
+        await store.refresh(includeOptimize: false)
+        for _ in 0..<1000 { if await count.value() >= 2 { break }; await Task.yield() }
+        try await Task.sleep(for: .milliseconds(20))
+        #expect(await count.value() == 2)
+        #expect(store.payload.savedHistory?.hasData == false)
+        #expect(store.headerStatus == "Recovery paused")
+        store.cancelTimeRecovery()
+    }
+
     @Test("All hydrates before a slow refresh and survives its failure and next-day restart")
     @MainActor
     func savedBeforeSlowRefresh() async throws {

@@ -38,7 +38,7 @@ struct HeroSection: View {
                 .foregroundStyle(.secondary)
                 .help(warning)
         }
-        if !store.payload.generated.isEmpty && store.selectedProvider == .all && store.payload.current.calls == 0 && store.payload.current.cost == 0 && !store.payload.hasIncompleteCallCounts {
+        if !store.payload.generated.isEmpty && store.payload.savedHistory == nil && store.selectedProvider == .all && store.payload.current.calls == 0 && store.payload.current.cost == 0 && !store.payload.hasIncompleteCallCounts {
             Text("No recorded usage in this period · supported tools are found automatically")
                 .font(.system(size: 10))
                 .foregroundStyle(.secondary)

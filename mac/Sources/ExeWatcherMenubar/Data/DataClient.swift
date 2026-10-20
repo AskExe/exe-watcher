@@ -62,7 +62,7 @@ extension DataClientError: LocalizedError {
 /// commands through `/bin/zsh -c` anymore.
 struct DataClient {
     static func fetchSaved(period: Period, provider: ProviderFilter, includeOptimize: Bool) async throws -> MenubarPayload {
-        let result = try await runCLI(subcommand: subcommand(period: .all, provider: provider, includeOptimize: false) + ["--cached-only"], timeoutSeconds: 10)
+        let result = try await runCLI(subcommand: subcommand(period: period, provider: provider, includeOptimize: false) + ["--cached-only"], timeoutSeconds: 10)
         guard result.exitCode == 0 else {
             throw DataClientError.nonZeroExit(code: result.exitCode, stderr: result.stderr)
         }
@@ -128,7 +128,7 @@ struct DataClient {
     static func validate(_ payload: MenubarPayload) throws {
         if let warning = payload.diagnostics?.warnings.first(where: {
             $0.hasPrefix("parseAllSessions failed:") ||
-            (payload.savedHistory == nil && (
+            (payload.savedHistory == nil && payload.periodSnapshots == nil && (
                 $0.hasPrefix("History rebuild paused at ") ||
                 $0.hasPrefix("History repricing will resume ") ||
                 $0.hasPrefix("history backfill paused at ") ||
