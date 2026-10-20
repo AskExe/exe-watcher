@@ -1,5 +1,6 @@
 import type { DateRange } from './types.js'
 import { createHash } from 'node:crypto'
+import { summarizeActivity, type ActivityHistory, type AppActivity } from './personal-activity.js'
 
 export const TIME_HISTORY_START = new Date('2025-07-01T00:00:00').getTime()
 export const TIME_PROVIDERS = ['claude', 'codex', 'cursor', 'cursor-agent', 'copilot', 'opencode', 'kimi', 'pi', 'omp']
@@ -30,8 +31,37 @@ export type TimeReport = {
   since: string; through: string; aiRunningMs: number | null; elapsedBusyMs: number | null; userActiveMs: number | null
   estimatedAiMs: number; coverage: 'partial' | 'missing'; pendingFiles: number; indexedFiles: number
   firstRecordedAt: string | null; lastRecordedAt: string | null
-  providers: Array<{ name: string; files: number; timedFiles: number; aiRunningMs: number | null; status: 'partial' | 'missing' }>
+  providers: Array<{ name: string; files: number; timedFiles: number; aiRunningMs: number | null; status: 'partial' | 'missing'; recentMainTurnAt?: number }>
   notes: string[]
+  personalTimeVersion?: 1
+  sessionEstimate?: SessionEstimate
+  appActivity?: AppActivity
+}
+export type SessionEstimate = { milliseconds: number; lowerMs: number; upperMs: number; method: 'main-chat-gaps-v1'; through: string }
+
+export function personalTimeMs(time?: TimeReport): number | null {
+  if (!time) return null
+  if (time.personalTimeVersion !== 1 && !time.sessionEstimate) return time.userActiveMs
+  if (!time.sessionEstimate && !time.appActivity) return null
+  return (time.sessionEstimate?.milliseconds ?? 0) + (time.appActivity?.activeMs ?? 0) + (time.appActivity?.contextualMs ?? 0)
+}
+
+/** Sensitivity range, not confidence bounds or measured attention. Only time
+ * between nearby main-chat turns counts; isolated turns and long unattended runs
+ * contribute no invented padding. All chats share one clock. */
+export function estimateSessions(points: number[], range: DateRange, through = range.end.getTime()): SessionEstimate | undefined {
+  const sorted = [...new Set(points.filter(Number.isFinite))].sort((a, b) => a - b)
+  const end = Math.min(through, range.end.getTime(), Date.now())
+  const start = Math.max(range.start.getTime(), TIME_HISTORY_START)
+  let milliseconds = 0, lowerMs = 0, upperMs = 0
+  for (let i = 1; i < sorted.length; i++) {
+    const a = sorted[i - 1]!, b = sorted[i]!, gap = b - a
+    const duration = Math.max(0, Math.min(b, end) - Math.max(a, start))
+    if (gap <= 30 * 60_000) upperMs += duration
+    if (gap <= 15 * 60_000) milliseconds += duration
+    if (gap <= 10 * 60_000) lowerMs += duration
+  }
+  return upperMs > 0 ? { milliseconds, lowerMs, upperMs, method: 'main-chat-gaps-v1', through: new Date(end).toISOString() } : undefined
 }
 
 export function timestamp(value: unknown): number | undefined {
@@ -168,7 +198,7 @@ export function unionIntervals(intervals: TimeInterval[], range?: DateRange): Ti
   return out
 }
 const sum = (rows: TimeInterval[]) => rows.reduce((n, [a, b]) => n + b - a, 0)
-export function summarizeTime(index: TimeIndex, range: DateRange, provider = 'all', include?: string[], exclude?: string[]): TimeReport {
+export function summarizeTime(index: TimeIndex, range: DateRange, provider = 'all', include?: string[], exclude?: string[], activity?: ActivityHistory): TimeReport {
   const matches = (name: string, terms?: string[]) => terms?.some(t => name.toLowerCase().includes(t.toLowerCase()))
   const files = Object.values(index.files).filter(f => (provider === 'all' || f.provider === provider)
     && (!include?.length || matches(f.project, include)) && !matches(f.project, exclude))
@@ -190,9 +220,16 @@ export function summarizeTime(index: TimeIndex, range: DateRange, provider = 'al
     states.set(file, copies)
   }
   const consumed = new Set<string>()
+  const mainTurns: number[] = []
+  const recentMainTurns = new Map<string, number>()
   const byProvider = new Map<string, { files: number; timedFiles: number; agents: Map<string, TimeInterval[]> }>()
   let pendingFiles = 0
   for (const file of files) {
+    for (const original of [file.state, ...Object.values(file.state.children ?? {})]) {
+      if (!original.child && original.pending !== undefined && original.pending <= Date.now()) {
+        recentMainTurns.set(file.provider, Math.max(recentMainTurns.get(file.provider) ?? 0, original.pending))
+      }
+    }
     if (file.offset < file.size || file.unavailable) pendingFiles++
     const row = byProvider.get(file.provider) ?? { files: 0, timedFiles: 0, agents: new Map<string, TimeInterval[]>() }
     row.files++
@@ -207,6 +244,12 @@ export function summarizeTime(index: TimeIndex, range: DateRange, provider = 'al
         consumed.add(key); return true
       })
       const ai = unionIntervals(unique, range)
+      if (!state.child) {
+        for (const interval of unique) {
+          mainTurns.push(interval[0])
+          if (interval[0] <= Date.now()) recentMainTurns.set(file.provider, Math.max(recentMainTurns.get(file.provider) ?? 0, interval[0]))
+        }
+      }
       const inferred = estimatedAgents.get(state.agent) ?? []
       inferred.push(...unique.filter(interval => interval[2]))
       estimatedAgents.set(state.agent, inferred)
@@ -223,6 +266,11 @@ export function summarizeTime(index: TimeIndex, range: DateRange, provider = 'al
   const all = [...agents.values()].flatMap(v => unionIntervals(v, range))
   const estimated = [...estimatedAgents.values()].flatMap(v => unionIntervals(v, range))
   const busy = unionIntervals(all, range), human = unionIntervals(user, range)
+  const cutover = activity ? Date.parse(activity.startedAt) : range.end.getTime()
+  const sessionEstimate = estimateSessions(mainTurns, range, cutover)
+  // App activity has no project attribution. Don't substitute all-project focus
+  // totals in a project-filtered report.
+  const appActivity = include?.length || exclude?.length ? undefined : summarizeActivity(activity, range, provider)
   const pending = files.filter(f => f.offset < f.size || f.unavailable)
   const waitingFiles = pending.filter(f => f.waitingForAppend && !f.unavailable).length
   const recovery = {
@@ -235,17 +283,20 @@ export function summarizeTime(index: TimeIndex, range: DateRange, provider = 'al
     since: new Date(Math.max(TIME_HISTORY_START, range.start.getTime())).toISOString(), through: range.end.toISOString(),
     aiRunningMs: all.length ? sum(all) : null, elapsedBusyMs: busy.length ? sum(busy) : null,
     userActiveMs: human.length ? sum(human) : null, estimatedAiMs: sum(estimated),
+    personalTimeVersion: 1, sessionEstimate, appActivity,
     coverage: all.length ? 'partial' : 'missing', pendingFiles, indexedFiles: files.length,
     firstRecordedAt: busy.length ? new Date(busy[0]![0]).toISOString() : null,
     lastRecordedAt: busy.length ? new Date(busy.at(-1)![1]).toISOString() : null,
     providers: (provider === 'all' ? TIME_PROVIDERS : [provider]).map(name => {
       const row = byProvider.get(name)
       const duration = row ? [...row.agents.values()].reduce((n, a) => n + sum(unionIntervals(a, range)), 0) : 0
-      return { name, files: row?.files ?? 0, timedFiles: row?.timedFiles ?? 0, aiRunningMs: duration || null, status: duration ? 'partial' : 'missing' }
+      return { name, files: row?.files ?? 0, timedFiles: row?.timedFiles ?? 0, aiRunningMs: duration || null, status: duration ? 'partial' : 'missing', recentMainTurnAt: recentMainTurns.get(name) }
     }),
     notes: [
       'Retained local records only, since July 1, 2025. Missing history is unknown, not zero. Run time can include tools and waiting.',
-      'Your time is an estimate of reply-to-next-prompt gaps up to 5 minutes, merged across chats. Longer idle gaps and subagents are excluded; unidentified automation may be included. It does not measure attention.',
+      'Legacy short reply gaps estimate reply-to-next-prompt gaps up to 5 minutes, merged across chats. Longer gaps and subagents are excluded; unidentified automation may be included. It does not measure attention.',
+      ...(sessionEstimate ? ['Historical session time uses gaps between main-chat turn starts: 15-minute continuity, with a 10–30-minute sensitivity range. Overlap counts once; subagents, isolated turns and long gaps are excluded. This includes some AI waiting, may include main-chat automation, and cannot measure attention.'] : []),
+      ...(appActivity ? ['App activity uses foreground app and idle metadata from this Mac. Terminal/editor time needs a recent matching AI session and is separately marked as contextual. Browsers and unsupported apps are unknown. Daily totals have no project attribution; tracking gaps remain unknown.'] : []),
       ...(estimated.length ? ['Some AI time is inferred from prompt/response timestamps, limited to spans up to 30 minutes. Longer unmeasured gaps stay unknown.'] : []),
       ...(recovery.runnableFiles ? ['Timing recovery is in progress. Queued timing work continues in bounded steps; usage costs are unaffected.'] : []),
       ...(waitingFiles ? ['Some logs end mid-record. Their incomplete records remain unknown until more data is saved.'] : []),

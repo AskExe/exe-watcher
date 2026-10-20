@@ -13,7 +13,9 @@ struct TimePayloadTests {
          "estimatedAiMs":0,"coverage":"partial","pendingFiles":0,"indexedFiles":12,
          "firstRecordedAt":"2025-10-01T00:00:00.000Z","lastRecordedAt":"2026-10-15T12:00:00.000Z",
          "providers":[{"name":"claude","files":12,"timedFiles":9,"aiRunningMs":45000000,"status":"partial"}],
-         "notes":["Missing timing records are unknown, not zero."]}
+         "notes":["Missing timing records are unknown, not zero."],
+         "sessionEstimate":{"milliseconds":1753200000,"lowerMs":1292400000,"upperMs":2588400000,"method":"main-chat-gaps-v1","through":"2026-10-15T12:00:00.000Z"},
+         "appActivity":{"activeMs":3600000,"contextualMs":1200000,"startedAt":"2026-10-15T12:00:00.000Z","updatedAt":"2026-10-15T13:00:00.000Z","enabled":true}}
         """.utf8)
         return try JSONDecoder().decode(TimeBlock.self, from: data)
     }
@@ -36,6 +38,7 @@ struct TimePayloadTests {
         #expect(decoded.time?.aiRunningMs == 45_000_000)
         #expect(decoded.time?.userActiveMs == 3_720_000)
         #expect(decoded.time?.coverage == "partial")
+        #expect(decoded.time?.personalTimeMs == 1_758_000_000)
     }
 
     @Test func periodSnapshotsCarryTheirOwnTimeWindow() throws {
@@ -43,6 +46,16 @@ struct TimePayloadTests {
             diagnostics: nil, historyValidatedAt: 0, time: try fixture())
         let decoded = try JSONDecoder().decode(PeriodSnapshot.self, from: JSONEncoder().encode(snapshot))
         #expect(decoded.time?.elapsedBusyMs == 28_800_000)
+    }
+
+    @Test func oldCacheIsNotReplacedWithFakeZeroWhenAppTrackingStarts() throws {
+        var time = try fixture()
+        time.sessionEstimate = nil
+        time.personalTimeVersion = nil
+        #expect(time.personalTimeMs == time.userActiveMs)
+        time.personalTimeVersion = 1
+        time.appActivity = nil
+        #expect(time.personalTimeMs == nil)
     }
 
     @Test @MainActor func compactTimePanelRendersAtPopoverWidth() throws {

@@ -37,6 +37,7 @@ import { watchMenubarParent } from './menubar-lifecycle.js'
 import { getTimeReport, refreshTimeIndex } from './time-index.js'
 import { formatDuration, summarizeTime, type TimeReport } from './time-tracking.js'
 import { buildTimeSnapshots } from './time-snapshots.js'
+import { readActivityHistory } from './personal-activity.js'
 
 const require = createRequire(import.meta.url)
 const { version } = require('../package.json')
@@ -852,9 +853,10 @@ program
         }), pf, displayNameByName, historicalRecovery, parseTimeMs, warnings,
       ) : undefined
       const timeIndex = await refreshTimeIndex()
-      const time = summarizeTime(timeIndex, getDateRange(opts.period, now).range, pf, opts.project, opts.exclude)
+      const activity = readActivityHistory()
+      const time = summarizeTime(timeIndex, getDateRange(opts.period, now).range, pf, opts.project, opts.exclude, activity)
       if (periodSnapshots) for (const [key, snapshot] of Object.entries(periodSnapshots)) {
-        snapshot.time = summarizeTime(timeIndex, getDateRange(key, now).range, pf, opts.project, opts.exclude)
+        snapshot.time = summarizeTime(timeIndex, getDateRange(key, now).range, pf, opts.project, opts.exclude, activity)
       }
       const json = JSON.stringify({ ...payload, time, periodSnapshots,
         ...(periodSnapshots?.[opts.period]?.savedHistory ? { savedHistory: periodSnapshots[opts.period]!.savedHistory } : {}),
@@ -1214,19 +1216,22 @@ program
   .option('--format <format>', 'text or json', 'text')
   .action(async opts => {
     const index = await refreshTimeIndex({ history: opts.recover === true })
+    const activity = readActivityHistory()
     if (opts.snapshots) {
       const now = new Date()
       const ranges = Object.fromEntries(['today', 'week', '30days', 'month', 'all'].map(key => [key, getDateRange(key, now).range]))
-      console.log(JSON.stringify(buildTimeSnapshots(index, ranges, opts.provider, opts.project, opts.exclude)))
+      console.log(JSON.stringify(buildTimeSnapshots(index, ranges, opts.provider, opts.project, opts.exclude, activity)))
       return
     }
-    const time = summarizeTime(index, getDateRange(opts.period).range, opts.provider, opts.project, opts.exclude)
+    const time = summarizeTime(index, getDateRange(opts.period).range, opts.provider, opts.project, opts.exclude, activity)
     if (opts.format === 'json') console.log(JSON.stringify(time))
     else {
       console.log(`\n  AI time · ${getDateRange(opts.period).label}`)
       console.log(`  AI running:   ${formatDuration(time.aiRunningMs)} (added across agents)`)
       console.log(`  Elapsed busy: ${formatDuration(time.elapsedBusyMs)} (overlap counted once)`)
-      console.log(`  Your time:    ${formatDuration(time.userActiveMs)} (estimate)`)
+      if (time.sessionEstimate) console.log(`  Past sessions ≈ ${formatDuration(time.sessionEstimate.milliseconds)} (10–30 min range: ${formatDuration(time.sessionEstimate.lowerMs)} – ${formatDuration(time.sessionEstimate.upperMs)})`)
+      if (time.appActivity) console.log(`  App activity: ${formatDuration(time.appActivity.activeMs + time.appActivity.contextualMs)} (${formatDuration(time.appActivity.contextualMs)} inferred terminal/editor context; tracking ${time.appActivity.enabled ? 'on' : 'off'})`)
+      console.log(`  Short reply gaps: ${formatDuration(time.userActiveMs)} (legacy interaction estimate)`)
       console.log(`  Partial history · ${time.indexedFiles} files · ${time.pendingFiles} awaiting recovery`)
       for (const row of time.providers) console.log(`  ${row.name}: ${formatDuration(row.aiRunningMs)} · ${row.timedFiles}/${row.files} files with timing in this period`)
       for (const note of time.notes) console.log(`  ${note}`)

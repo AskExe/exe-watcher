@@ -11,6 +11,7 @@ import type { SessionSource } from './providers/types.js'
 import type { DateRange } from './types.js'
 import { expandOpenCodeTimingSources, scanTimeDatabase } from './time-sqlite.js'
 import { getOpenCodeDbPaths } from './providers/opencode.js'
+import { readActivityHistory } from './personal-activity.js'
 
 const compress = promisify(gzip), decompress = promisify(gunzip)
 const MAX_INDEX = 32 * 1024 ** 2, MAX_DISK = 16 * 1024 ** 2, MAX_FILES = 20_000
@@ -263,10 +264,11 @@ export async function refreshTimeIndex(options: TimeRefreshOptions = {}): Promis
 }
 
 export async function getTimeReport(range: DateRange, provider = 'all', include?: string[], exclude?: string[], signal?: AbortSignal): Promise<TimeReport> {
-  try { return summarizeTime(await refreshTimeIndex({ signal }), range, provider, include, exclude) }
+  const activity = readActivityHistory()
+  try { return summarizeTime(await refreshTimeIndex({ signal }), range, provider, include, exclude, activity) }
   catch (error) {
     const index = await readTimeIndex()
     index.warnings.push(`Timing unavailable: ${error instanceof Error ? error.message : String(error)}`)
-    return summarizeTime(index, range, provider, include, exclude)
+    return summarizeTime(index, range, provider, include, exclude, activity)
   }
 }

@@ -70,6 +70,7 @@ struct PayloadCacheKey: Hashable {
 @MainActor
 @Observable
 final class AppStore {
+    let personalActivity: PersonalActivityStore
     var selectedProvider: ProviderFilter = .all
     var selectedPeriod: Period = .today
     var selectedInsight: InsightMode = .trend
@@ -159,6 +160,7 @@ final class AppStore {
         self.persistSubscriptionSnapshots = persistSubscriptionSnapshots
         self.now = now
         self.badgeCacheURL = badgeCacheURL
+        self.personalActivity = PersonalActivityStore(url: badgeCacheURL?.deletingLastPathComponent().appendingPathComponent("personal-activity-v1.json"))
         let todayKey = PayloadCacheKey(period: .today, provider: .all, now: now())
         if let url = badgeCacheURL,
            let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize,
@@ -281,7 +283,24 @@ final class AppStore {
     func floatingTime(for period: Period) -> TimeBlock? {
         let anchor = key(period: .today, provider: .all, includeOptimize: false).dateAnchor
         let separate = floatingTimeAnchor == anchor || period == .all ? floatingTimeSnapshots[period] : nil
-        return Self.newerTime(mergedPayload(period: period, provider: .all)?.time, separate)
+        return withActivity(Self.newerTime(mergedPayload(period: period, provider: .all)?.time, separate), period: period, provider: .all)
+    }
+
+    private func withActivity(_ time: TimeBlock?, period: Period, provider: ProviderFilter) -> TimeBlock? {
+        guard var time else { return nil }
+        if let activity = personalActivity.summary(period: period, provider: provider, now: now()) { time.appActivity = activity }
+        return time
+    }
+
+    var recentMainTurns: [String: Double] {
+        let times = [mergedPayload(period: .today, provider: .all)?.time, floatingTimeSnapshots[.today], floatingTimeSnapshots[.all]]
+        var result: [String: Double] = [:]
+        for time in times.compactMap({ $0 }) {
+            for provider in time.providers {
+                if let at = provider.recentMainTurnAt { result[provider.name] = max(result[provider.name] ?? 0, at) }
+            }
+        }
+        return result
     }
 
     func loadFloatingTimeIfNeeded(for period: Period, force: Bool = false) async {
@@ -454,7 +473,10 @@ final class AppStore {
     }
 
     var payload: MenubarPayload {
-        mergedPayload(period: selectedPeriod, provider: selectedProvider) ?? .empty
+        var result = mergedPayload(period: selectedPeriod, provider: selectedProvider) ?? .empty
+        result.time = selectedProvider == .all ? floatingTime(for: selectedPeriod)
+            : withActivity(result.time, period: selectedPeriod, provider: selectedProvider)
+        return result
     }
 
     /// Summary payload for the selected period across all providers. Header totals and provider
