@@ -1,8 +1,8 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { compactReportSession, mergeReportSession } from './report-summary.js'
 const reportMode = new AsyncLocalStorage<boolean>()
-import { cachedFileParse } from './parsed-file-cache.js'
-import { chargeRecord, withScanBudget } from './resource-budget.js'
+import { cachedFileParse, type FileParseProgress } from './parsed-file-cache.js'
+import { chargeRecord, withScanBudget, ResourceBudgetError } from './resource-budget.js'
 import { readdir, stat } from 'fs/promises'
 import { basename, join } from 'path'
 import { readSessionLines } from './fs-utils.js'
@@ -138,73 +138,106 @@ function parseApiCall(entry: JournalEntry): ParsedApiCall | null {
   }
 }
 
-async function parseTurns(filePath: string): Promise<ParsedTurn[]> {
-  const seenCalls = new Map<string, ParsedApiCall>()
-  const turns: ParsedTurn[] = []
-  let currentUserMessage = ''
-  let currentUserSignals = 0
-  let currentCalls: ParsedApiCall[] = []
-  let currentTimestamp = ''
-  let currentSessionId = ''
+type TurnScanState = {
+  turns: ParsedTurn[]; currentCalls: ParsedApiCall[]; currentUserMessage: string; currentUserSignals: number
+  currentTimestamp: string; currentSessionId: string; lineNumber: number
+}
+function validTurnScan(value: unknown): value is TurnScanState {
+  const x = value as TurnScanState | null
+  const amount = (n: unknown) => typeof n === 'number' && Number.isFinite(n) && n >= 0
+  const calls = (list: unknown): list is ParsedApiCall[] => Array.isArray(list) && list.every(c => c &&
+    typeof c.deduplicationKey === 'string' && typeof c.model === 'string' && typeof c.timestamp === 'string' &&
+    amount(c.costUSD) && c.usage && ['inputTokens', 'outputTokens', 'cacheCreationInputTokens', 'cacheReadInputTokens']
+      .every(key => amount(c.usage[key])) && Array.isArray(c.tools) && Array.isArray(c.bashCommands))
+  return !!x && Array.isArray(x.turns) && x.turns.every(t => t && calls(t.assistantCalls) &&
+    typeof t.userMessage === 'string' && typeof t.timestamp === 'string' && typeof t.sessionId === 'string') && calls(x.currentCalls) &&
+    typeof x.currentUserMessage === 'string' && Number.isSafeInteger(x.currentUserSignals) && x.currentUserSignals >= 0 &&
+    typeof x.currentTimestamp === 'string' && typeof x.currentSessionId === 'string' && Number.isSafeInteger(x.lineNumber) && x.lineNumber >= 0
+}
 
-  let lineNumber = 0
-  for await (const line of readSessionLines(filePath)) {
-    lineNumber++
-    const entry = parseJsonlLine(line)
-    if (!entry) continue
-    if (entry.type === 'user') {
-      const text = getUserMessageText(entry)
-      if (text.trim()) {
-        if (currentCalls.length > 0) {
-          turns.push({
-            userMessage: currentUserMessage,
-            userMessageSignals: currentUserSignals,
-            assistantCalls: currentCalls,
-            timestamp: currentTimestamp,
-            sessionId: currentSessionId,
-          })
+async function parseTurns(filePath: string, progress: FileParseProgress): Promise<ParsedTurn[]> {
+  const checkpoint = await progress.load(validTurnScan)
+  const saved = checkpoint?.state
+  const seenCalls = new Map<string, ParsedApiCall>()
+  const turns: ParsedTurn[] = saved?.turns ?? []
+  let currentUserMessage = saved?.currentUserMessage ?? ''
+  let currentUserSignals = saved?.currentUserSignals ?? 0
+  let currentCalls: ParsedApiCall[] = saved?.currentCalls ?? []
+  let currentTimestamp = saved?.currentTimestamp ?? ''
+  let currentSessionId = saved?.currentSessionId ?? ''
+  for (const turn of turns) for (const call of turn.assistantCalls) seenCalls.set(call.deduplicationKey, call)
+  for (const call of currentCalls) seenCalls.set(call.deduplicationKey, call)
+  let lineNumber = saved?.lineNumber ?? 0
+  let offset = checkpoint?.offset ?? 0
+  try {
+    for await (const line of readSessionLines(filePath, offset, undefined, next => { offset = next })) {
+      // Charge before mutating state so an interrupted record can be replayed
+      // without losing it or advancing its synthetic message ID.
+      chargeRecord()
+      lineNumber++
+      const entry = parseJsonlLine(line)
+      if (!entry) continue
+      if (entry.type === 'user') {
+        const text = getUserMessageText(entry)
+        if (text.trim()) {
+          if (currentCalls.length > 0) {
+            turns.push({
+              userMessage: currentUserMessage,
+              userMessageSignals: currentUserSignals,
+              assistantCalls: currentCalls,
+              timestamp: currentTimestamp,
+              sessionId: currentSessionId,
+            })
+          }
+          const compact = compactUserMessage(text)
+          currentUserMessage = compact.userMessage
+          currentUserSignals = compact.userMessageSignals
+          currentCalls = []
+          currentTimestamp = entry.timestamp ?? ''
+          currentSessionId = entry.sessionId ?? ''
         }
-        const compact = compactUserMessage(text)
-        currentUserMessage = compact.userMessage
-        currentUserSignals = compact.userMessageSignals
-        currentCalls = []
-        currentTimestamp = entry.timestamp ?? ''
-        currentSessionId = entry.sessionId ?? ''
-      }
-    } else if (entry.type === 'assistant') {
-      const msgId = getMessageId(entry)
-      const call = parseApiCall(entry)
-      if (!call) continue
-      const previous = msgId ? seenCalls.get(msgId) : undefined
-      if (previous) {
-        // Claude writes several blocks and a final usage snapshot with the same
-        // API message ID. These are cumulative counters, never separate charges.
-        for (const key of Object.keys(call.usage) as Array<keyof TokenUsage>) {
-          previous.usage[key] = Math.max(previous.usage[key] ?? 0, call.usage[key] ?? 0)
+      } else if (entry.type === 'assistant') {
+        const msgId = getMessageId(entry)
+        const call = parseApiCall(entry)
+        if (!call) continue
+        const previous = msgId ? seenCalls.get(msgId) : undefined
+        if (previous) {
+          // Claude writes several blocks and a final usage snapshot with the same
+          // API message ID. These are cumulative counters, never separate charges.
+          for (const key of Object.keys(call.usage) as Array<keyof TokenUsage>) {
+            previous.usage[key] = Math.max(previous.usage[key] ?? 0, call.usage[key] ?? 0)
+          }
+          previous.tools = [...new Set([...previous.tools, ...call.tools])]
+          previous.mcpTools = extractMcpTools(previous.tools)
+          previous.bashCommands = [...new Set([...previous.bashCommands, ...call.bashCommands])]
+          previous.hasAgentSpawn ||= call.hasAgentSpawn
+          previous.hasPlanMode ||= call.hasPlanMode
+          if (call.speed === 'fast') previous.speed = 'fast'
+          previous.costUSD = calculateCost(previous.model, previous.usage.inputTokens,
+            previous.usage.outputTokens, previous.usage.cacheCreationInputTokens,
+            previous.usage.cacheReadInputTokens, previous.usage.webSearchRequests,
+            previous.speed, previous.usage.inputTokens + previous.usage.cacheCreationInputTokens + previous.usage.cacheReadInputTokens,
+            previous.usage.cacheCreation1hInputTokens)
+          continue
         }
-        previous.tools = [...new Set([...previous.tools, ...call.tools])]
-        previous.mcpTools = extractMcpTools(previous.tools)
-        previous.bashCommands = [...new Set([...previous.bashCommands, ...call.bashCommands])]
-        previous.hasAgentSpawn ||= call.hasAgentSpawn
-        previous.hasPlanMode ||= call.hasPlanMode
-        if (call.speed === 'fast') previous.speed = 'fast'
-        previous.costUSD = calculateCost(previous.model, previous.usage.inputTokens,
-          previous.usage.outputTokens, previous.usage.cacheCreationInputTokens,
-          previous.usage.cacheReadInputTokens, previous.usage.webSearchRequests,
-          previous.speed, previous.usage.inputTokens + previous.usage.cacheCreationInputTokens + previous.usage.cacheReadInputTokens,
-          previous.usage.cacheCreation1hInputTokens)
-        continue
+        if (msgId) seenCalls.set(msgId, call)
+        else call.deduplicationKey = `${filePath}:${lineNumber}`
+        currentCalls.push(call)
       }
-      if (msgId) seenCalls.set(msgId, call)
-      else call.deduplicationKey = `${filePath}:${lineNumber}`
-      chargeRecord(); currentCalls.push(call)
     }
+  } catch (error) {
+    if (error instanceof ResourceBudgetError) {
+      try {
+        await progress.save({ turns, currentCalls, currentUserMessage, currentUserSignals, currentTimestamp, currentSessionId, lineNumber }, offset)
+      } catch { _parseWarnings.push('A historical transcript checkpoint could not be saved; its unfinished usage remains unknown.') }
+    }
+    throw error
   }
 
   if (currentCalls.length > 0) {
     turns.push({
       userMessage: currentUserMessage,
-            userMessageSignals: currentUserSignals,
+      userMessageSignals: currentUserSignals,
       assistantCalls: currentCalls,
       timestamp: currentTimestamp,
       sessionId: currentSessionId,
@@ -326,7 +359,7 @@ async function parseSessionFile(
       if (s.mtimeMs < dateRange.start.getTime()) return null
     } catch { /* fall through to normal read; missing stat shouldn't break parsing */ }
   }
-  const rawTurns = await cachedFileParse(filePath, 'claude-turns', () => parseTurns(filePath))
+  const rawTurns = await cachedFileParse(filePath, 'claude-turns', progress => parseTurns(filePath, progress))
   const sessionId = basename(filePath, '.jsonl')
   const turns: ParsedTurn[] = []
   for (const turn of rawTurns) {

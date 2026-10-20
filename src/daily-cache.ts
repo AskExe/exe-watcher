@@ -69,6 +69,8 @@ export type DailyCache = {
   lastComputedDate: string | null
   days: DailyEntry[]
   revalidatedAt?: number
+  /** Durable parser progress, even before an entire historical day is complete. */
+  historyScanProgress?: number
   /** Slice the last run aborted on, so the next run resumes there instead of restarting. */
   backfill?: BackfillCursor | null
   /** Days recorded without a complete scan because they exhausted their retries. */
@@ -123,6 +125,7 @@ function isValidCache(parsed: unknown): parsed is DailyCache {
   if (c.version !== DAILY_CACHE_VERSION && c.version !== 8) return false
   if (typeof c.scopeKey !== 'string' || c.scopeKey.length === 0) return false
   if (!Array.isArray(c.days)) return false
+  if (c.historyScanProgress !== undefined && (!Number.isSafeInteger(c.historyScanProgress) || c.historyScanProgress < 0)) return false
   if (c.missingProviders && (!Array.isArray(c.missingProviders) || !c.missingProviders.every(p => typeof p === 'string'))) return false
   if (c.historyBuild) {
     const stage = c.historyBuild
@@ -211,6 +214,7 @@ export function addNewDays(
     lastComputedDate: nextLast,
     days: merged,
     revalidatedAt: cache.revalidatedAt,
+    historyScanProgress: cache.historyScanProgress,
     backfill: cache.backfill,
     partialDates: cache.partialDates,
   }

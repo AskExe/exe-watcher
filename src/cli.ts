@@ -31,6 +31,7 @@ import { applyClaudeRecovery, readClaudeUsageSnapshot, recoverClaudeUsage, lockC
 import { assertHistoryComplete, buildPeriodSnapshots, hasRecordedHistory } from './period-snapshots.js'
 import { buildSavedHistory } from './saved-history.js'
 import { completeHistoryBuild } from './history-build.js'
+import { parsedFileProgress } from './parsed-file-cache.js'
 import { createInterface } from 'node:readline'
 import { createRequire } from 'node:module'
 import { watchMenubarParent } from './menubar-lifecycle.js'
@@ -450,6 +451,19 @@ program
       const dailyCacheScope = buildDailyCacheScopeKey(opts.project, opts.exclude)
 
       const backfillWarnings: string[] = []
+      let savedParserProgress = parsedFileProgress()
+      const saveHistoryCache = async (c: DailyCache) => {
+        const progress = parsedFileProgress()
+        const advanced = progress > savedParserProgress
+        c.historyScanProgress = (c.historyScanProgress ?? 0) + progress - savedParserProgress
+        savedParserProgress = progress
+        if (c.backfill) {
+          // File checkpoints and completed parsed files are real progress even
+          // before a day can be committed. A stuck attempt counter is not.
+          c.backfill.attempts = advanced ? 0 : Math.min(c.backfill.attempts, MAX_BLOCKED_CHUNK_ATTEMPTS)
+        }
+        await saveDailyCache(c)
+      }
       /**
        * Scan [start, end] one slice at a time, persisting the daily cache after each.
        *
@@ -459,14 +473,15 @@ program
        * day every day. Persisting per slice makes an abort cost only the slice it hit.
        *
        * A slice that aborts is recorded in `cache.backfill`; the next run resumes there.
-       * A slice that aborts MAX_BLOCKED_CHUNK_ATTEMPTS times is recorded as an
-       * incomplete day and skipped, so a single unscannable day cannot pin the cursor.
+       * A slice with no saved file progress after MAX_BLOCKED_CHUNK_ATTEMPTS is
+       * deferred so newer days can load. Deferred dates remain eligible for repair.
        */
       const runChunkedBackfill = async (
         cache: DailyCache,
         start: Date,
         end: Date,
         order: 'oldest-first' | 'newest-first',
+        repair = false,
       ): Promise<DailyCache> => {
         let c = cache
         const chunks = planBackfillChunks(start, end)
@@ -474,13 +489,13 @@ program
         for (const chunk of chunks) {
           const chunkDate = toDateString(chunk.start)
           const coveredThrough = toDateString(chunk.end)
-          if (shouldSkipBlockedChunk(c.backfill, chunkDate)) {
+          if (!repair && shouldSkipBlockedChunk(c.backfill, chunkDate)) {
             const blanks = fillMissingDays(chunk.start, chunk.end, [])
             c = addNewDays(c, blanks, yesterdayStr, { coveredThrough })
             c.partialDates = [...new Set([...(c.partialDates ?? []), ...blanks.map(d => d.date)])]
             c.backfill = null
             c.revalidatedAt = Date.now()
-            await saveDailyCache(c)
+            await saveHistoryCache(c)
             const warn = `history for ${chunkDate} exceeded the scan budget ${MAX_BLOCKED_CHUNK_ATTEMPTS} times; recorded as incomplete so newer days can load`
             backfillWarnings.push(warn)
             process.stderr.write(`[exe-watcher] WARNING: ${warn}\n`)
@@ -491,15 +506,16 @@ program
             const chunkProjects = filterProjectsByName(await parseAllSessions(chunkRange, 'all', true), opts.project, opts.exclude)
             const chunkDays = fillMissingDays(chunk.start, chunk.end, aggregateProjectsIntoDays(chunkProjects))
             c = addNewDays(c, chunkDays, yesterdayStr, { coveredThrough })
+            c.partialDates = (c.partialDates ?? []).filter(date => date < chunkDate || date > coveredThrough)
             c.backfill = null
             c.revalidatedAt = Date.now()
-            await saveDailyCache(c)
+            await saveHistoryCache(c)
           } catch (err: unknown) {
             if (!(err instanceof ResourceBudgetError)) throw err
             // Keep every slice resolved before this one; mark where to resume.
             c.backfill = nextBackfillCursor(c.backfill, chunkDate)
             c.revalidatedAt = Date.now()
-            await saveDailyCache(c)
+            await saveHistoryCache(c)
             const warn = `history backfill paused at ${chunkDate} (attempt ${c.backfill.attempts}): ${err.message}`
             backfillWarnings.push(warn)
             process.stderr.write(`[exe-watcher] WARNING: ${warn}\n`)
@@ -514,7 +530,7 @@ program
         c, start, end, scanProviders,
         async (provider, from, through) => aggregateProjectsIntoDays(filterProjectsByName(
           await parseAllSessions({ start: from, end: through }, provider, true), opts.project, opts.exclude,
-        )), saveDailyCache, { mergeExisting },
+        )), saveHistoryCache, { mergeExisting },
       )
       const pausedHistory = (c: DailyCache) => {
         if (!c.historyBuild) return false
@@ -524,6 +540,7 @@ program
 
       const cache = await withScanBudget(() => withScanSlice(() => withDailyCacheLock(async () => {
         let c = await loadDailyCache(dailyCacheScope)
+        const repairDates = [...new Set(c.partialDates ?? [])].sort()
 
         // The always-visible badge must not rebuild or revalidate history on every
         // filesystem event. Historical views maintain the cache when requested.
@@ -593,6 +610,20 @@ program
           const backEnd = new Date(new Date(updatedOldest).getTime() - MS_PER_DAY)
           if (clampedNeeded.getTime() <= backEnd.getTime()) {
             c = await runChunkedBackfill(c, clampedNeeded, backEnd, 'newest-first')
+          }
+        }
+
+        // Earlier releases permanently parked budget-limited dates as partial
+        // placeholders. Revisit only those holes, preserving every verified row.
+        // Do not spend another scan on a newly blocked forward/backward gap.
+        if (!c.backfill || repairDates.includes(c.backfill.blockedDate)) {
+          const selectedStart = toDateString(periodInfo.range.start)
+          for (const date of repairDates) {
+            if (date < selectedStart || date > yesterdayStr || !c.partialDates?.includes(date)) continue
+            const start = parseHistoryStartDate(date)!
+            const end = new Date(start); end.setHours(23, 59, 59, 999)
+            c = await runChunkedBackfill(c, start, end, 'oldest-first', true)
+            if (c.backfill) break
           }
         }
 

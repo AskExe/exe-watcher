@@ -2,6 +2,7 @@ import { describe, it, expect, afterEach, vi } from 'vitest'
 import { mkdtemp, writeFile, rm } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
+import { ResourceBudgetError, withScanBudget } from '../src/resource-budget.js'
 
 import {
   MAX_SESSION_FILE_BYTES,
@@ -94,5 +95,33 @@ describe('readSessionLines', () => {
     const gen = readSessionLines(p)
     await gen.next()
     await gen.return(undefined)
+  })
+
+  it('resumes at completed UTF-8/CRLF records across a byte-budget interruption', async () => {
+    const expected = ['🌏'.repeat(16382), '你好', 'done']
+    const content = expected.join('\r\n') + '\r\n'
+    const p = await tmpPath(content)
+    const lines: string[] = []
+    let offset = 0
+    await expect(withScanBudget(async () => {
+      for await (const line of readSessionLines(p, 0, undefined, next => { offset = next })) lines.push(line)
+    }, 100, undefined, 65536)).rejects.toBeInstanceOf(ResourceBudgetError)
+    expect(lines).toEqual(expected.slice(0, 1))
+    expect(offset).toBe(Buffer.byteLength(expected[0]! + '\r\n'))
+    await withScanBudget(async () => {
+      for await (const line of readSessionLines(p, offset)) lines.push(line)
+    }, 100, undefined, 65536)
+    expect(lines).toEqual(expected)
+  })
+
+  it('does not advance a cursor for a record the consumer fails to process', async () => {
+    const p = await tmpPath('first\nsecond\nthird\n')
+    let offset = 0
+    await expect((async () => {
+      for await (const line of readSessionLines(p, 0, undefined, next => { offset = next })) {
+        if (line === 'second') throw new ResourceBudgetError('fixture')
+      }
+    })()).rejects.toBeInstanceOf(ResourceBudgetError)
+    expect(offset).toBe(Buffer.byteLength('first\n'))
   })
 })

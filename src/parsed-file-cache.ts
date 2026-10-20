@@ -16,6 +16,55 @@ const compress = promisify(gzip)
 const decompress = promisify(gunzip)
 const MAX_ENTRY = 16 * 1024 * 1024
 const MAX_DISK = 256 * 1024 * 1024
+let mutationCount = 0
+export const parsedFileProgress = () => mutationCount
+
+export type FileParseProgress = {
+  load<T>(valid: (value: unknown) => value is T): Promise<{ offset: number; state: T } | undefined>
+  save(state: unknown, offset: number): Promise<void>
+}
+
+/** Bound serialization itself, including checkpoints, before building a large
+ * string alongside the live parser state. Array index overhead is conservative. */
+function encodeEntry(value: unknown): string | undefined {
+  let bytes = 0
+  try {
+    return JSON.stringify(value, (key, item) => {
+      bytes += key ? Buffer.byteLength(JSON.stringify(key)) + 2 : 0
+      bytes += item && typeof item === 'object' ? 2 : Buffer.byteLength(JSON.stringify(item) ?? 'null')
+      if (bytes > MAX_ENTRY) throw new Error('parsed entry limit')
+      return item
+    })
+  } catch { return undefined }
+}
+
+function fileProgress(path: string, dir: string, cachePath: string, before: string | null): FileParseProgress {
+  let startingOffset = 0
+  return {
+    async load<T>(valid: (value: unknown) => value is T) {
+      if (!before) return
+      try {
+        const size = (await stat(cachePath)).size
+        if (size > MAX_ENTRY) return
+        chargeRead(size)
+        const saved = JSON.parse((await decompress(await readFile(cachePath), { maxOutputLength: MAX_ENTRY })).toString('utf8'))
+        if (saved.v !== VERSION || saved.fingerprint !== before || !Number.isSafeInteger(saved.offset) ||
+            saved.offset <= 0 || saved.offset > Number(before.split(':')[2]) || !valid(saved.state)) return
+        startingOffset = saved.offset
+        return { offset: saved.offset as number, state: saved.state as T }
+      } catch (error) { if (error instanceof ResourceBudgetError) throw error }
+    },
+    async save(state, offset) {
+      // Do not claim progress on an unfinished line, a moving/replaced snapshot,
+      // or an unchanged cursor. Completed files and checkpoints share one quota.
+      if (!before || offset <= startingOffset || offset > Number(before.split(':')[2]) || await fingerprint(path) !== before) return
+      // Appends, truncation and replacements all invalidate a checkpoint. Never
+      // reuse partial state unless it describes this exact source snapshot.
+      const payload = encodeEntry({ v: VERSION, fingerprint: before, offset, state })
+      if (payload) await storeParsedEntry(dir, cachePath, payload)
+    },
+  }
+}
 
 async function fingerprint(path: string): Promise<string | null> {
   try {
@@ -28,10 +77,11 @@ async function fingerprint(path: string): Promise<string | null> {
 /** Durable, versioned per-file parsed results. Date filtering and cross-file dedup
  * happen after replay. Changed/truncated/replaced files are reparsed from a fixed snapshot.
  */
-export async function cachedFileParse<T>(path: string, kind: string, parse: () => Promise<T[]>, warnings?: string[], range?: DateRange): Promise<T[]> {
+export async function cachedFileParse<T>(path: string, kind: string, parse: (progress: FileParseProgress) => Promise<T[]>, warnings?: string[], range?: DateRange): Promise<T[]> {
   const dir = join(getCacheDir(), 'parsed-files')
   const key = createHash('sha256').update(`${VERSION}:${kind}:${path}`).digest('hex')
   const cachePath = join(dir, `v${VERSION}-${key}.json.gz`)
+  const progressPath = join(dir, `v${VERSION}-progress-${key}.json.gz`)
   const legacyKey = createHash('sha256').update(`3:${kind}:${path}:${getPricingFingerprint()}`).digest('hex')
   const legacyPath = join(dir, `v3-${legacyKey}.json.gz`)
   const fingerprintPath = kind === 'opencode' ? path.slice(0, path.lastIndexOf(':')) : path
@@ -78,15 +128,19 @@ export async function cachedFileParse<T>(path: string, kind: string, parse: () =
       } catch (err) { if (err instanceof ResourceBudgetError) throw err }
     }
   }
-  const data = migrated ?? await parse()
+  const data = migrated ?? await parse(fileProgress(fingerprintPath, dir, progressPath, before))
   const hasUnpricedUsage = lockRecordedCosts(data)
   if (!before || await fingerprint(fingerprintPath) !== before) return data
   await rememberRange(data)
   // No cache can describe a moving snapshot as current. Stable files only; appends
   // invalidate by size/mtime/ctime and preserve incomplete final lines for reparse.
-  const payload = JSON.stringify({ v: VERSION, fingerprint: before, data, warnings, pricesLocked: true,
+  const payload = encodeEntry({ v: VERSION, fingerprint: before, data, warnings, pricesLocked: true,
     hasUnpricedUsage, pricingFingerprint: getPricingFingerprint() })
-  if (Buffer.byteLength(payload) > MAX_ENTRY) return data
+  if (payload) await storeParsedEntry(dir, cachePath, payload, progressPath)
+  return data
+}
+
+async function storeParsedEntry(dir: string, cachePath: string, payload: string, obsolete?: string): Promise<void> {
   await mkdir(dir, { recursive: true })
   const encoded = await compress(Buffer.from(payload))
   const release = await acquireFileLock(join(dir, 'writes.lock'))
@@ -128,7 +182,7 @@ export async function cachedFileParse<T>(path: string, kind: string, parse: () =
       // Reserve both the existing entry and its replacement until rename succeeds.
       // A crash while a smaller replacement is pending must never under-count disk use.
       let nextSize = total + encoded.length
-      if (!Number.isFinite(nextSize)) return data
+      if (!Number.isFinite(nextSize)) return
       if (nextSize > MAX_DISK) {
         // Make room in batches so reaching the cap never disables future caching.
         const rows = []
@@ -144,17 +198,22 @@ export async function cachedFileParse<T>(path: string, kind: string, parse: () =
           await unlink(row.path).catch(() => {})
           nextSize -= row.size
         }
-        if (nextSize > MAX_DISK) return data
+        if (nextSize > MAX_DISK) return
       }
       const tmp = `${cachePath}.${randomUUID()}.tmp`
       try {
         // Reserve before writing: a crash can over-count disk use, never under-count it.
         await writeQuota(nextSize)
         await writeFile(tmp, encoded, { mode: 0o600 }); await rename(tmp, cachePath)
+        mutationCount++
         if (oldSize) await writeQuota(nextSize - oldSize)
+        total = nextSize - oldSize
       }
       finally { await unlink(tmp).catch(() => {}) }
     }
+    if (obsolete) {
+      const size = (await stat(obsolete).catch(() => null))?.size ?? 0
+      if (size) { await unlink(obsolete); await writeQuota(Math.max(0, total - size)) }
+    }
   } finally { await release() }
-  return data
 }
