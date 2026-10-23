@@ -12,6 +12,7 @@ final class WatcherTelemetry {
     private(set) var usageEnabled = false
     private(set) var diagnosticsEnabled = false
     private var timer: Timer?
+    private var timerTicks = 0
     private var visible = false
     private var previous: (TimeInterval, Bool)?
     private var pending = 0
@@ -231,11 +232,11 @@ final class WatcherTelemetry {
         }
         s.refreshConsent()
         s.presentBasicNoticeIfNeeded()
-        var ticks = 0
+        s.timerTicks = 0
         s.timer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { _ in
             Task { @MainActor in
-                s.sample(); ticks += 1
-                if ticks % 6 == 0 { s.flush("usage"); s.flush("errors") }
+                s.sample(); s.timerTicks += 1
+                if s.timerTicks % 6 == 0 { s.flush("usage"); s.flush("errors") }
             }
         }
     }
