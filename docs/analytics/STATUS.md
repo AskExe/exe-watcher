@@ -108,3 +108,13 @@ remain uncollected. Ember Analytics received the compatible pin/API update.
 Checks: **791 Node tests, 209 Swift tests, six gateway tests, three release-helper
 tests**, build/typecheck and diff checks passed. No public release, installed-app
 replacement or gateway restart by Watcher. Token usage remains unavailable.
+
+## 0.2.71 release preparation (2026-10-23)
+
+Human authorized merge and paired npm/Mac publication. Integrated current main
+through 0.2.70, preserving history recovery and personal activity behavior.
+Release candidate 0.2.71 passed 803 Node tests, 209 Swift tests, six gateway
+tests, three release-helper tests, typecheck/build and packed consumer install.
+Analytics is bundled; its local development dependency is not required by npm
+consumers. Next: PR/merged-main CI, signed notarized publication, npm latest
+and updater verification. No gateway changes. Token usage unavailable.
