@@ -96,6 +96,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             return
         }
 
+        WatcherTelemetry.start()
         ProcessInfo.processInfo.automaticTerminationSupportEnabled = false
         ProcessInfo.processInfo.disableSuddenTermination()
         backgroundActivity = ProcessInfo.processInfo.beginActivity(
@@ -229,6 +230,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        WatcherTelemetry.stop()
         appActivityTracker?.stop()
         floatingQuota?.stop()
         store.cancelSubscriptionRefresh()
@@ -466,6 +468,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         popover.contentViewController?.view.appearance = NSAppearance(named: .darkAqua)
     }
 
+    // Reopening from Finder/LaunchServices should reveal this menu-only app.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if popover != nil, !popover.isShown { handleButtonClick(nil) }
+        return true
+    }
+
     @objc private func handleButtonClick(_ sender: AnyObject?) {
         guard let button = statusItem.button else { return }
         playMenuBarOwlReaction()
@@ -485,6 +493,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     }
 
     func popoverWillShow(_ notification: Notification) {
+        WatcherTelemetry.capture("menu_opened")
         RefreshTracer.shared.instant(name: "popover_open", category: "lifecycle", tid: .lifecycle)
         owlPresence.popoverWillShow()
         Task {
@@ -499,6 +508,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     }
 
     func popoverDidClose(_ notification: Notification) {
+        WatcherTelemetry.menuClosed()
         RefreshTracer.shared.instant(name: "popover_close", category: "lifecycle", tid: .lifecycle)
         owlPresence.popoverDidClose()
     }

@@ -7,6 +7,7 @@ export default defineConfig({
   outDir: 'dist',
   clean: true,
   splitting: false,
+  noExternal: ['@odd-core/analytics'],
   sourcemap: true,
   dts: false,
   banner: {

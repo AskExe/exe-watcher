@@ -1,0 +1,85 @@
+{
+  "date": "2026-10-23",
+  "branch": "feat/personal-ai-time",
+  "base_revision": "f661476692c0c54fb0b55279e397d553a69820e1",
+  "working_tree_changes": true,
+  "checks": {
+    "node_tests": 789,
+    "swift_tests": 205,
+    "gateway_tests": 5,
+    "release_helper_tests": 3,
+    "typecheck": "passed",
+    "build": "passed",
+    "package_inventory_files": 16,
+    "shared_snapshot_hashes": "verified"
+  },
+  "posthog": {
+    "source": "real foreground CLI status and native menu; synthetic canary removed",
+    "project_id": 3,
+    "recording_minutes": "N/A",
+    "observed": {
+      "events": 10,
+      "installations": 1,
+      "active_ms": 31264,
+      "features": 5,
+      "feature_names": [
+        "",
+        "mac_menu",
+        "mac_period",
+        "cli_status"
+      ]
+    },
+    "checked_at": "2026-10-23T12:27:10.995170+00:00"
+  },
+  "sentry": {
+    "checked_at": "2026-10-23T12:23:26.137982+00:00",
+    "retained_reports": [
+      {
+        "project": "watcher-cli",
+        "project_id": 3,
+        "group_id": 6,
+        "times_seen": 2,
+        "event_id": "7df413b157f84434ab9863cae653513c",
+        "release": "watcher-cli@0.2.67",
+        "sanitized": true
+      },
+      {
+        "project": "watcher-macos",
+        "project_id": 4,
+        "group_id": 7,
+        "times_seen": 13,
+        "event_id": "2d43a91ac7a649c29375c5601909c01b",
+        "release": "watcher-macos@0.2.67",
+        "sanitized": true
+      }
+    ]
+  },
+  "error_retry_canary": {
+    "project_id": 3,
+    "duplicate_deliveries": 2,
+    "stored_events": 1,
+    "sanitized": true,
+    "owned_issue_removed": true
+  },
+  "boundary": {
+    "public_dns": "72.60.192.211",
+    "ingress_routes": [
+      "http://data.odd.community {",
+      "redir https://data.odd.community{uri} 308",
+      "https://data.odd.community {",
+      "path /batch/",
+      "reverse_proxy 127.0.0.1:18081",
+      "path /errors/",
+      "reverse_proxy 127.0.0.1:18081",
+      "path /health",
+      "reverse_proxy 127.0.0.1:18081"
+    ],
+    "gateway_sha256": "03af585f78252fe0bf6982cc95dffc042aa6d4e57fcd00afc016202de62229d7",
+    "existing_mappings_preserved": true
+  },
+  "native_dogfood_binary_sha256": "33a1be90fe2b2c9971e7a3c03b090bcf80e89e294156d785aa81d816d2388311",
+  "native_dogfood_version": "0.2.67",
+  "installed_version_untouched": "0.2.70",
+  "public_release": false,
+  "token_usage": "unavailable"
+}

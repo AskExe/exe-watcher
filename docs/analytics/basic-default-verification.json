@@ -1,0 +1,35 @@
+{
+  "date": "2026-10-23",
+  "policy": {
+    "basic_usage_default": "on after first-run disclosure",
+    "detailed_diagnostics_default": "off",
+    "existing_opt_outs_preserved": true,
+    "privacy_overrides_honored": true,
+    "shared_client_pin": "6ae44a117e23a4332ab13209b840a912d132e7a4"
+  },
+  "checks": {
+    "node_tests": 790,
+    "swift_tests": 208,
+    "typecheck": "passed",
+    "build": "passed",
+    "release_helper_tests": 3,
+    "native_first_run_checkbox_default_checked": true,
+    "native_opt_out_before_collection": true,
+    "native_opt_out_persisted": true,
+    "native_opt_out_created_no_identity_or_queue": true
+  },
+  "binary_sha256": "10bdd7dd29dc6c20828bc986ba73793b0309e17ad4cb29bffee7063148049840",
+  "basic_metrics": [
+    "daily activity / installation retention",
+    "foreground menu time",
+    "allowlisted feature counts"
+  ],
+  "unsupported_metrics": [
+    "version/OS cohorts",
+    "broader performance and success/failure buckets"
+  ],
+  "shared_gateway_changed": false,
+  "public_release": false,
+  "installed_app_changed": false,
+  "token_usage": "unavailable"
+}

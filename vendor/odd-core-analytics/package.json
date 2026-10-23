@@ -1,0 +1,13 @@
+{
+  "name": "@odd-core/analytics",
+  "version": "0.2.0",
+  "license": "MIT",
+  "description": "Pinned Odd Core privacy and gateway entry points",
+  "exports": {
+    "./privacy": {
+      "types": "./dist/privacy/index.d.ts",
+      "default": "./dist/privacy/index.js"
+    },
+    "./gateway": "./gateway/server.mjs"
+  }
+}

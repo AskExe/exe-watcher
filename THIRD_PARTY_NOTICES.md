@@ -35,3 +35,10 @@ SOFTWARE.
 ```
 
 Runtime dependencies and other bundled assets retain their own licenses. This CodeBurn notice does not replace them. Check the applicable upstream notices before importing further code or assets; current CodeBurn includes components with additional third-party terms.
+
+## Odd Core Analytics
+
+The CLI bundles the MIT-licensed `@odd-core/analytics/privacy` implementation.
+The pinned source and artifact hashes are in `vendor/odd-core-analytics/PROVENANCE.json`;
+its full license is included at `vendor/odd-core-analytics/LICENSE`. The native
+Swift adapter follows the same restricted collection protocol.

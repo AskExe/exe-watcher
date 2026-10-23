@@ -122,6 +122,8 @@ struct MenuBarContent: View {
             StarBanner()
         }
         .background(Theme.warmSurfaceDark)
+        .onChange(of: store.selectedPeriod) { _, _ in WatcherTelemetry.capture("mac_period") }
+        .onChange(of: store.selectedProvider) { _, _ in WatcherTelemetry.capture("mac_provider") }
     }
 
     /// True when a specific provider tab is selected and that provider has no spend in the
@@ -478,22 +480,31 @@ struct FooterBar: View {
             .noFocusRing()
 
             Menu {
+                Toggle("Share basic usage statistics", isOn: Binding(
+                    get: { WatcherTelemetry.shared.usageEnabled },
+                    set: { WatcherTelemetry.shared.setConsent(usage: true, enabled: $0) }))
+                Toggle("Share error diagnostics", isOn: Binding(
+                    get: { WatcherTelemetry.shared.diagnosticsEnabled },
+                    set: { WatcherTelemetry.shared.setConsent(usage: false, enabled: $0) }))
+                Button("Send harmless test diagnostic") { WatcherTelemetry.testDiagnostic() }
+                    .disabled(!WatcherTelemetry.shared.diagnosticsEnabled)
+                Divider()
                 Toggle("Floating quota display", isOn: Binding(
                     get: { quotaPreferences.isEnabled }, set: { quotaPreferences.isEnabled = $0 }))
                 Button("Reset floating display position") { quotaPreferences.resetPosition() }
             } label: {
-                Image(systemName: "slider.horizontal.3")
+                Image(systemName: "gearshape")
                     .font(.system(size: 11, weight: .medium))
             }
             .menuStyle(.button)
             .menuIndicator(.hidden)
             .controlSize(.small)
-            .help("Display settings")
-            .accessibilityLabel("Display settings")
+            .help("Settings")
+            .accessibilityLabel("Settings")
 
             Spacer()
 
-            Button { openReport() } label: {
+            Button { WatcherTelemetry.capture("mac_report"); openReport() } label: {
                 Label("Report", systemImage: "terminal")
                     .font(.system(size: 11, weight: .semibold))
                     .labelStyle(.titleAndIcon)
