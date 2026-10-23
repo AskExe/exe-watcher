@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.71 (2026-10-23)
+
+- Add basic usage analytics through our self-hosted privacy gateway after a first-run disclosure, with an easy off switch. Preserve existing opt-outs. Error diagnostics remain a separate, optional control and start off. No prompts, usage logs, file paths, account details or spending data are collected.
+- Use shared Odd Core analytics for the CLI and a matching restricted protocol for the Mac app, including bounded retries and sanitized diagnostics.
+- Replace the menu settings button with a gear icon.
+
 ## 0.2.70 (2026-10-20)
 
 - Track active time in supported AI apps on this Mac, with idle, lock and sleep gaps excluded. Keep a small private daily ledger, an off switch, and day, week, month, all-time and provider views. Terminal/editor attribution stays a clearly marked estimate; no Terminal control, typing, screen or Accessibility access is required.

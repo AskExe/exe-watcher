@@ -90,7 +90,7 @@ async function main() {
   run('xcrun', ['stapler', 'validate', join(output, names[0])], { stdio: 'inherit' });
   const buildInfo = readFileSync(join(output, 'BUILD-INFO.txt'), 'utf8');
   verifyRelease({ tag_name: tag, assets: names.map(name => ({ name, size: 1 })) }, version, tree, buildInfo);
-  const notes = `Watcher ${version} includes the floating quota display, all-agent You + AI and AI Time totals, and retained All Time timing across restarts.\n\nDownload the universal DMG for macOS 14+. The app is Developer ID signed and Apple notarized, and includes its matching CLI. Existing users can select Update in Watcher. Terminal users can run npm install -g exe-watcher@latest --registry=https://registry.npmjs.org.\n\nIncludes CodeBurn by AgentSeal (MIT); full notices ship in the app and npm package.`;
+  const notes = `Watcher ${version} adds basic product analytics through our self-hosted privacy gateway, a first-run disclosure and easy opt-out, and a new settings gear icon. Existing opt-outs are preserved. Error diagnostics remain separately opt-in. Prompts, usage logs, file paths, account details and spending data are excluded.\n\nDownload the universal DMG for macOS 14+. The app is Developer ID signed and Apple notarized, and includes its matching CLI. Existing users can select Update in Watcher. Terminal users can run npm install -g exe-watcher@latest --registry=https://registry.npmjs.org.\n\nIncludes CodeBurn by AgentSeal (MIT); full notices ship in the app and npm package.`;
   run('gh', ['release', 'create', tag, '--repo', repository, '--target', source, '--draft', '--title', `Watcher ${version}`,
     '--notes', notes, ...names.map(name => join(output, name))], { stdio: 'inherit' });
   const draft = releaseMetadata(tag);

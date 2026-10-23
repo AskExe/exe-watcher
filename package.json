@@ -1,6 +1,6 @@
 {
   "name": "exe-watcher",
-  "version": "0.2.70",
+  "version": "0.2.71",
   "description": "The owl watching your AI coding spend \u2014 cost, tokens, agents, and projects in your terminal and menu bar",
   "type": "module",
   "main": "./dist/cli.js",
@@ -9,6 +9,7 @@
   },
   "files": [
     "dist",
+    "vendor/odd-core-analytics",
     "THIRD_PARTY_NOTICES.md",
     "!dist/**/*.map"
   ],
@@ -57,7 +58,8 @@
     "tsup": "^8.4.0",
     "tsx": "^4.19.0",
     "typescript": "^5.8.0",
-    "vitest": "^3.1.0"
+    "vitest": "^3.1.0",
+    "@odd-core/analytics": "file:vendor/odd-core-analytics"
   },
   "publishConfig": {
     "registry": "https://registry.npmjs.org"

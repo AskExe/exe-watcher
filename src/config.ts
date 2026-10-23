@@ -15,7 +15,18 @@ export type Plan = {
   setAt: string
 }
 
+export type TelemetryConfig = {
+  /** Preserve opt-outs written by early telemetry configurations. */
+  enabled?: boolean
+  basicNoticeVersion?: number
+  usageEnabled?: boolean
+  diagnosticsEnabled?: boolean
+  usageEpoch?: string
+  diagnosticsEpoch?: string
+}
+
 export type ExeWatcherConfig = {
+  telemetry?: TelemetryConfig
   /** Optional beginning of the user's coding history, including gaps without logs. */
   historyStartDate?: string
   /** Additional Claude config roots (each contains projects/), e.g. old profiles. */

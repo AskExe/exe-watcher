@@ -729,6 +729,7 @@ final class AppStore {
             if isBadge { persistBadge() }
             errorsByKey[key] = nil
             RefreshTracer.shared.endSpan(spanId, args: ["result": .string("success")])
+            if key == currentBaseKey { WatcherTelemetry.refreshResult(success: true) }
             healthMonitor?.recordFetchResult(success: true)
             if !includeOptimize { scheduleTimeRecovery(fresh.time?.recovery) }
             if !includeOptimize { scheduleHistoryRecovery() }
@@ -745,12 +746,14 @@ final class AppStore {
             let failures = min((failureCounts[key] ?? 0) + 1, 5)
             failureCounts[key] = failures
             retryAfter[key] = now().addingTimeInterval(min(300, 30 * pow(2, Double(failures - 1))))
+            if failures == 1 { WatcherTelemetry.fetchFailed() }
             errorsByKey[key] = Self.describe(error: error)
             NSLog("Exe Watcher: fetch failed for \(key.period.rawValue)/\(key.provider.rawValue): \(error)")
             RefreshTracer.shared.endSpan(spanId, args: [
                 "result": .string("error"),
                 "error": .string(Self.describe(error: error)),
             ])
+            if key == currentBaseKey { WatcherTelemetry.refreshResult(success: false) }
             healthMonitor?.recordFetchResult(success: false)
             return false
         }

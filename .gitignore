@@ -45,3 +45,6 @@ desktop/
 # Employee task assignments (private)
 /exe/
 .npmrc
+
+# Checked-in compiled analytics snapshot for reproducible builds
+!vendor/odd-core-analytics/dist/

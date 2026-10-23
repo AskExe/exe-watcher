@@ -1,0 +1,28 @@
+{
+  "source": "OddCommunity/odd-core-kits/packages/analytics",
+  "revision": "3fb6fb095a1f9b1b8601965df58f08521fc38f7f",
+  "version": "0.2.0",
+  "dirty": false,
+  "compiler": "5.9.3",
+  "sourceHashes": {
+    "package.json": "5163e68c17ac1b0296c6d2a9c556e2847ad0a961d66dc072f9810e587d343ead",
+    "README.md": "a6785accc7fafbe5355cc01d9876f47d12d290b15568ff92890f98c258f9eeb6",
+    "LICENSE": "7a9af43e5df34f24605f6d7ea7613b0982429ab12d09150a76ed681781bd964f",
+    "gateway/server.mjs": "3cacb4903bbbfecc38f2c14152ace487001c3e4e362c3ca07b086b2dc279adf2",
+    "src/privacy/index.ts": "fcd05058ad316d87938248edfb4fd7a9a1305c3176201027e602f60957455a2b",
+    "src/privacy/client.ts": "facac772a0c4767304f7e0564af387555144ed61800257ab996801be90454ddc",
+    "src/privacy/schema.ts": "a5a8ed885d6f7674d9449e66f69f2a4debda937b96a0642d97c8b4d37e5d2dd8"
+  },
+  "hashes": {
+    "README.md": "a6785accc7fafbe5355cc01d9876f47d12d290b15568ff92890f98c258f9eeb6",
+    "LICENSE": "7a9af43e5df34f24605f6d7ea7613b0982429ab12d09150a76ed681781bd964f",
+    "gateway/server.mjs": "3cacb4903bbbfecc38f2c14152ace487001c3e4e362c3ca07b086b2dc279adf2",
+    "dist/privacy/index.js": "f345eebe3947115469d4b84361d17583165c77901388e5afd668bf8442fda561",
+    "dist/privacy/index.d.ts": "fcd05058ad316d87938248edfb4fd7a9a1305c3176201027e602f60957455a2b",
+    "dist/privacy/client.js": "a476348c2934a331de8f5eea70c2a11ff3610e46ead0b0a9f334f9ef5b894564",
+    "dist/privacy/client.d.ts": "cae6e898f34ee1b3c0b04087b1c66b5abd2b9ef4c409aecfe925ee23b3e5c7e8",
+    "dist/privacy/schema.js": "e850805166766fd36dc05b71915d0e64a4f64c32fd0b21c3086bb17e778ff510",
+    "dist/privacy/schema.d.ts": "babe50be7c11c0ef016cb442cc195d5584bd98dfbf9a7a81ef99a80b5460ebbc",
+    "package.json": "ab60af99e145369ff8819a8c8b161658fe1efb7edec7d4b39a44d592e77d12e7"
+  }
+}

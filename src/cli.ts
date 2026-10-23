@@ -1,8 +1,9 @@
+import { BASIC_NOTICE, createTelemetry, resolveTelemetry } from './telemetry.js'
 import { getCacheDir } from './cache-dir.js'
 import { acquireFileLock } from './file-lock.js'
 import { ResourceBudgetError, withScanBudget, withScanSlice } from './resource-budget.js'
 import { existsSync, readFileSync, statSync } from 'fs'
-import { join } from 'path'
+import { dirname, join } from 'path'
 import { homedir } from 'os'
 import { Command } from 'commander'
 import { installMenubarApp } from './menubar-installer.js'
@@ -179,6 +180,9 @@ async function runJsonReport(period: Period, provider: string, project: string[]
   console.log(JSON.stringify({ ...report, pricing: getPricingMetadata() }, null, 2))
 }
 
+let telemetry: Awaited<ReturnType<typeof createTelemetry>> | undefined
+let telemetryCommand = 'unknown'
+
 const program = new Command()
   .name('exe-watcher')
   .description('See where your AI coding tokens go - by task, tool, model, and project')
@@ -187,6 +191,20 @@ const program = new Command()
 
 program.hook('preAction', async (thisCommand, command) => {
   const config = await readConfig()
+  if (command.name() !== 'telemetry' && process.stdin.isTTY && resolveTelemetry(config.telemetry).usageEnabled && config.telemetry?.basicNoticeVersion !== 1) {
+    const noticePath = join(dirname(getConfigFilePath()), 'basic-analytics-notice-v1')
+    if (!existsSync(noticePath)) console.error(`\n${BASIC_NOTICE}\n`)
+    config.telemetry = { ...config.telemetry, basicNoticeVersion: 1 }
+    try {
+      const fs = await import('node:fs/promises')
+      await fs.mkdir(dirname(noticePath), { recursive: true, mode: 0o700 })
+      try { await fs.writeFile(noticePath, '1\n', { flag: 'wx', mode: 0o600 }) }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error }
+    } catch { config.telemetry.usageEnabled = false }
+  }
+  telemetry = command.name() === 'telemetry' ? undefined : await createTelemetry(config.telemetry, version)
+  telemetryCommand = command.name()
+  await telemetry?.capture('command_started', telemetryCommand)
   setModelAliases(config.modelAliases ?? {})
   configuredHistoryStart = parseHistoryStartDate(config.historyStartDate)
   if (thisCommand.opts<{ verbose?: boolean }>().verbose) {
@@ -1336,6 +1354,41 @@ program
     console.log(lines.join('\n'))
   })
 
+program.command('telemetry')
+  .description('Optional self-hosted usage statistics and sanitized error diagnostics (basic usage on; diagnostics off by default)')
+  .option('--usage <on|off>', 'Allow pseudonymous installation and foreground feature counters')
+  .option('--errors <on|off>', 'Consent to error category/class/version; no messages or content')
+  .option('--test-error', 'Send one harmless handled diagnostic when error consent is enabled')
+  .action(async (opts) => {
+    const config = await readConfig()
+    for (const value of [opts.usage, opts.errors]) {
+      if (value !== undefined && value !== 'on' && value !== 'off') throw new Error('Use on or off for telemetry consent')
+    }
+    config.telemetry ??= {}
+    if ((opts.usage !== undefined || opts.errors !== undefined) && config.telemetry.enabled === false) {
+      config.telemetry.usageEnabled = false
+      config.telemetry.diagnosticsEnabled = false
+      delete config.telemetry.enabled
+    }
+    if (opts.usage !== undefined && config.telemetry.usageEnabled !== (opts.usage === 'on')) {
+      config.telemetry.usageEnabled = opts.usage === 'on'
+      config.telemetry.usageEpoch = (await import('node:crypto')).randomUUID()
+    }
+    if (opts.errors !== undefined && config.telemetry.diagnosticsEnabled !== (opts.errors === 'on')) {
+      config.telemetry.diagnosticsEnabled = opts.errors === 'on'
+      config.telemetry.diagnosticsEpoch = (await import('node:crypto')).randomUUID()
+    }
+    if (opts.usage !== undefined || opts.errors !== undefined) await saveConfig(config)
+    const effective = resolveTelemetry(config.telemetry)
+    const current = await createTelemetry(config.telemetry, version)
+    if (opts.testError && config.telemetry.diagnosticsEnabled === true) {
+      try { throw new Error('Watcher harmless handled diagnostic') } catch (error) { await current.error(error) }
+    }
+    await current.shutdown()
+    console.log(JSON.stringify({ usage: effective.usageEnabled, errors: effective.diagnosticsEnabled,
+      collector: 'https://data.odd.community', recordingMinutes: 'N/A', notice: BASIC_NOTICE }))
+  })
+
 // One menubar ingestion owner across processes. Queueing and dead-owner recovery
 // are bounded; cancellation leaves a PID lease that the next launch can reclaim.
 let releaseScan: (() => Promise<void>) | undefined
@@ -1343,7 +1396,11 @@ const stopParentWatch = watchMenubarParent(Number(process.env['EXE_WATCHER_PAREN
 program.hook('preAction', async (_root, command) => {
   if (command.name() === 'status' && !command.opts().cachedOnly) releaseScan = await acquireFileLock(join(getCacheDir(), 'scan.lock'))
 })
-program.hook('postAction', async () => { await releaseScan?.(); releaseScan = undefined; stopParentWatch() })
+program.hook('postAction', async () => {
+  await releaseScan?.(); releaseScan = undefined; stopParentWatch()
+  await telemetry?.capture('command_finished', telemetryCommand, !process.exitCode)
+  await telemetry?.shutdown()
+})
 
 // Default action: install menubar app on macOS when no subcommand given
 if (process.argv.length <= 2 && process.platform === 'darwin') {
@@ -1371,6 +1428,9 @@ if (process.argv.length <= 2 && process.platform === 'darwin') {
   program.parseAsync().catch(async error => {
     await releaseScan?.()
     stopParentWatch()
+    await telemetry?.error(error)
+    await telemetry?.capture('command_finished', telemetryCommand, false)
+    await telemetry?.shutdown()
     console.error(error instanceof Error ? error.message : String(error))
     process.exitCode = 1
   })

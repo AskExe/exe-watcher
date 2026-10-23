@@ -403,6 +403,28 @@ For unfiltered All Time Claude totals, Watcher also reconciles `stats-cache.json
 | `XDG_CONFIG_HOME` | Base directory for Watcher configuration (default: `~/.config`) |
 | `EXE_WATCHER_CACHE_DIR` | Override cache directory (default: `~/.cache/exe-watcher`) |
 
+### Optional analytics and error reporting
+
+Watcher uses our self-hosted PostHog and Sentry through `https://data.odd.community`.
+Basic usage statistics default on after a first-run disclosure. Sanitized error
+diagnostics are a separate, optional choice and default off. Existing opt-outs
+are preserved. In the Mac app, find both controls under the Settings gear. In the CLI:
+
+```sh
+exe-watcher telemetry --usage on --errors on
+exe-watcher telemetry --usage off --errors off
+```
+
+Usage counts participating installations, foreground feature use, active Mac menu
+time, and fixed success/failure outcomes, with numeric app version and coarse
+platform metadata. Recording time is N/A. Errors include only category, class and app version.
+No prompts, usage logs, project names, paths, spend, raw error text, native crash
+dumps, screenshots or replay are sent. Background CLI scans do not count as use.
+`DO_NOT_TRACK=1` or `EXE_WATCHER_TELEMETRY=0` disables collection. Turning a control
+off clears its unsent queue; received reports remain. Our collector receives your
+connection IP but does not forward it to PostHog/Sentry. No project keys are needed.
+See [privacy, retry behavior and operator setup](docs/analytics/README.md).
+
 ---
 
 ## Contributing
