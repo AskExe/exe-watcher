@@ -2,7 +2,8 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { mkdtemp, mkdir, open, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { cachedFileParse } from '../src/parsed-file-cache.js'
+import { cachedFileParse, parsedFileProgress } from '../src/parsed-file-cache.js'
+import { ResourceBudgetError } from '../src/resource-budget.js'
 let dir = ''
 afterEach(async () => { vi.unstubAllEnvs(); if (dir) await rm(dir, { recursive: true, force: true }) })
 it('compresses durable results and replays them without parsing again', async () => {
@@ -107,4 +108,62 @@ it('accounts for the replaced entry after a source shrinks', async () => {
   const sizes = await Promise.all((await readdir(cacheDir)).filter(name => name.endsWith('.json.gz')).map(async name => (await stat(join(cacheDir, name))).size))
   expect(quota).toBe(sizes.reduce((sum, size) => sum + size, 0))
   expect(quota).toBeLessThan(before)
+})
+
+it('keeps unfinished state separate, counts actual progress, and reclaims it on completion', async () => {
+  dir = await mkdtemp(join(tmpdir(), 'watcher-cursor-'))
+  vi.stubEnv('EXE_WATCHER_CACHE_DIR', dir)
+  const path = join(dir, 'session.jsonl'); await writeFile(path, 'one\ntwo\n')
+  const start = parsedFileProgress()
+  await expect(cachedFileParse(path, 'fixture', async progress => {
+    await progress.save([1], 4)
+    throw new ResourceBudgetError('fixture')
+  })).rejects.toBeInstanceOf(ResourceBudgetError)
+  expect(parsedFileProgress()).toBe(start + 1)
+  const cacheDir = join(dir, 'parsed-files')
+  expect((await readdir(cacheDir)).filter(name => name.endsWith('.json.gz'))).toHaveLength(1)
+  await expect(cachedFileParse(path, 'fixture', async progress => {
+    expect(await progress.load(Array.isArray)).toEqual({ offset: 4, state: [1] })
+    await progress.save([1], 4) // The same cursor cannot keep background retries alive.
+    throw new ResourceBudgetError('fixture')
+  })).rejects.toBeInstanceOf(ResourceBudgetError)
+  expect(parsedFileProgress()).toBe(start + 1)
+  expect(await cachedFileParse(path, 'fixture', async progress => {
+    expect(await progress.load(Array.isArray)).toEqual({ offset: 4, state: [1] })
+    return [1, 2]
+  })).toEqual([1, 2])
+  const files = (await readdir(cacheDir)).filter(name => name.endsWith('.json.gz'))
+  expect(files).toHaveLength(1)
+  expect(files[0]).not.toContain('progress')
+  expect((await stat(join(cacheDir, files[0]!))).mode & 0o777).toBe(0o600)
+  expect(Number(await readFile(join(cacheDir, 'quota'), 'utf8'))).toBe((await stat(join(cacheDir, files[0]!))).size)
+})
+
+it.each(['appended source', 'rewrite!', 'x'])('invalidates unfinished state after a changed source: %j', async content => {
+  dir = await mkdtemp(join(tmpdir(), 'watcher-cursor-invalid-'))
+  vi.stubEnv('EXE_WATCHER_CACHE_DIR', dir)
+  const path = join(dir, 'session.jsonl'); await writeFile(path, 'one\ntwo\n')
+  await expect(cachedFileParse(path, 'fixture', async progress => {
+    await progress.save([1], 4)
+    throw new ResourceBudgetError('fixture')
+  })).rejects.toBeInstanceOf(ResourceBudgetError)
+  await writeFile(path, content)
+  await cachedFileParse(path, 'fixture', async progress => {
+    expect(await progress.load(Array.isArray)).toBeUndefined()
+    return [2]
+  })
+})
+
+it('bounds checkpoint storage and rejects moving source snapshots', async () => {
+  dir = await mkdtemp(join(tmpdir(), 'watcher-cursor-limit-'))
+  vi.stubEnv('EXE_WATCHER_CACHE_DIR', dir)
+  const path = join(dir, 'session.jsonl'); await writeFile(path, 'one\ntwo\n')
+  const start = parsedFileProgress()
+  await expect(cachedFileParse(path, 'fixture', async progress => {
+    await progress.save('x'.repeat(17 * 1024 ** 2), 4)
+    await writeFile(path, 'changed source')
+    await progress.save([1], 4)
+    throw new ResourceBudgetError('fixture')
+  })).rejects.toBeInstanceOf(ResourceBudgetError)
+  expect(parsedFileProgress()).toBe(start)
 })

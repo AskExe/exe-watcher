@@ -118,45 +118,57 @@ export function readSessionFileSync(filePath: string): string | null {
   }
 }
 
-export async function* readSessionLines(filePath: string, startByte = 0, skipOversizedRecord?: (prefix: string) => boolean): AsyncGenerator<string> {
+export async function* readSessionLines(filePath: string, startByte = 0, skipOversizedRecord?: (prefix: string) => boolean,
+  completedLine?: (nextByte: number) => void): AsyncGenerator<string> {
   const handle = await open(filePath, 'r').catch(() => null)
   if (!handle) return
   try {
     const size = (await handle.stat()).size
     if (size <= startByte) return
     // Streaming supports large transcripts without allocating the whole file.
-    chargeRead(size - startByte)
-    const stream = handle.createReadStream({ encoding: 'utf-8', start: startByte, end: size - 1, autoClose: false })
-    let pieces: string[] = []
+    const stream = handle.createReadStream({ start: startByte, end: size - 1, autoClose: false })
+    let pieces: Buffer[] = []
     let lineBytes = 0
     let discarding = false
     const maxLineBytes = 32 * 1024 * 1024
-    const append = (piece: string) => {
+    const append = (piece: Buffer) => {
       if (discarding) return
-      lineBytes += Buffer.byteLength(piece)
+      lineBytes += piece.length
       if (lineBytes > maxLineBytes) {
-        const prefix = (pieces.slice(0, 4).join('') + piece.slice(0, 1024)).slice(0, 1024)
+        const prefix = Buffer.concat([...pieces.slice(0, 4), piece.subarray(0, 1024)]).toString('utf8').slice(0, 1024)
         if (!skipOversizedRecord?.(prefix)) throw new ResourceBudgetError(`32 MiB JSONL record budget in ${filePath}`)
         discarding = true; pieces = []
         return
       }
       pieces.push(piece)
     }
+    let readThrough = startByte
     try {
       for await (const chunk of stream) {
+        // Charge actual blocks, rather than rejecting the entire file before
+        // reading its first record. Completed-line cursors can then advance
+        // through a transcript larger than a single bounded scan.
+        chargeRead(chunk.length)
+        const chunkStart = readThrough
+        readThrough += chunk.length
         let start = 0
         let newline: number
-        while ((newline = chunk.indexOf('\n', start)) >= 0) {
-          append(chunk.slice(start, newline))
+        while ((newline = chunk.indexOf(10, start)) >= 0) {
+          append(chunk.subarray(start, newline))
           chargeRead(0)
-          const line = discarding ? null : pieces.join('').replace(/\r$/, '')
+          const line = discarding ? null : (pieces.length === 1 ? pieces[0]! : Buffer.concat(pieces)).toString('utf8').replace(/\r$/, '')
           pieces = []; lineBytes = 0; discarding = false
           if (line !== null) yield line
+          // Runs only after the consumer successfully processed this record.
+          completedLine?.(chunkStart + newline + 1)
           start = newline + 1
         }
-        if (start < chunk.length) append(chunk.slice(start))
+        if (start < chunk.length) append(chunk.subarray(start))
       }
-      if (pieces.length) yield pieces.join('').replace(/\r$/, '')
+      if (pieces.length) {
+        yield (pieces.length === 1 ? pieces[0]! : Buffer.concat(pieces)).toString('utf8').replace(/\r$/, '')
+        completedLine?.(readThrough)
+      }
     } finally { stream.destroy() }
   } catch (err) {
     if (err instanceof ResourceBudgetError) throw err
