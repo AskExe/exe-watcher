@@ -116,3 +116,65 @@ fallback is authorized.
 Only declare shipped after the actual npm registry version is 0.2.72 and the
 matching public updater release and required assets are observed and verified.
 All existing paired-publication and installed-app acceptance gates remain pending.
+
+## Routing and fresh-task verification (2026-10-25 Asia/Makassar)
+
+Henry assigned the Watcher project's Cloud CICD chat as the active CI/CD owner.
+Active Codex chat: 01a16ead-c8de-7682-9cde-a26848ef50b3 (durable host).
+Previous coordination chat: 6adcd1dd-1950-83ec-9164-38b87220b1f9.
+Continue this existing status branch; do not duplicate release implementation.
+The earlier Hansel handoff was misrouted to this Watcher checkout. No Hansel or
+Watcher repository mutations had been made when the mismatch was identified.
+Hansel PR59 remains untouched at b6c9c96be7d80fc7e2d51629934672282d02165d,
+pinning odd-core-kits 698d180269c7cdab49d1132c2377ce589b7b6f4c. Its recovery
+notes were read through the GitHub source connector. No candidate50 tests/builds
+were run here, and its prior source/synthetic evidence is not native acceptance.
+
+Observed cloud environment: ccarenv_b64_Y2NhcmVudl80YTM1YWE0NjNmMjA4MTkxOTVhYTBjODJhZjdmMTc1OQ,
+provider cloud, Linux x86_64, workspace /workspace/exe-watcher,
+Node v24.19.0, npm 11.9.0. Environment status reports current observations,
+running phase and enforced restricted package-manager networking; capabilities,
+secrets, runtime variables and outbound identities are all empty.
+Actual shell HTTPS requests fail connecting to the inherited proxy on port 8080
+(curl exit 7; git ls-remote exit 128). This is a proxy connectivity failure,
+not evidence of denied GitHub repository permissions. GitHub source connector
+reads work. No proxy bypass or credential-file inspection was attempted.
+
+git status --porcelain=v1 was empty; git rev-parse HEAD and remote main match
+15dedd18854e984b4c8747a2a35b525303090466; HEAD tree matches
+68ff49ea972efc7041af7dcb79b4f66d01774fdb. The latest check-runs endpoint still
+returns exactly four completed/success checks at that SHA: build-and-test (22),
+build-and-test (22.13.0), semgrep and macos-resource-tests. No passed checks were
+rerun. GitHub latest public release is still mac-v0.2.71 with its four assets.
+The prior npm observation was 0.2.71; this shell cannot refresh the npm registry
+while proxy connectivity is broken. No 0.2.72 publication is claimed.
+
+Onboarding chat 01a16ea0-beb3-77f1-8892-13d9058dc0b6 records 803 CLI tests
+across 66 files, 3 release guard tests, typecheck/build and JSON report passing,
+and a validated saved install_script/start_skill. Those are onboarding receipts.
+This runtime has no /workspace/exe-watcher-env.sh, node_modules or dist, so that
+snapshot/startup setup is not established in this fresh task. Environment
+publication and fresh-task startup remain unverified. No environment publishing
+or configuration API is exposed here. Restore the managed proxy and attach the
+published Watcher setup before claiming reusable CLI readiness; do not repeat
+all already-passed tests merely to reproduce the earlier report.
+
+command -v checks found gh, node and npm, but no swift, xcodebuild, codesign,
+security, xcrun, actool, lipo, hdiutil or spctl. No first-party native Mac
+execution/provisioning interface or protected signing binding is exposed.
+The exact native release blocker remains a ChatGPT Cloud-connected compatible
+Mac with protected Developer ID/notarization, GitHub release-write and npm
+publication authorization, plus interactive installed-bundle QA and real Intel
+hardware acceptance. There is no native app, DMG, ZIP, BUILD-INFO or digest
+receipt for 0.2.72 from this task. Expected qualified output remains
+mac/.build/dist with the four releaseNames(0.2.72) artifacts.
+
+The local profile instructions and exe-cicd skill paths are inaccessible here;
+executor skill catalog is empty and no exe-cicd cloud skill is available.
+Apply Henry's supplied verification discipline without claiming to run that
+skill. Keep all execution in ChatGPT Cloud. No personal Mac, Build-My, GitHub
+Actions execution, external runners, paid resources, EAS or new timers/schedules.
+GitHub is used only for source/status reads and this documentation branch update.
+No PR was opened because its pull_request trigger would start external CI.
+No workflow, source implementation, main branch or release gate was changed;
+no publishing, signing, installation or native QA was attempted.
