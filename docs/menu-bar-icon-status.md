@@ -26,3 +26,14 @@ next signed update. No public release or Intel hardware qualification performed.
 
 Next: review the change and run CI; release only through the authorized cloud
 coordination/native runner process. Token usage unavailable.
+
+## 0.2.72 release preparation
+
+PR #41 passed all four CI jobs and was authorized for merge. Version 0.2.72
+prepares the matching npm/Mac release. Current release blocker: repository runner
+inventory is empty, repository Actions secrets are empty, and the Mac release
+workflow is disabled. No authorized remote signing/QA runner or Watcher cloud
+release-chat binding has been established. Keep the workflow disabled until a
+qualified protected release path is available. Personal Mac signing must not be
+used under the October 24 global policy without an explicit exception. Final
+installed Finder verification remains outstanding.
