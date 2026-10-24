@@ -73,8 +73,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     let updateChecker = UpdateChecker()
     /// Drives the popover owl: animated only between popoverWillShow and popoverDidClose.
     private let owlPresence = OwlPresence()
-    /// One-shot glance-and-blink of the menu bar owl on click.
-    private let owlReaction = MenuBarOwlReaction()
+    /// Gentle continuous menu-bar motion, independently switchable in Settings.
+    private let owlAnimator = MenuBarOwlAnimator()
+    private let menuBarBadge = MenuBarBadgeView()
 
     private var usageLogWatcher: UsageLogWatcher?
     private var usageLogDebounceWork: DispatchWorkItem?
@@ -86,6 +87,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
         registerBundledFonts()
+
+        if ProcessInfo.processInfo.arguments.contains("--menu-bar-preview") {
+            setupStatusItem()
+            setupPopover()
+            return
+        }
 
         // Isolated visual review: no usage scans, login registration, credential reads or
         // updater requests. Only the real floating-panel implementation uses sample data.
@@ -230,6 +237,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        owlAnimator.stop()
         WatcherTelemetry.stop()
         appActivityTracker?.stop()
         floatingQuota?.stop()
@@ -375,69 +383,49 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         button.target = self
         button.action = #selector(handleButtonClick(_:))
         button.sendAction(on: [.leftMouseUp, .rightMouseUp])
+        menuBarBadge.wantsLayer = true
+        menuBarBadge.frame = button.bounds
+        menuBarBadge.autoresizingMask = [.width, .height]
+        button.addSubview(menuBarBadge)
+        NotificationCenter.default.addObserver(self, selector: #selector(updateMenuBarAnimation), name: UserDefaults.didChangeNotification, object: nil)
+        NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(updateMenuBarAnimation), name: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil)
+        NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(pauseMenuBarAnimation), name: NSWorkspace.willSleepNotification, object: nil)
+        NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(updateMenuBarAnimation), name: NSWorkspace.didWakeNotification, object: nil)
+        updateMenuBarAnimation()
         refreshStatusButton()
     }
 
-    /// Sets the menubar icon (owl) + cost text. Uses button.image for the icon
-    /// and button.attributedTitle for the text — simpler and more reliable than
-    /// NSTextAttachment which silently drops custom images.
+    /// Draw the owl and cost in one layer so their visible bounds share a center.
     private func refreshStatusButton() {
         guard let button = statusItem.button else { return }
 
         let font = NSFont.monospacedDigitSystemFont(ofSize: menubarTitleFontSize, weight: .medium)
 
-        // Draw the owl programmatically — PDF/SVG template images are unreliable at menubar size.
-        // A click reaction in progress keeps its current frame.
-        let owlImage: NSImage = owlReaction.currentFrame ?? staticMenuBarOwl
-
-        button.image = owlImage
-        button.imagePosition = .imageLeading
-
-        let hasPayload = store.todayPayload != nil
+        let preview = ProcessInfo.processInfo.arguments.contains("--menu-bar-preview")
+        let hasPayload = preview || store.todayPayload != nil
         let compact = isCompact
         // No successful scan for this date means unknown, including day rollover.
         let fallback = compact ? "$-" : "$—"
         let formatted = store.todayPayload?.current.cost
-        let valueText = compact
+        let valueText = preview ? "$281.29" : compact
             ? (formatted?.asCompactCurrencyWhole() ?? fallback)
             : (formatted?.asCompactCurrency() ?? fallback)
         let color: NSColor = hasPayload ? .labelColor : .secondaryLabelColor
 
-        button.attributedTitle = NSAttributedString(
-            string: valueText,
-            attributes: [.font: font, .foregroundColor: color]
-        )
-        // Force the menu bar to repaint immediately. For accessory apps (LSUIElement), setting
-        // needsDisplay + display() only draws into the button's backing store — the system-owned
-        // menu bar window won't composite the update until something nudges WindowServer.
-        // Toggling the status item length forces a layout pass that makes the fresh content
-        // visible without requiring user interaction.
-        button.needsDisplay = true
-        let currentLength = statusItem.length
-        statusItem.length = currentLength == NSStatusItem.variableLength
-            ? currentLength : NSStatusItem.variableLength
-        statusItem.length = currentLength
-        button.display()
+        menuBarBadge.text = NSAttributedString(string: valueText, attributes: [.font: font, .foregroundColor: color])
+        button.title = ""
+        button.image = nil
+        button.setAccessibilityLabel("Watcher, \(valueText)")
+        statusItem.length = menuBarBadge.requiredWidth
+        menuBarBadge.needsDisplay = true
     }
 
-    private var menuBarOwlSize: CGFloat { menubarTitleFontSize + 3 }
+    @objc private func pauseMenuBarAnimation() { owlAnimator.stop() }
 
-    private var staticMenuBarOwl: NSImage {
-        OwlIcon.cachedImage(size: menuBarOwlSize, menuBar: true)
-    }
-
-    /// Quick glance and blink when the menu bar owl is clicked (a blink only with Reduce
-    /// Motion). Frames use the same gold, non-template drawing as the static image.
-    private func playMenuBarOwlReaction() {
-        owlReaction.play(
-            size: menuBarOwlSize,
-            color: NSColor(Theme.brandAccent),
-            reduceMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-        ) { [weak self] frame in
-            guard let self, let button = self.statusItem.button else { return }
-            button.image = frame ?? self.staticMenuBarOwl
-            button.needsDisplay = true
-            button.display()
+    @objc private func updateMenuBarAnimation() {
+        let enabled = UserDefaults.standard.object(forKey: MenuBarOwlAnimator.preferenceKey) as? Bool ?? true
+        owlAnimator.configure(enabled: enabled && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion) { [weak self] pose in
+            self?.menuBarBadge.pose = pose
         }
     }
 
@@ -476,7 +464,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
     @objc private func handleButtonClick(_ sender: AnyObject?) {
         guard let button = statusItem.button else { return }
-        playMenuBarOwlReaction()
         if popover.isShown {
             popover.performClose(sender)
         } else {
@@ -493,6 +480,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     }
 
     func popoverWillShow(_ notification: Notification) {
+        if ProcessInfo.processInfo.arguments.contains("--menu-bar-preview") {
+            owlPresence.popoverWillShow()
+            return
+        }
         WatcherTelemetry.capture("menu_opened")
         RefreshTracer.shared.instant(name: "popover_open", category: "lifecycle", tid: .lifecycle)
         owlPresence.popoverWillShow()
@@ -508,6 +499,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     }
 
     func popoverDidClose(_ notification: Notification) {
+        if ProcessInfo.processInfo.arguments.contains("--menu-bar-preview") {
+            owlPresence.popoverDidClose()
+            return
+        }
         WatcherTelemetry.menuClosed()
         RefreshTracer.shared.instant(name: "popover_close", category: "lifecycle", tid: .lifecycle)
         owlPresence.popoverDidClose()

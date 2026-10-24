@@ -80,6 +80,8 @@ cat > "${BUNDLE}/Contents/Info.plist" <<PLIST
     <string>Watcher by EXE</string>
     <key>CFBundleExecutable</key>
     <string>${EXECUTABLE_NAME}</string>
+    <key>CFBundleIconName</key>
+    <string>AppIcon</string>
     <key>CFBundleIconFile</key>
     <string>AppIcon</string>
     <key>CFBundleIdentifier</key>
@@ -110,6 +112,11 @@ cat > "${BUNDLE}/Contents/PkgInfo" <<'PKG'
 APPL????
 PKG
 
+# Compile the opaque, unmasked catalog so Tahoe can apply its own enclosure.
+# Retain the independently rounded legacy ICNS for macOS 14/15.
+xcrun actool "${MAC_DIR}/Assets.xcassets" --compile "${BUNDLE}/Contents/Resources" \
+  --platform macosx --minimum-deployment-target "${MIN_MACOS}" --app-icon AppIcon \
+  --output-partial-info-plist "${DIST_DIR}/icon-info.plist"
 # Copy app icon into bundle Resources so Finder/Dock/Spotlight display it.
 ICON_SRC="${MAC_DIR}/Sources/ExeWatcherMenubar/Resources/AppIcon.icns"
 if [[ -f "${ICON_SRC}" ]]; then

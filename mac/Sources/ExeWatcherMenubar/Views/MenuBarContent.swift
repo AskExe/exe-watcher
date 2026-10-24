@@ -438,6 +438,7 @@ struct StarBanner: View {
 }
 
 struct FooterBar: View {
+    @AppStorage(MenuBarOwlAnimator.preferenceKey) private var animateMenuBarOwl = true
     @Environment(AppStore.self) private var store
     @Environment(FloatingQuotaPreferences.self) private var quotaPreferences
 
@@ -493,6 +494,8 @@ struct FooterBar: View {
             .noFocusRing()
 
             Menu {
+                Toggle("Animate menu bar owl", isOn: $animateMenuBarOwl)
+                Divider()
                 Toggle("Share basic usage statistics", isOn: Binding(
                     get: { WatcherTelemetry.shared.usageEnabled },
                     set: { WatcherTelemetry.shared.setConsent(usage: true, enabled: $0) }))
