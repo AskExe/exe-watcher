@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.72 (2026-10-24)
+
+- Package an opaque, unmasked app-icon catalog so macOS Tahoe can apply its own enclosure, with the legacy ICNS retained for older macOS versions.
+- Keep the menu-bar owl gently animated while the popover is closed. Add a saved Settings switch; Reduce Motion and system sleep stop the animation.
+- Align the menu-bar owl and cost text by their visible centers.
+
 ## 0.2.71 (2026-10-23)
 
 - Add basic usage analytics through our self-hosted privacy gateway after a first-run disclosure, with an easy off switch. Preserve existing opt-outs. Error diagnostics remain a separate, optional control and start off. No prompts, usage logs, file paths, account details or spending data are collected.
