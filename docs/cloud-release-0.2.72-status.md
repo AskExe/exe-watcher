@@ -82,3 +82,37 @@ no paid runner provisioned and no spending/billing settings changed.
 - Current release: https://github.com/AskExe/exe-watcher/releases/tag/mac-v0.2.71
 - Releases: https://github.com/AskExe/exe-watcher/releases
 - npm: https://www.npmjs.com/package/exe-watcher
+
+## CI/CD discipline clarification (2026-10-24)
+
+Henry explicitly invoked exe-cicd. The named files
+/Users/exeai/.claude/skills/exe-cicd/SKILL.md and
+/Users/exeai/.exe-os/cicd/cicd-loop.sh are not readable here, and no
+exe-cicd package was found in the available executor or cloud skill catalogs.
+Codex has not read those files and has not run, ported or recreated the local
+enforcement sweep. This record applies Henry's supplied verification requirements;
+it does not claim execution of the unavailable skill or local loop.
+The older local-only directive is superseded by the October 24 cloud ownership policy.
+
+Refreshed remote main is still 15dedd18854e984b4c8747a2a35b525303090466.
+The GitHub check-runs endpoint with filter=latest returned exactly four checks
+for that SHA, each status=completed and conclusion=success:
+build-and-test (22), build-and-test (22.13.0), semgrep,
+macos-resource-tests. None was skipped, absent or pending.
+This was a read-only evidence refresh, not a rerun of passed checks.
+Do not retry immutable failures unchanged, bypass protected release/workflow
+review, or enable the disabled workflow merely because a skill was invoked.
+
+The allowed missing capability is a first-party ChatGPT Cloud-connected native
+macOS release execution environment with a real task/environment binding and
+protected cloud Developer ID/notarization, GitHub release-write and npm publication
+credentials. It must execute the existing repository helper and retain verification
+receipts; a coordination conversation alone cannot supply it. This task exposes
+no provisioning or credential-binding capability for that environment.
+Actual native Intel hardware and an interactive installed-app Mac QA surface
+remain separate acceptance prerequisites. No personal-Mac or paid-provider
+fallback is authorized.
+
+Only declare shipped after the actual npm registry version is 0.2.72 and the
+matching public updater release and required assets are observed and verified.
+All existing paired-publication and installed-app acceptance gates remain pending.
