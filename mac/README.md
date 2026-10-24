@@ -163,3 +163,20 @@ Exe Foundry Bold palette (gold accent on dark purple):
 - Surface (dark): `#1A1528`
 
 SF Mono for currency values; SF Pro for UI text. Web equivalents: Epilogue (headings), Manrope (body).
+
+### Menu bar owl and app icon
+
+The menu bar owl idles with gentle looks and blinks even while the popover is closed.
+Disable **Settings → Animate menu bar owl** for a static mark. This preference
+survives relaunch; macOS Reduce Motion also keeps it static. Frames pause between
+motions and stop during system sleep. The owl and cost share one optical center.
+
+Packaging compiles `mac/Assets.xcassets` with `actool` and declares
+`CFBundleIconName=AppIcon`. Its opaque square source lets Tahoe apply the enclosure
+without padding an already-rounded icon onto a grey compatibility tile. The
+independent legacy ICNS remains for older macOS versions. Regenerate both sources
+with `mac/Scripts/build-owl-icons.sh`. See [Apple’s app icon guidance](https://developer.apple.com/design/human-interface-guidelines/app-icons/).
+
+For an isolated native menu review, launch a separate development app bundle with
+`--menu-bar-preview`; it uses a sample badge and skips tracking, scans, login
+registration and update checks. Do not use the installed production bundle for this.

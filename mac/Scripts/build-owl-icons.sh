@@ -11,6 +11,20 @@ node "${ROOT}/mac/Scripts/generate-owl-preview.mjs"
 WORK="$(mktemp -d)"
 trap 'rm -rf "${WORK}"' EXIT
 mkdir "${WORK}/AppIcon.iconset"
+CATALOG="${ROOT}/mac/Assets.xcassets/AppIcon.appiconset"
+mkdir -p "${CATALOG}"
+rsvg-convert -w 1024 -h 1024 "${ROOT}/assets/owls/selected-app-unmasked.svg" -o "${WORK}/unmasked.png"
+node --input-type=module - "${CATALOG}" <<'JS'
+import { writeFileSync } from 'node:fs';
+const images = [16,32,128,256,512].flatMap(size => [1,2].map(scale => ({idiom:'mac',size:`${size}x${size}`,scale:`${scale}x`,filename:`icon_${size}@${scale}x.png`})));
+writeFileSync(`${process.argv[2]}/Contents.json`, JSON.stringify({images,info:{author:'xcode',version:1}},null,2)+'\n');
+JS
+for size in 16 32 128 256 512; do
+  for scale in 1 2; do
+    pixels=$((size * scale))
+    sips -z "${pixels}" "${pixels}" "${WORK}/unmasked.png" --out "${CATALOG}/icon_${size}@${scale}x.png" >/dev/null
+  done
+done
 rsvg-convert -w 1024 -h 1024 "${ROOT}/assets/owls/selected-app.svg" -o "${ROOT}/assets/owl-icon.png"
 sips -z 512 512 "${ROOT}/assets/owl-icon.png" --out "${ROOT}/assets/owl-icon-512.png" >/dev/null
 for size in 16 32 128 256 512; do
