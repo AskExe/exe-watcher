@@ -84,7 +84,7 @@ struct SavedTotalsTests {
         store.selectedPeriod = .sevenDays
         await store.refresh(includeOptimize: false)
         for _ in 0..<1000 { if await count.value() >= 2 { break }; await Task.yield() }
-        try await Task.sleep(for: .milliseconds(20))
+        try await waitForStoreUpdate { store.headerStatus == "Recovery paused" }
         #expect(await count.value() == 2)
         #expect(store.payload.savedHistory?.hasData == false)
         #expect(store.headerStatus == "Recovery paused")
@@ -210,7 +210,7 @@ struct SharedPeriodSnapshotsTests {
         #expect(await store.refreshTodayBadge())
         await store.switchTo(period: .sevenDays)
         #expect(store.payload.current.cost == 20)
-        try await Task.sleep(nanoseconds: 50_000_000)
+        try await waitForStoreUpdate { store.payload.current.cost == 30 }
         #expect(await counter.value() == 3)
         #expect(store.payload.current.cost == 30)
     }
@@ -361,7 +361,7 @@ struct AppStoreProviderPrefetchTests {
 
         await store.refreshQuietly(period: .today)
         await store.switchTo(period: .sevenDays)
-        try await Task.sleep(nanoseconds: 50_000_000)
+        try await waitForStoreUpdate { store.payload.current.cost == 100 }
 
         let keysAfterPeriodSwitch = await recorder.recordedKeys()
         #expect(keysAfterPeriodSwitch.contains(weekAll))
@@ -371,7 +371,7 @@ struct AppStoreProviderPrefetchTests {
         let callCountBeforeTabSwitch = keysAfterPeriodSwitch.count
         await store.switchTo(provider: .claude)
 
-        try await Task.sleep(nanoseconds: 50_000_000)
+        try await waitForStoreUpdate { store.payload.current.cost == 70 }
         let callCountAfterTabSwitch = await recorder.recordedKeys().count
         #expect(store.payload.current.cost == 70)
         #expect(callCountAfterTabSwitch == callCountBeforeTabSwitch + 1)
@@ -629,7 +629,7 @@ struct AppStoreProviderPrefetchTests {
         await store.refreshQuietly(period: .sevenDays)
         await store.switchTo(period: .sevenDays)
         await store.switchTo(provider: .claude)
-        try await Task.sleep(nanoseconds: 50_000_000)
+        try await waitForStoreUpdate { store.payload.current.cost == 70 }
 
         #expect(store.payload.current.cost == 70)
         #expect(store.headerPayload.current.cost == 100)
@@ -658,7 +658,7 @@ struct AppStoreProviderPrefetchTests {
         #expect(store.showProviderTabs)
 
         await store.switchTo(period: .sevenDays)
-        try await Task.sleep(nanoseconds: 50_000_000)
+        try await waitForStoreUpdate { store.lastError != nil }
 
         #expect(store.providerTabsPayload == nil)
         #expect(!store.showProviderTabs)
@@ -758,11 +758,11 @@ struct AppStoreProviderPrefetchTests {
 
         await store.refreshQuietly(period: .today)
         await store.switchTo(period: .sevenDays)
-        try await Task.sleep(nanoseconds: 50_000_000)
+        try await waitForStoreUpdate { store.lastError != nil }
         #expect(store.lastError != nil)
 
         await store.switchTo(period: .today)
-        try await Task.sleep(nanoseconds: 50_000_000)
+        try await waitForStoreUpdate { store.payload.current.cost == 18 && store.lastError == nil }
 
         #expect(store.lastError == nil)
         #expect(store.headerPayload.current.cost == 18)

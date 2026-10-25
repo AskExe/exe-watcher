@@ -16,7 +16,10 @@ Functional PR #41 and version PR #42 merged. Prepared main was
 [40099737590](https://github.com/AskExe/exe-watcher/actions/runs/40099737590)
 passed all four jobs. Local native checks: 211 tests. Cloud onboarding passed
 803 Node tests, three release guard tests, typecheck/build and JSON report.
-No functional source changes are needed for the ownership update. Integrate and
+The first hybrid PR Mac run exposed existing 50 ms timing assumptions in
+cache/history tests. Replaced those sleeps with bounded waits for the original
+observable assertions; all 211 native tests now pass in the default parallel run.
+No production refresh code changed. Integrate and
 qualify its actual merged main before packaging; do not sign an older tree.
 
 ## Environment and gates
