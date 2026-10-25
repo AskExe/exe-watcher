@@ -37,3 +37,9 @@ release-chat binding has been established. Keep the workflow disabled until a
 qualified protected release path is available. Personal Mac signing must not be
 used under the October 24 global policy without an explicit exception. Final
 installed Finder verification remains outstanding.
+
+## Hybrid authorization (2026-10-25)
+
+The user superseded the cloud-only hold: cloud-supported checks remain remote;
+required native signing, publication and installed QA may run locally. See
+`docs/cloud-release-0.2.72-status.md` for current owners and release gates.

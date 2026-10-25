@@ -135,7 +135,7 @@ REQUIRE_NOTARIZATION=1 mac/Scripts/package-app.sh v0.2.66
 
 The release mode signs the runtime and app with hardened runtime, submits both app and DMG to Apple, staples their tickets, and verifies the app's Gatekeeper assessment. An unsigned or unnotarized package is a review build, not a public launch artifact. See [Apple's notarization documentation](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution).
 
-Releases are built and signed locally. The hosted `Release macOS Menubar` workflow is disabled: it has no signing secrets and only failed on each tag. To ship a version:
+Use cloud checks where supported and perform required native build, signing and installed-app QA locally, as authorized on 2026-10-25. Cloud CICD coordinates supported cloud work; the local Watcher chat is the single native publisher. The hosted `Release macOS Menubar` workflow is disabled: it has no signing secrets and only failed on each tag. To ship a version:
 
 1. Bump `package.json`, `package-lock.json` and `CHANGELOG.md`, open the PR, and merge it once CI passes. Publish from a clean checkout of the actual merged main with successful CI on that commit.
 2. Set `CODESIGN_IDENTITY` and `NOTARY_PROFILE` to the release Mac's existing identity and Keychain profile. Run `npm run release:mac`, or `npm publish --registry=https://registry.npmjs.org` to publish both app and npm. The npm prepublish hook requires the paired Mac release first. Keep the npm token in the release environment or Keychain, never in source.
