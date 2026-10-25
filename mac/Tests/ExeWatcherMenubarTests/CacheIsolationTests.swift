@@ -125,18 +125,18 @@ struct CacheIsolationTests {
 
         // Switch to 7 Days — should get the week payload, not today's
         await store.switchTo(period: .sevenDays)
-        try await Task.sleep(nanoseconds: 50_000_000)
+        try await waitForStoreUpdate { store.payload.current.cost == 100 }
         #expect(store.payload.current.cost == 100)
 
         // Switch provider to Claude on 7 Days
         await store.switchTo(provider: .claude)
-        try await Task.sleep(nanoseconds: 50_000_000)
+        try await waitForStoreUpdate { store.payload.current.cost == 70 }
         #expect(store.payload.current.cost == 70)
 
         // Switch back to today — should restore today's cost, not leak week data
         await store.switchTo(period: .today)
         await store.switchTo(provider: .all)
-        try await Task.sleep(nanoseconds: 50_000_000)
+        try await waitForStoreUpdate { store.payload.current.cost == 18 }
         #expect(store.payload.current.cost == 18)
     }
 
@@ -164,12 +164,12 @@ struct CacheIsolationTests {
 
         // Switch to 7 Days — fetch will fail
         await store.switchTo(period: .sevenDays)
-        try await Task.sleep(nanoseconds: 50_000_000)
+        try await waitForStoreUpdate { store.lastError != nil }
         #expect(store.lastError != nil)
 
         // Switch back to today — error should NOT carry over
         await store.switchTo(period: .today)
-        try await Task.sleep(nanoseconds: 50_000_000)
+        try await waitForStoreUpdate { store.payload.current.cost == 18 && store.lastError == nil }
         #expect(store.lastError == nil)
         #expect(store.payload.current.cost == 18)
     }
