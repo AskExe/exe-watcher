@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.73 (2026-10-28)
+
+### Security
+- Verify updater archive SHA-256 and size, then require the expected Apple signing team, a valid notarization ticket, Gatekeeper acceptance and matching app version before replacing the installed app. Reject unsafe download redirects and preserve the working installation on every verification failure. Quarantine is no longer cleared by the installer.
+
 ## 0.2.72 (2026-10-24)
 
 - Package an opaque, unmasked app-icon catalog so macOS Tahoe can apply its own enclosure, with the legacy ICNS retained for older macOS versions.

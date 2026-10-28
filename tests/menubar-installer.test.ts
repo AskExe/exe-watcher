@@ -2,6 +2,11 @@ import { describe, it, expect, afterEach, vi, beforeEach } from 'vitest'
 import * as os from 'node:os'
 import * as childProcess from 'node:child_process'
 import { EventEmitter } from 'node:events'
+import { createHash } from 'node:crypto'
+
+const ARCHIVE = Buffer.from('fixture signed app archive')
+const FIXTURE_DIGEST = `sha256:${createHash('sha256').update(ARCHIVE).digest('hex')}`
+let fixtureVersion = '0.2.21'
 
 // Mock os.platform before importing the module under test.
 // The module reads platform() at call time, so vi.mock is sufficient.
@@ -41,14 +46,6 @@ vi.mock('node:fs', async (importOriginal) => {
   }
 })
 
-vi.mock('node:stream/promises', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('node:stream/promises')>()
-  return {
-    ...actual,
-    pipeline: vi.fn().mockResolvedValue(undefined),
-  }
-})
-
 // Lazy import so mocks are in place
 const { installMenubarApp } = await import('../src/menubar-installer.js')
 type InstallResult = Awaited<ReturnType<typeof installMenubarApp>>
@@ -62,6 +59,7 @@ describe('menubar-installer', () => {
   const savedEnv: Record<string, string | undefined> = {}
 
   beforeEach(() => {
+    fixtureVersion = '0.2.21'
     savedEnv['EXE_WATCHER_FORCE_MACOS_MAJOR'] = process.env.EXE_WATCHER_FORCE_MACOS_MAJOR
     savedEnv['EXE_WATCHER_APP_EXIT_TIMEOUT_MS'] = process.env.EXE_WATCHER_APP_EXIT_TIMEOUT_MS
     savedEnv['EXE_WATCHER_APP_LAUNCH_TIMEOUT_MS'] = process.env.EXE_WATCHER_APP_LAUNCH_TIMEOUT_MS
@@ -88,6 +86,7 @@ describe('menubar-installer', () => {
       process.env.EXE_WATCHER_APP_LAUNCH_TIMEOUT_MS = savedEnv['EXE_WATCHER_APP_LAUNCH_TIMEOUT_MS']
     }
     vi.restoreAllMocks()
+    vi.unstubAllGlobals()
   })
 
   // -----------------------------------------------------------------------
@@ -112,11 +111,11 @@ describe('menubar-installer', () => {
       // progresses past the platform check. It will still fail later when
       // download is attempted, but that proves the platform gate passed.
       const fakeRelease = {
-        tag_name: 'v0.1.1',
+        tag_name: 'mac-v0.1.1',
         assets: [
           {
-            name: 'ExeWatcherMenubar-v0.1.1.zip',
-            browser_download_url: 'https://github.com/AskExe/exe-watcher/releases/download/v0.2.21/fake.zip',
+            name: 'ExeWatcherMenubar-v0.1.1.zip', digest: FIXTURE_DIGEST, size: ARCHIVE.length,
+            browser_download_url: 'https://github.com/AskExe/exe-watcher/releases/download/mac-v0.1.1/ExeWatcherMenubar-v0.1.1.zip',
           },
         ],
       }
@@ -200,11 +199,11 @@ describe('menubar-installer', () => {
       vi.mocked(fsMock.rm).mockResolvedValue(undefined)
 
       const fakeRelease = {
-        tag_name: 'v0.2.21',
+        tag_name: 'mac-v0.2.21',
         assets: [
           {
-            name: 'ExeWatcherMenubar-v0.2.21.zip',
-            browser_download_url: 'https://github.com/AskExe/exe-watcher/releases/download/v0.2.21/fake.zip',
+            name: 'ExeWatcherMenubar-v0.2.21.zip', digest: FIXTURE_DIGEST, size: ARCHIVE.length,
+            browser_download_url: 'https://github.com/AskExe/exe-watcher/releases/download/mac-v0.2.21/ExeWatcherMenubar-v0.2.21.zip',
           },
         ],
       }
@@ -212,7 +211,7 @@ describe('menubar-installer', () => {
         .mockResolvedValueOnce({ ok: true, json: async () => fakeRelease } as unknown as Response)
         .mockResolvedValueOnce({
           ok: true,
-          body: new ReadableStream({ start(controller) { controller.close() } }),
+          body: new ReadableStream({ start(controller) { controller.enqueue(new Uint8Array(ARCHIVE)); controller.close() } }),
         } as unknown as Response))
 
       const pgrepOutputs = ['111\n', '', '222\n']
@@ -224,6 +223,9 @@ describe('menubar-installer', () => {
         proc.stderr = new EventEmitter()
 
         process.nextTick(() => {
+          if (command === '/usr/libexec/PlistBuddy') {
+            proc.stdout.emit('data', Buffer.from(fixtureVersion)); proc.emit('close', 0); return
+          }
           if (command === '/usr/bin/pgrep') {
             const out = pgrepOutputs.shift() ?? ''
             if (out) proc.stdout.emit('data', Buffer.from(out))
@@ -242,9 +244,16 @@ describe('menubar-installer', () => {
       expect(spawnCalls).toContainEqual({ command: '/bin/kill', args: ['-TERM', '111'] })
       expect(spawnCalls).toContainEqual({ command: '/usr/bin/open', args: [expect.stringContaining('Watcher by EXE.app')] })
       expect(spawnCalls.filter(c => c.command === '/usr/bin/pgrep').length).toBeGreaterThanOrEqual(3)
+      const commands = spawnCalls.map(c => c.command)
+      expect(commands.indexOf('/usr/bin/codesign')).toBeLessThan(commands.indexOf('/bin/kill'))
+      expect(commands.indexOf('/usr/bin/xcrun')).toBeLessThan(commands.indexOf('/bin/kill'))
+      expect(commands.indexOf('/usr/sbin/spctl')).toBeLessThan(commands.indexOf('/bin/kill'))
+      expect(commands.indexOf('/usr/libexec/PlistBuddy')).toBeLessThan(commands.indexOf('/bin/kill'))
+      expect(commands).not.toContain('/usr/bin/xattr')
     })
 
     it('unpacks the update with ditto so the app signature survives', async () => {
+      fixtureVersion = '0.2.59'
       process.env.EXE_WATCHER_FORCE_MACOS_MAJOR = '15'
       process.env.EXE_WATCHER_APP_EXIT_TIMEOUT_MS = '0'
       process.env.EXE_WATCHER_APP_LAUNCH_TIMEOUT_MS = '1'
@@ -257,8 +266,8 @@ describe('menubar-installer', () => {
       vi.mocked(fsMock.rm).mockResolvedValue(undefined)
 
       vi.stubGlobal('fetch', vi.fn()
-        .mockResolvedValueOnce({ ok: true, json: async () => ({ tag_name: 'v0.2.59', assets: [{ name: 'ExeWatcherMenubar-v0.2.59.zip', browser_download_url: 'https://github.com/AskExe/exe-watcher/releases/download/mac-v0.2.59/ExeWatcherMenubar-v0.2.59.zip' }] }) } as unknown as Response)
-        .mockResolvedValueOnce({ ok: true, body: new ReadableStream({ start(controller) { controller.close() } }) } as unknown as Response))
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ tag_name: 'mac-v0.2.59', assets: [{ name: 'ExeWatcherMenubar-v0.2.59.zip', digest: FIXTURE_DIGEST, size: ARCHIVE.length, browser_download_url: 'https://github.com/AskExe/exe-watcher/releases/download/mac-v0.2.59/ExeWatcherMenubar-v0.2.59.zip' }] }) } as unknown as Response)
+        .mockResolvedValueOnce({ ok: true, body: new ReadableStream({ start(controller) { controller.enqueue(new Uint8Array(ARCHIVE)); controller.close() } }) } as unknown as Response))
 
       const pgrepOutputs = ['111\n', '', '222\n']
       const spawnCalls: Array<{ command: string; args: string[] }> = []
@@ -268,6 +277,9 @@ describe('menubar-installer', () => {
         proc.stdout = new EventEmitter()
         proc.stderr = new EventEmitter()
         process.nextTick(() => {
+          if (command === '/usr/libexec/PlistBuddy') {
+            proc.stdout.emit('data', Buffer.from(fixtureVersion)); proc.emit('close', 0); return
+          }
           const out = command === '/usr/bin/pgrep' ? pgrepOutputs.shift() ?? '' : ''
           if (out) proc.stdout.emit('data', Buffer.from(out))
           proc.emit('close', command === '/usr/bin/pgrep' && !out ? 1 : 0)
@@ -299,13 +311,13 @@ describe('menubar-installer', () => {
         .mockResolvedValueOnce({
           ok: true,
           json: async () => ({
-            tag_name: 'v0.2.21',
-            assets: [{ name: 'ExeWatcherMenubar-v0.2.21.zip', browser_download_url: 'https://github.com/AskExe/exe-watcher/releases/download/v0.2.21/fake.zip' }],
+            tag_name: 'mac-v0.2.21',
+            assets: [{ name: 'ExeWatcherMenubar-v0.2.21.zip', digest: FIXTURE_DIGEST, size: ARCHIVE.length, browser_download_url: 'https://github.com/AskExe/exe-watcher/releases/download/mac-v0.2.21/ExeWatcherMenubar-v0.2.21.zip' }],
           }),
         } as unknown as Response)
         .mockResolvedValueOnce({
           ok: true,
-          body: new ReadableStream({ start(controller) { controller.close() } }),
+          body: new ReadableStream({ start(controller) { controller.enqueue(new Uint8Array(ARCHIVE)); controller.close() } }),
         } as unknown as Response))
 
       // Existing app exits; candidate never appears after first open; restored app appears
@@ -320,6 +332,9 @@ describe('menubar-installer', () => {
         proc.stderr = new EventEmitter()
 
         process.nextTick(() => {
+          if (command === '/usr/libexec/PlistBuddy') {
+            proc.stdout.emit('data', Buffer.from(fixtureVersion)); proc.emit('close', 0); return
+          }
           if (command === '/usr/bin/open') {
             openCount += 1
             proc.emit('close', 0)
@@ -369,13 +384,13 @@ describe('menubar-installer', () => {
         .mockResolvedValueOnce({
           ok: true,
           json: async () => ({
-            tag_name: 'v0.2.21',
-            assets: [{ name: 'ExeWatcherMenubar-v0.2.21.zip', browser_download_url: 'https://github.com/AskExe/exe-watcher/releases/download/v0.2.21/fake.zip' }],
+            tag_name: 'mac-v0.2.21',
+            assets: [{ name: 'ExeWatcherMenubar-v0.2.21.zip', digest: FIXTURE_DIGEST, size: ARCHIVE.length, browser_download_url: 'https://github.com/AskExe/exe-watcher/releases/download/mac-v0.2.21/ExeWatcherMenubar-v0.2.21.zip' }],
           }),
         } as unknown as Response)
         .mockResolvedValueOnce({
           ok: true,
-          body: new ReadableStream({ start(controller) { controller.close() } }),
+          body: new ReadableStream({ start(controller) { controller.enqueue(new Uint8Array(ARCHIVE)); controller.close() } }),
         } as unknown as Response))
 
       // Initial pgrep finds 111; wait loop repeatedly sees it still alive; after SIGKILL it exits;
@@ -389,6 +404,9 @@ describe('menubar-installer', () => {
         proc.stderr = new EventEmitter()
 
         process.nextTick(() => {
+          if (command === '/usr/libexec/PlistBuddy') {
+            proc.stdout.emit('data', Buffer.from(fixtureVersion)); proc.emit('close', 0); return
+          }
           if (command === '/usr/bin/pgrep') {
             const out = pgrepOutputs.shift() ?? ''
             if (out) proc.stdout.emit('data', Buffer.from(out))
@@ -405,6 +423,68 @@ describe('menubar-installer', () => {
 
       expect(spawnCalls).toContainEqual({ command: '/bin/kill', args: ['-TERM', '111'] })
       expect(spawnCalls).toContainEqual({ command: '/bin/kill', args: ['-KILL', '111'] })
+    })
+  })
+
+  describe('candidate authentication preserves the installed app', () => {
+    const failures = ['missing digest', 'changed bytes', 'oversize stream', 'truncated stream', 'wrong repository',
+      'mixed version', 'duplicate archive', 'draft', 'prerelease', 'missing archive', 'foreign redirect',
+      'HTTP redirect', 'wrong signing identity', 'missing notarization ticket', 'Gatekeeper denial', 'wrong signed version'] as const
+    it.each(failures)('rejects %s before stopping or replacing the working app', async failure => {
+      const fs = await import('node:fs/promises')
+      vi.mocked(fs.stat).mockResolvedValue({} as any)
+      vi.mocked(fs.mkdtemp).mockResolvedValue('/tmp/exe-watcher-menubar-mock')
+      vi.mocked(fs.rename).mockClear()
+      const asset = { name: 'ExeWatcherMenubar-v0.2.21.zip', digest: FIXTURE_DIGEST, size: ARCHIVE.length,
+        browser_download_url: 'https://github.com/AskExe/exe-watcher/releases/download/mac-v0.2.21/ExeWatcherMenubar-v0.2.21.zip' }
+      const release = { tag_name: 'mac-v0.2.21', assets: [asset], draft: false, prerelease: false }
+      let bytes = ARCHIVE
+      if (failure === 'missing digest') asset.digest = ''
+      if (failure === 'changed bytes') bytes = Buffer.alloc(ARCHIVE.length, 1)
+      if (failure === 'oversize stream') bytes = Buffer.concat([ARCHIVE, Buffer.from('extra')])
+      if (failure === 'truncated stream') bytes = ARCHIVE.subarray(1)
+      if (failure === 'wrong repository') asset.browser_download_url = asset.browser_download_url.replace('AskExe/exe-watcher', 'foreign/watcher')
+      if (failure === 'mixed version') release.tag_name = 'mac-v0.2.22'
+      if (failure === 'duplicate archive') release.assets.push(asset)
+      if (failure === 'missing archive') release.assets = []
+      if (failure === 'draft') release.draft = true
+      if (failure === 'prerelease') release.prerelease = true
+      const fetchMock = vi.fn().mockResolvedValueOnce({ ok: true, json: async () => release })
+      if (failure === 'foreign redirect' || failure === 'HTTP redirect') {
+        fetchMock.mockResolvedValueOnce(new Response(null, { status: 302, headers: {
+          location: failure === 'foreign redirect' ? 'https://foreign.example/payload.zip' : 'http://github.com/payload.zip',
+        } }))
+      } else fetchMock.mockResolvedValueOnce(new Response(new Uint8Array(bytes)))
+      vi.stubGlobal('fetch', fetchMock)
+      const commands: string[] = []
+      const deniedCommands: Partial<Record<typeof failure, string>> = {
+        'wrong signing identity': '/usr/bin/codesign', 'missing notarization ticket': '/usr/bin/xcrun', 'Gatekeeper denial': '/usr/sbin/spctl',
+      }
+      const deny = deniedCommands[failure]
+      vi.mocked(childProcess.spawn).mockImplementation((command: string) => {
+        commands.push(command)
+        const proc = new EventEmitter() as any
+        proc.stdout = new EventEmitter(); proc.stderr = new EventEmitter()
+        process.nextTick(() => {
+          if (command === '/usr/libexec/PlistBuddy') proc.stdout.emit('data', Buffer.from(failure === 'wrong signed version' ? '0.2.20' : '0.2.21'))
+          proc.emit('close', command === deny ? 1 : 0)
+        })
+        return proc
+      })
+      const reason: Record<typeof failure, RegExp> = {
+        'missing digest': /integrity metadata/, 'changed bytes': /SHA-256/, 'oversize stream': /exceeds/,
+        'truncated stream': /SHA-256/, 'wrong repository': /integrity metadata/, 'mixed version': /matching app archive/,
+        'duplicate archive': /matching app archive/, 'draft': /stable Watcher release/, 'prerelease': /stable Watcher release/,
+        'missing archive': /matching app archive/, 'foreign redirect': /untrusted destination/, 'HTTP redirect': /untrusted destination/,
+        'wrong signing identity': /codesign exited/, 'missing notarization ticket': /xcrun exited/,
+        'Gatekeeper denial': /spctl exited/, 'wrong signed version': /signed app version/,
+      }
+      await expect(installMenubarApp({ force: true })).rejects.toThrow(reason[failure])
+      expect(fs.rename).not.toHaveBeenCalled()
+      expect(commands).not.toContain('/bin/kill')
+      expect(commands).not.toContain('/usr/bin/open')
+      expect(commands).not.toContain('/usr/bin/xattr')
+      expect(fetchMock).toHaveBeenCalledTimes(['missing digest', 'wrong repository', 'mixed version', 'duplicate archive', 'draft', 'prerelease', 'missing archive'].includes(failure) ? 1 : 2)
     })
   })
 

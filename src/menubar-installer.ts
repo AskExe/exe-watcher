@@ -1,17 +1,20 @@
 import { spawn } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { createWriteStream } from 'node:fs'
 import { cp, mkdir, mkdtemp, rename, rm, stat } from 'node:fs/promises'
 import { homedir, platform, tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { pipeline } from 'node:stream/promises'
-import { Readable } from 'node:stream'
+import { Readable, Transform } from 'node:stream'
 
 /// Public GitHub repo that hosts signed macOS release builds. `/releases/latest` returns the
 /// newest tagged release; we filter its assets list for our zipped .app bundle.
 const RELEASE_API_LATEST = 'https://api.github.com/repos/AskExe/exe-watcher/releases/latest'
 const RELEASE_API_BY_TAG = 'https://api.github.com/repos/AskExe/exe-watcher/releases/tags/'
 const APP_BUNDLE_NAME = 'Watcher by EXE.app'
-const ASSET_PATTERN = /^ExeWatcherMenubar-.*\.zip$/
+const MAX_ARCHIVE_BYTES = 256 * 1024 * 1024
+const DOWNLOAD_HOSTS = new Set(['github.com', 'release-assets.githubusercontent.com', 'objects.githubusercontent.com'])
+const SIGNING_REQUIREMENT = '=anchor apple generic and certificate leaf[subject.OU] = "ZNU2X48VW5" and identifier "com.askexe.exe-watcher-menubar"'
 const APP_PROCESS_NAME = 'ExeWatcherMenubar'
 const SUPPORTED_OS = 'darwin'
 const MIN_MACOS_MAJOR = 14
@@ -21,8 +24,9 @@ const POLL_INTERVAL_MS = 150
 
 export type InstallResult = { installedPath: string; launched: boolean }
 
-type ReleaseAsset = { name: string; browser_download_url: string }
-type ReleaseResponse = { tag_name: string; assets: ReleaseAsset[] }
+type ReleaseAsset = { name: string; browser_download_url: string; digest: string; size: number }
+type VerifiedAsset = ReleaseAsset & { version: string }
+type ReleaseResponse = { tag_name: string; assets: ReleaseAsset[]; draft?: boolean; prerelease?: boolean }
 
 function userApplicationsDir(): string {
   return join(homedir(), 'Applications')
@@ -61,9 +65,10 @@ async function sysProductVersion(): Promise<string> {
   })
 }
 
-async function fetchLatestReleaseAsset(version?: string): Promise<ReleaseAsset> {
+async function fetchLatestReleaseAsset(version?: string): Promise<VerifiedAsset> {
   // If a specific version is requested, fetch that tag; otherwise use /releases/latest.
   const tag = version ? (version.startsWith('mac-') ? version : `mac-${version.startsWith('v') ? version : `v${version}`}`) : undefined
+  if (tag && !/^mac-v\d+\.\d+\.\d+$/.test(tag)) throw new Error('Choose a stable Watcher release version.')
   const url = tag ? `${RELEASE_API_BY_TAG}${tag}` : RELEASE_API_LATEST
   const response = await fetch(url, {
     headers: {
@@ -87,35 +92,66 @@ async function fetchLatestReleaseAsset(version?: string): Promise<ReleaseAsset> 
     throw new Error(`GitHub release lookup failed: HTTP ${response.status}`)
   }
   const body = await response.json() as ReleaseResponse
-  const asset = body.assets.find(a => ASSET_PATTERN.test(a.name))
-  if (!asset) {
-    throw new Error(
-      `No ${APP_BUNDLE_NAME} zip found in release ${body.tag_name}. ` +
-      `Check https://github.com/AskExe/exe-watcher/releases.`
-    )
+  if (!body || body.draft || body.prerelease || !/^mac-v\d+\.\d+\.\d+$/.test(body.tag_name) ||
+      (tag && body.tag_name !== tag) || !Array.isArray(body.assets)) {
+    throw new Error('GitHub did not return the requested stable Watcher release.')
   }
-  // Validate download URL points to GitHub-owned domains to prevent supply-chain attacks.
-  const allowedPrefixes = ['https://github.com/', 'https://objects.githubusercontent.com/']
-  if (!allowedPrefixes.some(prefix => asset.browser_download_url.startsWith(prefix))) {
-    throw new Error(
-      `Untrusted download URL: ${asset.browser_download_url}. ` +
-      `Expected a GitHub-hosted asset URL.`
-    )
+  const releaseVersion = body.tag_name.slice('mac-v'.length)
+  const name = `ExeWatcherMenubar-v${releaseVersion}.zip`
+  const matches = body.assets.filter(a => a?.name === name)
+  if (matches.length !== 1) throw new Error('The Watcher release must contain exactly one matching app archive.')
+  const asset = matches[0]
+  const expectedURL = `https://github.com/AskExe/exe-watcher/releases/download/${body.tag_name}/${name}`
+  if (!asset || asset.browser_download_url !== expectedURL || !/^sha256:[a-f0-9]{64}$/.test(asset.digest) ||
+      !Number.isSafeInteger(asset.size) || asset.size <= 0 || asset.size > MAX_ARCHIVE_BYTES) {
+    throw new Error('The Watcher archive has missing or untrusted integrity metadata.')
   }
-  return asset
+  return { ...asset, version: releaseVersion }
 }
 
-async function downloadToFile(url: string, destPath: string): Promise<void> {
-  const response = await fetch(url, {
-    headers: { 'User-Agent': 'exe-watcher-installer' },
-    redirect: 'follow',
-  })
+async function downloadToFile(asset: VerifiedAsset, destPath: string): Promise<void> {
+  let url = asset.browser_download_url
+  let response: Response
+  // Validate every redirect before sending another request, including HTTPS.
+  for (let redirects = 0; ; redirects++) {
+    const parsed = new URL(url)
+    if (parsed.protocol !== 'https:' || parsed.username || parsed.password || parsed.port || !DOWNLOAD_HOSTS.has(parsed.hostname)) {
+      throw new Error('The Watcher download redirected to an untrusted destination.')
+    }
+    response = await fetch(url, {
+      headers: { 'User-Agent': 'exe-watcher-installer' }, redirect: 'manual', signal: AbortSignal.timeout(120_000),
+    })
+    if (![301, 302, 303, 307, 308].includes(response.status)) break
+    const location = response.headers.get('location')
+    await response.body?.cancel()
+    if (!location || redirects >= 4) throw new Error('The Watcher download returned an invalid redirect.')
+    url = new URL(location, url).href
+  }
   if (!response.ok || response.body === null) {
     throw new Error(`Download failed: HTTP ${response.status}`)
   }
-  // fetch's ReadableStream needs to be wrapped for Node streams.
+  let bytes = 0
+  const hash = createHash('sha256')
+  const integrity = new Transform({ transform(chunk: Buffer, _encoding, done) {
+    bytes += chunk.length
+    if (bytes > asset.size) { done(new Error('The Watcher archive exceeds its published size.')); return }
+    hash.update(chunk)
+    done(null, chunk)
+  } })
   const nodeStream = Readable.fromWeb(response.body as never)
-  await pipeline(nodeStream, createWriteStream(destPath))
+  await pipeline(nodeStream, integrity, createWriteStream(destPath, { flags: 'wx', mode: 0o600 }))
+  if (bytes !== asset.size || `sha256:${hash.digest('hex')}` !== asset.digest) {
+    throw new Error('The Watcher archive failed its published SHA-256 or size check. Your installed app was preserved.')
+  }
+}
+
+/** Authenticate the complete staged app before touching the installed copy. */
+export async function verifyMacCandidate(appPath: string, version: string): Promise<void> {
+  await runCommand('/usr/bin/codesign', ['--verify', '--deep', '--strict', '--all-architectures', '-R', SIGNING_REQUIREMENT, appPath])
+  await runCommand('/usr/bin/xcrun', ['stapler', 'validate', appPath])
+  await runCommand('/usr/sbin/spctl', ['--assess', '--type', 'execute', appPath])
+  const info = await captureCommand('/usr/libexec/PlistBuddy', ['-c', 'Print :CFBundleShortVersionString', join(appPath, 'Contents/Info.plist')])
+  if (info.code !== 0 || info.stdout.trim() !== version) throw new Error('The signed app version does not match the requested Watcher release.')
 }
 
 async function runCommand(command: string, args: string[]): Promise<void> {
@@ -257,7 +293,7 @@ export async function installMenubarApp(options: { force?: boolean; version?: st
   try {
     const archivePath = join(stagingDir, asset.name)
     console.log(`Downloading ${asset.name}...`)
-    await downloadToFile(asset.browser_download_url, archivePath)
+    await downloadToFile(asset, archivePath)
 
     console.log('Unpacking...')
     // ditto, not unzip: the release ZIP is made with `ditto -c -k --sequesterRsrc`, and unzip
@@ -271,10 +307,7 @@ export async function installMenubarApp(options: { force?: boolean; version?: st
       throw new Error(`Archive did not contain ${APP_BUNDLE_NAME}.`)
     }
 
-    // Clear Gatekeeper's quarantine xattr. Without this, the first launch shows the
-    // "cannot verify developer" prompt even for a signed + notarized app when the bundle
-    // was delivered via curl/fetch instead of the Mac App Store.
-    await runCommand('/usr/bin/xattr', ['-dr', 'com.apple.quarantine', unpackedApp]).catch(() => {})
+    await verifyMacCandidate(unpackedApp, asset.version)
 
     await mkdir(appsDir, { recursive: true })
     const backupPath = alreadyInstalled

@@ -90,7 +90,13 @@ async function main() {
   run('xcrun', ['stapler', 'validate', join(output, names[0])], { stdio: 'inherit' });
   const buildInfo = readFileSync(join(output, 'BUILD-INFO.txt'), 'utf8');
   verifyRelease({ tag_name: tag, assets: names.map(name => ({ name, size: 1 })) }, version, tree, buildInfo);
-  const notes = `Watcher ${version} updates the app icon for macOS Tahoe and aligns the menu-bar owl with the cost. The owl now gently animates continuously, with a saved Settings switch and respect for Reduce Motion. Basic usage analytics retains its disclosure and opt-out; detailed diagnostics remains separately opt-in.\n\nDownload the universal DMG for macOS 14+. The app is Developer ID signed and Apple notarized, and includes its matching CLI. Existing users can select Update in Watcher. Terminal users can run npm install -g exe-watcher@latest --registry=https://registry.npmjs.org.\n\nIncludes CodeBurn by AgentSeal (MIT); full notices ship in the app and npm package.`;
+  const changelog = readFileSync(join(root, 'CHANGELOG.md'), 'utf8').split(/\r?\n/);
+  const heading = changelog.findIndex(line => line.startsWith(`## ${version} (`));
+  if (heading < 0) throw Error('The release must have its own changelog section.');
+  const following = changelog.findIndex((line, index) => index > heading && line.startsWith('## '));
+  const changes = changelog.slice(heading + 1, following < 0 ? undefined : following).join('\n').trim();
+  if (!changes) throw Error('The release changelog section is empty.');
+  const notes = `${changes}\n\nDownload the universal DMG for macOS 14+. The app is Developer ID signed and Apple notarized, and includes its matching CLI. Existing users can select Update in Watcher. Terminal users can run npm install -g exe-watcher@latest --registry=https://registry.npmjs.org.\n\nIncludes CodeBurn by AgentSeal (MIT); full notices ship in the app and npm package.`;
   run('gh', ['release', 'create', tag, '--repo', repository, '--target', source, '--draft', '--title', `Watcher ${version}`,
     '--notes', notes, ...names.map(name => join(output, name))], { stdio: 'inherit' });
   const draft = releaseMetadata(tag);
