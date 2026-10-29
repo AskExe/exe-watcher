@@ -181,7 +181,10 @@ final class CLIProcessRunner: @unchecked Sendable {
     private let timeout: Double
     private let lock = NSLock()
     private var cancelled = false
-    init(process: Process, timeout: Double) { self.process = process; self.timeout = timeout }
+    private let input: Data?
+    init(process: Process, timeout: Double, input: Data? = nil) {
+        self.process = process; self.timeout = timeout; self.input = input
+    }
     private func cancel() { lock.lock(); cancelled = true; lock.unlock() }
     private var isCancelled: Bool { lock.lock(); defer { lock.unlock() }; return cancelled }
 
@@ -199,6 +202,7 @@ final class CLIProcessRunner: @unchecked Sendable {
 
     private func execute() throws -> (Data, Data, Int32) {
         if isCancelled { throw CancellationError() }
+        if let input, input.count > 4_096 { throw DataClientError.outputTooLarge }
         let stdout = Pipe(), stderr = Pipe()
         defer {
             try? stdout.fileHandleForReading.close(); try? stdout.fileHandleForWriting.close()
@@ -206,11 +210,25 @@ final class CLIProcessRunner: @unchecked Sendable {
         }
         process.standardOutput = stdout
         process.standardError = stderr
+        let stdin = input == nil ? nil : Pipe()
+        if let stdin { process.standardInput = stdin }
+        defer {
+            try? stdin?.fileHandleForReading.close()
+            try? stdin?.fileHandleForWriting.close()
+        }
         for pipe in [stdout, stderr] {
             let fd = pipe.fileHandleForReading.fileDescriptor
             _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK)
         }
         do { try process.run() } catch { throw DataClientError.spawn(error.localizedDescription) }
+        if let input, let stdin {
+            // Account messages fit in the fresh pipe buffer and contain no secrets in argv.
+            try? stdin.fileHandleForReading.close()
+            _ = fcntl(stdin.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1)
+            do { try stdin.fileHandleForWriting.write(contentsOf: input) }
+            catch { kill(process.processIdentifier, SIGKILL); process.waitUntilExit(); throw DataClientError.spawn("Could not send account request") }
+            try? stdin.fileHandleForWriting.close()
+        }
         _ = setpriority(PRIO_PROCESS, UInt32(process.processIdentifier), 10)
         try? stdout.fileHandleForWriting.close()
         try? stderr.fileHandleForWriting.close()

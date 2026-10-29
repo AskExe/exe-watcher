@@ -1,6 +1,6 @@
 {
   "name": "exe-watcher",
-  "version": "0.2.73",
+  "version": "0.2.74",
   "description": "The owl watching your AI coding spend \u2014 cost, tokens, agents, and projects in your terminal and menu bar",
   "type": "module",
   "main": "./dist/cli.js",
@@ -11,7 +11,8 @@
     "dist",
     "vendor/odd-core-analytics",
     "THIRD_PARTY_NOTICES.md",
-    "!dist/**/*.map"
+    "!dist/**/*.map",
+    "vendor/odd-core-recovery"
   ],
   "scripts": {
     "build": "tsup",
@@ -47,19 +48,26 @@
   },
   "homepage": "https://github.com/AskExe/exe-watcher#readme",
   "dependencies": {
+    "@noble/ciphers": "^2.0.1",
+    "@noble/curves": "^2.0.1",
+    "@noble/hashes": "^2.0.1",
+    "@supabase/supabase-js": "^2.108.1",
+    "bip39": "^3.1.0",
     "chalk": "^5.4.1",
     "commander": "^13.1.0",
     "ink": "^7.0.0",
     "react": "^19.2.5"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.11",
+    "@odd-core/analytics": "file:vendor/odd-core-analytics",
+    "@odd-core/recovery": "file:vendor/odd-core-recovery",
     "@types/node": "^22.19.17",
     "@types/react": "^19.2.14",
     "tsup": "^8.4.0",
     "tsx": "^4.19.0",
     "typescript": "^5.8.0",
-    "vitest": "^3.1.0",
-    "@odd-core/analytics": "file:vendor/odd-core-analytics"
+    "vitest": "^3.1.0"
   },
   "publishConfig": {
     "registry": "https://registry.npmjs.org"

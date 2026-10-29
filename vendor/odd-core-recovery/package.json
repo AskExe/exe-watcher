@@ -1,0 +1,11 @@
+{
+  "name": "@odd-core/recovery",
+  "version": "1.0.0-watcher.1",
+  "type": "module",
+  "license": "MIT",
+  "exports": {
+    "./account": "./src/core/account-recovery.ts",
+    "./backup": "./src/recovery/oddCloudBackup.ts",
+    "./capsule": "./src/recovery/appKeyCapsule.ts"
+  }
+}

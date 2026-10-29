@@ -48,3 +48,6 @@ desktop/
 
 # Checked-in compiled analytics snapshot for reproducible builds
 !vendor/odd-core-analytics/dist/
+
+# Local Supabase CLI link and cache metadata
+supabase/.temp/

@@ -1,0 +1,28 @@
+{
+  "repository": "https://github.com/AskExe/odd-core-kits",
+  "revision": "3fb6fb095a1f9b1b8601965df58f08521fc38f7f",
+  "upstreamPackage": "@odd/crypto",
+  "adaptation": "Add watcher to OddRecoveryAppCode and type-only non-null assertions for noUncheckedIndexedAccess. No cryptographic changes.",
+  "files": {
+    "src/core/account-recovery.ts": {
+      "upstreamSha256": "e6e03f6f85e9a7e1ab619a8ff55077d15e9aa9eedee66bb7da13cc5f20ace8aa",
+      "vendoredSha256": "94bcfa4875e030ffee4768178df81a40fabcd4046a9169766576f84a21c139d9"
+    },
+    "src/core/keys.ts": {
+      "upstreamSha256": "8be7886db7369434605d637e09d4a8775e4cc414f3f0dddc5c7a7f6ea131f9af",
+      "vendoredSha256": "d4b649df557e84b7beda58c0c1fbbeb4138266fe5dcf8bb679752e61f8383b74"
+    },
+    "src/platform/storage.ts": {
+      "upstreamSha256": "38a12b5bd5471bff86c9783b476a5d4dd7fe0214bcccce0f72176d89f85a617b",
+      "vendoredSha256": "279408ff30a693a2978ee7e07a3a530ab8d4694b23779e7d409b5997fc514061"
+    },
+    "src/recovery/oddCloudBackup.ts": {
+      "upstreamSha256": "4bc44a1579e1df32102f7904dc63433674ebdd3be7655117d84b2f58fdbcedbd",
+      "vendoredSha256": "047c104f51eda8cf51f0f3b7269a700715e009c47e0bb570bb775a96a4c61067"
+    },
+    "src/recovery/appKeyCapsule.ts": {
+      "upstreamSha256": "e6257872190425b1cb72a1c5287ae745aea090ee33e782b577340fa8d4e12af5",
+      "vendoredSha256": "e6257872190425b1cb72a1c5287ae745aea090ee33e782b577340fa8d4e12af5"
+    }
+  }
+}

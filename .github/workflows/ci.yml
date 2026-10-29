@@ -28,7 +28,9 @@ jobs:
         run: npm ci
 
       - name: Typecheck
-        run: npx tsc --noEmit
+        run: |
+          npx tsc --noEmit
+          npx tsc --noEmit -p tsconfig.cloud.json
 
       - name: Build
         run: npm run build

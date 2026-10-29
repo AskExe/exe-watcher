@@ -40,6 +40,7 @@ import { getTimeReport, refreshTimeIndex } from './time-index.js'
 import { formatDuration, summarizeTime, type TimeReport } from './time-tracking.js'
 import { buildTimeSnapshots } from './time-snapshots.js'
 import { readActivityHistory } from './personal-activity.js'
+import { accountCommand } from './cloud/command.js'
 
 const require = createRequire(import.meta.url)
 const { version } = require('../package.json')
@@ -191,7 +192,7 @@ const program = new Command()
 
 program.hook('preAction', async (thisCommand, command) => {
   const config = await readConfig()
-  if (command.name() !== 'telemetry' && process.stdin.isTTY && resolveTelemetry(config.telemetry).usageEnabled && config.telemetry?.basicNoticeVersion !== 1) {
+  if (!['telemetry', 'account'].includes(command.name()) && process.stdin.isTTY && resolveTelemetry(config.telemetry).usageEnabled && config.telemetry?.basicNoticeVersion !== 1) {
     const noticePath = join(dirname(getConfigFilePath()), 'basic-analytics-notice-v1')
     if (!existsSync(noticePath)) console.error(`\n${BASIC_NOTICE}\n`)
     config.telemetry = { ...config.telemetry, basicNoticeVersion: 1 }
@@ -202,7 +203,7 @@ program.hook('preAction', async (thisCommand, command) => {
       catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error }
     } catch { config.telemetry.usageEnabled = false }
   }
-  telemetry = command.name() === 'telemetry' ? undefined : await createTelemetry(config.telemetry, version)
+  telemetry = ['telemetry', 'account'].includes(command.name()) ? undefined : await createTelemetry(config.telemetry, version)
   telemetryCommand = command.name()
   await telemetry?.capture('command_started', telemetryCommand)
   setModelAliases(config.modelAliases ?? {})
@@ -210,7 +211,7 @@ program.hook('preAction', async (thisCommand, command) => {
   if (thisCommand.opts<{ verbose?: boolean }>().verbose) {
     process.env['EXE_WATCHER_VERBOSE'] = '1'
   }
-  if (!command.opts().cachedOnly) await loadCurrency()
+  if (command.name() !== 'account' && !command.opts().cachedOnly) await loadCurrency()
 })
 
 function buildJsonReport(projects: ProjectSummary[], period: string, periodKey: string) {
@@ -1353,6 +1354,11 @@ program
 
     console.log(lines.join('\n'))
   })
+
+program.command('account [action]')
+  .description('Odd account and private encrypted history: status, login, enable, backup, devices, dashboard, restore, local, disable, logout, delete')
+  .option('--json', 'Read an account request from stdin and return JSON; secrets never go in command arguments')
+  .action(async (action = 'status', options) => accountCommand(action, !!options.json))
 
 program.command('telemetry')
   .description('Optional self-hosted usage statistics and sanitized error diagnostics (basic usage on; diagnostics off by default)')

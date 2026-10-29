@@ -494,6 +494,8 @@ struct FooterBar: View {
             .noFocusRing()
 
             Menu {
+                Button("Odd account & private history…") { OddAccountWindow.show() }
+                Divider()
                 Toggle("Animate menu bar owl", isOn: $animateMenuBarOwl)
                 Divider()
                 Toggle("Share basic usage statistics", isOn: Binding(
