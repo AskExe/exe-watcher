@@ -18,6 +18,10 @@
 
 Exe Watcher shows what your AI coding work costs, how long the agents run, and how each Exe OS employee's memory grows. Track nine coding clients, models, projects, tokens, and optimization findings from local usage files. Spend and time tracking need no API keys, account, proxy, or wrappers around your tools; employee memory and spend appear when Exe OS supplies its local agent stats.
 
+Optional Odd account backup and a private spending view are under development.
+Cloud rollout is disabled pending shared-project storage qualification; local tracking
+continues to work without an account. See the [implementation and activation status](docs/odd-account-history.md).
+
 **Forked from [CodeBurn by AgentSeal](https://github.com/getagentseal/codeburn) on April 24, 2026.** Since then, Exe AI has developed Watcher for AI employee teams and parallel agent workflows. [Development timeline and comparison](#development-since-the-codeburn-fork) · [Origin and MIT attribution](#origin--attribution)
 
 **macOS app:** Download the universal DMG from [Releases](https://github.com/AskExe/exe-watcher/releases/latest), drag **Watcher by EXE** into **Applications**, and open it. macOS 14+ on Apple Silicon or Intel. From 0.2.55, Node and the CLI are included.
@@ -53,7 +57,7 @@ node dist/cli.js report
 - **Spend per employee** — puts model-aware 24-hour, 7-day, and 30-day cost beside the same Exe OS employee identities.
 - **Bounded background work** — coalesces usage-file events, reuses cached periods, resumes historical recovery, and rests between scans.
 - **Visible data limits** — distinguishes unknown timing, missing historical call counts, recovered usage, and models whose costs cannot be priced.
-- **One local view** — Claude Code, Codex, Cursor, Cursor Agent, Copilot, OpenCode, Kimi Code, OMP, and Pi, with no usage-data upload service.
+- **One local view** — Claude Code, Codex, Cursor, Cursor Agent, Copilot, OpenCode, Kimi Code, OMP, and Pi, with local tracking by default; optional encrypted account backup requires separate consent.
 
 ## Development since the CodeBurn fork
 

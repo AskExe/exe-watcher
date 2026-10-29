@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.74 (2026-10-29)
+
+- Add optional Odd email-code sign-in and a private local spending-history view.
+- Prepare encrypted history backup in the existing Odd Supabase project with scoped storage, owner isolation, retention and account cleanup. Rollout stays disabled until live qualification and protected cleanup are ready; signing in alone never uploads history.
+- Keep account credentials in the Mac Keychain and account activity outside product telemetry.
+
 ## 0.2.73 (2026-10-28)
 
 ### Security

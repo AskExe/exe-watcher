@@ -52,6 +52,11 @@ private let menubarTitleFontSize: CGFloat = 13
 
 @main
 struct ExeWatcherApp: App {
+    init() {
+        if CommandLine.arguments.contains("--odd-keychain") {
+            exit(OddKeychain.runBroker())
+        }
+    }
     @NSApplicationDelegateAdaptor(AppDelegate.self) var delegate
 
     var body: some Scene {
@@ -76,6 +81,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     /// Gentle continuous menu-bar motion, independently switchable in Settings.
     private let owlAnimator = MenuBarOwlAnimator()
     private let menuBarBadge = MenuBarBadgeView()
+    private let oddBackup = OddAutomaticBackup()
 
     private var usageLogWatcher: UsageLogWatcher?
     private var usageLogDebounceWork: DispatchWorkItem?
@@ -87,6 +93,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
         registerBundledFonts()
+
+        if ProcessInfo.processInfo.arguments.contains("--odd-account-preview") {
+            let args = ProcessInfo.processInfo.arguments
+            let layout = args.firstIndex(of: "--odd-account-layout").flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil }
+            OddAccountWindow.show(layoutPreview: layout)
+            return
+        }
 
         if ProcessInfo.processInfo.arguments.contains("--menu-bar-preview") {
             setupStatusItem()
@@ -104,6 +117,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         }
 
         WatcherTelemetry.start()
+        oddBackup.start()
         ProcessInfo.processInfo.automaticTerminationSupportEnabled = false
         ProcessInfo.processInfo.disableSuddenTermination()
         backgroundActivity = ProcessInfo.processInfo.beginActivity(
@@ -237,6 +251,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        oddBackup.stop()
         owlAnimator.stop()
         WatcherTelemetry.stop()
         appActivityTracker?.stop()
@@ -512,6 +527,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
     /// Register bundled custom fonts (Epilogue) so they're available via Font.custom().
     private func registerBundledFonts() {
+        OddAccountBrand.registerFonts()
         let resourceBundle = Bundle.main.resourceURL
             .flatMap { Bundle(url: $0.appendingPathComponent("ExeWatcherMenubar_ExeWatcherMenubar.bundle")) }
             ?? Bundle.module

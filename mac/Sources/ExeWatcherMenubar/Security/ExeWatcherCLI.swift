@@ -96,6 +96,9 @@ enum ExeWatcherCLI {
         // Last option wins over an inherited larger heap setting.
         environment["NODE_OPTIONS"] = (environment["NODE_OPTIONS"] ?? "") + " --max-old-space-size=256"
         environment["EXE_WATCHER_PARENT_PID"] = String(ProcessInfo.processInfo.processIdentifier)
+        if let executable = Bundle.main.executableURL {
+            environment["EXE_WATCHER_KEYCHAIN_HELPER"] = executable.path
+        }
         process.environment = environment
         // Accounting yields to the user's coding work when the Mac is busy.
         process.qualityOfService = .utility

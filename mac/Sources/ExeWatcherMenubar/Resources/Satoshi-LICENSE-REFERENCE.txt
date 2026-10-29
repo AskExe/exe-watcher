@@ -1,0 +1,8 @@
+Satoshi — Indian Type Foundry / Fontshare
+
+Licensed under the ITF Free Font License.
+Official license: https://www.fontshare.com/licenses/itf-ffl
+Font family: https://www.fontshare.com/fonts/satoshi
+
+These unmodified font files are the canonical Odd Community brand assets,
+shared with odd.community. They are not licensed under Watcher's MIT license.

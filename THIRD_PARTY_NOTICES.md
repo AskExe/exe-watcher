@@ -42,3 +42,18 @@ The CLI bundles the MIT-licensed `@odd-core/analytics/privacy` implementation.
 The pinned source and artifact hashes are in `vendor/odd-core-analytics/PROVENANCE.json`;
 its full license is included at `vendor/odd-core-analytics/LICENSE`. The native
 Swift adapter follows the same restricted collection protocol.
+
+## Odd Core Recovery
+
+Watcher's account backup uses a pinned subset of Odd Core's MIT-licensed
+`@odd/crypto` account recovery and backup engine. Source hashes and the small
+Watcher/type-checking adaptations are in `vendor/odd-core-recovery/PROVENANCE.json`;
+its license is included alongside it.
+
+## Odd Community account typography
+
+Account screens bundle the same unmodified Satoshi and Grandstander font files
+as odd.community. Satoshi is by Indian Type Foundry and uses the
+[ITF Free Font License](https://www.fontshare.com/licenses/itf-ffl), rather than
+Watcher's MIT license. Grandstander uses the SIL Open Font License; its full
+notice is bundled as `Grandstander-OFL.txt` in the Mac resources.
