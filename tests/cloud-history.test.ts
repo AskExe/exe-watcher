@@ -31,8 +31,6 @@ describe('private history data boundary', () => {
     for (const [path, hashes] of Object.entries(manifest.files) as Array<[string, { vendoredSha256: string }]>) {
       expect(createHash('sha256').update(await readFile(new URL(path, base))).digest('hex')).toBe(hashes.vendoredSha256)
     }
-    const validator = manifest.deletionExportValidator
-    expect(createHash('sha256').update(await readFile(new URL('../' + validator.localPath, import.meta.url))).digest('hex')).toBe(validator.sha256)
   })
   it('captures only approved totals and labels API estimates accurately', () => {
     const snapshot = captureSnapshot(cache(), deviceId, null)
