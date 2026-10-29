@@ -2,6 +2,26 @@
 
 ## Current handoff — shared-project decision, 2026-10-29
 
+Hosted qualification follow-up: the canonical central migration and cleanup core
+are pinned in `supabase/SHARED_PROJECT_PROVENANCE.json`. The migration also
+registers Watcher atomically. Admin-seeded QA access expires within four hours;
+public rollout stays false. `scripts/watcher-hosted-qa.ts` uses only newly created
+disposable review-mailbox aliases, synthetic totals and in-memory credentials. It
+checks genuine hosted login, isolation, immutable ciphertext, new-device restore,
+retention, consent revocation, physical history cleanup and central account erasure.
+Cleanup of exact generated identity IDs runs independently after any failure.
+
+No production migration/function or recurring job has been applied. Existing
+server-key use requires explicit approval after automatic review rejected even
+metadata-only retrieval. The protected endpoint uses existing platform secrets;
+no new key, project, budget change or schedule is prepared implicitly.
+
+Run only after the reviewed backend is deployed, with `WATCHER_QA_DISPOSABLE=1`,
+a protected `WATCHER_SERVICE_SECRET`, the installed Supabase CLI and an optional
+`WATCHER_QA_RECEIPT` path outside the temporary fixture directory. Never pass a
+server key in argv or write it to a file. The command is
+`node_modules/.bin/tsx scripts/watcher-hosted-qa.ts`.
+
 Henry chose the **existing central Odd Supabase project** for Watcher. This is a
 Watcher-specific exception to the per-app project architecture and supersedes
 the earlier extra-project/billing request. No new project or base compute charge

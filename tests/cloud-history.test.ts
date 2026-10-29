@@ -28,6 +28,10 @@ describe('private history data boundary', () => {
   it('matches the pinned shared recovery source inventory', async () => {
     const base = new URL('../vendor/odd-core-recovery/', import.meta.url)
     const manifest = JSON.parse(await readFile(new URL('PROVENANCE.json', base), 'utf8'))
+    const shared = JSON.parse(await readFile(new URL('../supabase/SHARED_PROJECT_PROVENANCE.json', import.meta.url), 'utf8'))
+    for (const [path, pin] of Object.entries(shared.files) as Array<[string, { sha256: string }]>) {
+      expect(createHash('sha256').update(await readFile(new URL('../' + path, import.meta.url))).digest('hex')).toBe(pin.sha256)
+    }
     for (const [path, hashes] of Object.entries(manifest.files) as Array<[string, { vendoredSha256: string }]>) {
       expect(createHash('sha256').update(await readFile(new URL(path, base))).digest('hex')).toBe(hashes.vendoredSha256)
     }

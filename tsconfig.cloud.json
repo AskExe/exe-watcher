@@ -1,5 +1,5 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": { "rootDir": ".", "noEmit": true },
-  "include": ["scripts/watcher-maintenance.ts", "supabase/**/*.ts"]
+  "include": ["scripts/watcher-maintenance.ts", "scripts/watcher-hosted-qa.ts", "supabase/**/*.ts"]
 }
