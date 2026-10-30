@@ -1,6 +1,6 @@
 import { PGlite } from '@electric-sql/pglite'
 import { beforeAll, afterAll, expect, it } from 'vitest'
-import { readFile } from 'node:fs/promises'
+import { readFile, readdir } from 'node:fs/promises'
 
 let db: PGlite
 const alice = '10000000-0000-4000-8000-000000000001', bob = '10000000-0000-4000-8000-000000000002'
@@ -43,11 +43,15 @@ beforeAll(async () => {
     create function auth.uid() returns uuid language sql stable as $$ select (auth.jwt()->>'sub')::uuid $$;
     grant usage on schema auth,storage to anon,authenticated,service_role;
     create table storage.buckets(id text primary key,name text,public boolean,file_size_limit bigint,allowed_mime_types text[]);
-    create table storage.objects(bucket_id text,name text,created_at timestamptz default now(),primary key(bucket_id,name));
+    -- Include actual hosted Storage owner fields: an omitted owner column hid a
+    -- PL/pgSQL variable/column ambiguity in both upload admission and deletion.
+    create table storage.objects(bucket_id text,name text,created_at timestamptz default now(),owner uuid,owner_id text,primary key(bucket_id,name));
     alter table storage.objects enable row level security;
     grant select,insert,update,delete on storage.objects to anon,authenticated;
   `)
-  await db.exec(await readFile(new URL('../supabase/migrations/20261029090001_watcher_private_history.sql', import.meta.url), 'utf8'))
+  const migrations = new URL('../supabase/migrations/', import.meta.url)
+  for (const file of (await readdir(migrations)).filter(x => x.endsWith('.sql')).sort())
+    await db.exec(await readFile(new URL(file, migrations), 'utf8'))
 }, 30_000)
 afterAll(async () => { await db?.close() })
 

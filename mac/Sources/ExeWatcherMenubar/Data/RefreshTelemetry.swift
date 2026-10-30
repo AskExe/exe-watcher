@@ -64,6 +64,7 @@ final class RefreshTracer {
     private var spanCounter: UInt64 = 0
     private var writeScheduled = false
     private var evictionTimer: DispatchSourceTimer?
+    private let writer = DispatchQueue(label: "community.odd.watcher.trace-writer", qos: .utility)
 
     private let traceDir: URL = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent(".cache/exe-watcher/traces")
@@ -81,8 +82,8 @@ final class RefreshTracer {
     }
 
     func initialize() {
-        startTimeUs = UInt64(Date().timeIntervalSince1970 * 1_000_000)
-        try? FileManager.default.createDirectory(at: traceDir, withIntermediateDirectories: true)
+        startTimeUs = DispatchTime.now().uptimeNanoseconds / 1000
+        try? LocalDiagnostics.prepare(traceDir)
 
         metadataEvents.append(TraceEvent(
             name: "process_name", cat: "__metadata", ph: "M",
@@ -170,8 +171,8 @@ final class RefreshTracer {
     // MARK: - Internals
 
     private func timestamp() -> UInt64 {
-        let nowUs = UInt64(Date().timeIntervalSince1970 * 1_000_000)
-        return nowUs - startTimeUs
+        let nowUs = DispatchTime.now().uptimeNanoseconds / 1000
+        return nowUs >= startTimeUs ? nowUs - startTimeUs : 0
     }
 
     private func pushEvent(_ event: TraceEvent) {
@@ -204,12 +205,12 @@ final class RefreshTracer {
     /// Write trace to disk. Called on coalesced schedule and on app termination.
     func writeToDisk() {
         let allEvents = metadataEvents + events
-        DispatchQueue.global(qos: .utility).async { [traceFile = self.traceFile] in
+        writer.async { [traceFile = self.traceFile] in
             guard let payload = try? JSONEncoder().encode(allEvents) else { return }
             var data = Data("{\"traceEvents\":".utf8)
             data.append(payload)
             data.append(Data("}".utf8))
-            try? data.write(to: traceFile, options: .atomic)
+            try? LocalDiagnostics.write(data, to: traceFile)
         }
     }
 

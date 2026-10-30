@@ -19,35 +19,14 @@ private let popoverHeight: CGFloat = 660
 /// Rotates the log when it exceeds ~500KB: moves to refresh.log.old (keeping one
 /// generation of history) and starts fresh. Without rotation the file grows unbounded
 /// at ~30 lines per minute during active coding sessions.
-private let logRotationBytes = 500 * 1024
 @MainActor
 func watcherLog(_ message: String) {
     let dir = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent(".cache/exe-watcher")
-    try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
     let logFile = dir.appendingPathComponent("refresh.log")
-    let ts = refreshTimeFormatter.string(from: Date())
-    let line = "[\(ts)] \(message)\n"
-    if let handle = try? FileHandle(forWritingTo: logFile) {
-        handle.seekToEndOfFile()
-        let size = handle.offsetInFile
-        handle.write(Data(line.utf8))
-        handle.closeFile()
-        if size > logRotationBytes {
-            let oldLog = dir.appendingPathComponent("refresh.log.old")
-            try? FileManager.default.removeItem(at: oldLog)
-            try? FileManager.default.moveItem(at: logFile, to: oldLog)
-        }
-    } else {
-        try? Data(line.utf8).write(to: logFile)
-    }
+    try? LocalDiagnostics.appendLog(message, to: logFile,
+        version: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0")
 }
-
-private let refreshTimeFormatter: DateFormatter = {
-    let f = DateFormatter()
-    f.dateFormat = "HH:mm:ss"
-    return f
-}()
 private let menubarTitleFontSize: CGFloat = 13
 
 @main
