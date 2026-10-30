@@ -17,7 +17,7 @@ not a companion SKILL.md, in Henrykun, Odd Website/DM or installed skill folders
 | Signal | Observed behavior | Remaining launch gate |
 | --- | --- | --- |
 | Logs | Native refresh/health log rotates near 500 KiB. Supabase Storage logs expose the actual database error, request/trace IDs and duration. | Source follow-up changes local logs to timestamped JSON lines and makes logs/rotation/traces owner-only. Qualify the signed installed artifact after merge. |
-| Metrics | Existing PostHog dashboard has daily active installations, active minutes, feature counts, outcomes and version/platform cohorts. Native traces contain fetch-health counters and span duration. | Central latency percentiles/request-duration metrics are absent. Usage outcomes cover participating foreground activity, not every background/account request. |
+| Metrics | Existing PostHog dashboard has daily active installations, active minutes, feature counts, outcomes and version/platform cohorts. Native traces contain fetch-health counters and span duration. Supabase's live Storage report shows request counts/statuses and average response speed; its project overview shows per-service error rates. | Backend rate/errors/duration exist in Supabase. Cross-surface client latency percentiles are absent from PostHog. Usage outcomes cover participating foreground activity, not every background/account request. |
 | Traces | Installed native Perfetto trace was valid JSON: 5,516 events, including 1,612 begin/end pairs, health counters and duration fields. Hosted Storage exposes trace_id/span_id and responseTime. | No verified OpenTelemetry client-to-server trace propagation/export. Perfetto refresh traces alone do not meet that requirement. |
 | Alerts | Both Watcher Sentry projects were queried directly; each has zero rules. Existing Sentry SMTP transport is configured. | Choose recipient/channel; configure the error-rate rule and prove a marked test alert arrives. The pending user card asks for that destination and test permission. |
 | Crashes | Real sanitized handled CLI/native reports reached Sentry during the release audit. | Full native crash capture remains outside current coverage; do not label handled-error reporting as crash qualification. |
@@ -60,5 +60,8 @@ owner UUIDs, fixed check names and sanitized status/code classifications.
 Every attempted fixture cleanup passed; no real review-account vault was enrolled.
 
 **Not launch-qualified yet:** hosted upload/restore/deletion must pass after the
-SQL correction; central duration metrics, end-to-end tracing and delivered alert
-verification remain open. Public backup is disabled. Token usage is unavailable.
+SQL correction; propagated client-to-server tracing and delivered alert
+verification remain open. The existing backend metric report is at
+`https://supabase.com/dashboard/project/vjiexzktmduoguxvleiy/observability/storage`.
+It exposed the failed owned uploads and their durations during this audit.
+Public backup is disabled. Token usage is unavailable.
