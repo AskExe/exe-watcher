@@ -15,6 +15,8 @@ import type { BackupPointer } from '@odd-core/recovery/backup'
 const run = promisify(execFile)
 const ref = 'vjiexzktmduoguxvleiy'
 const checks: string[] = [], cleanupFailures: string[] = [], owners: string[] = []
+const requestFailures: Array<{ route: string; status: number; code?: string; hints?: string[] }> = []
+let failureClass: string | undefined
 let phase = 'preflight', directory = ''
 function check(condition: unknown, name: string): asserts condition {
   phase = name
@@ -22,7 +24,27 @@ function check(condition: unknown, name: string): asserts condition {
   checks.push(name)
 }
 const boundedFetch: typeof fetch = async (input, init) => {
-  try { return await fetch(input, { ...init, redirect: 'error', signal: AbortSignal.timeout(15_000) }) }
+  try {
+    const response = await fetch(input, { ...init, redirect: 'error', signal: AbortSignal.timeout(15_000) })
+    if (!response.ok && requestFailures.length < 30) {
+      const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url)
+      const route = url.pathname.startsWith('/storage/v1/') ? 'storage' :
+        url.pathname.startsWith('/rest/v1/rpc/') ? 'rpc' :
+        url.pathname.startsWith('/auth/v1/') ? 'auth' : 'other'
+      let code: string | undefined
+      let hints: string[] = []
+      try {
+        const body = await response.clone().json()
+        if (typeof body.code === 'string' && /^[A-Za-z0-9_]{1,32}$/.test(body.code)) code = body.code
+        const text = JSON.stringify(body).toLowerCase()
+        hints = ['permission denied', 'insufficient privilege', 'schema', 'function', 'column',
+          'syntax', 'deadlock', 'duplicate', 'row-level security', 'trigger', 'read-only',
+          'watcher_private', 'auth', 'storage', '42501', '42703', '42883', '23505'].filter(x => text.includes(x))
+      } catch {}
+      requestFailures.push({ route, status: response.status, ...(code ? { code } : {}), hints })
+    }
+    return response
+  }
   catch { return Response.json({ message: 'QA network unavailable' }, { status: 408 }) }
 }
 async function sql(statement: string) {
@@ -95,6 +117,7 @@ async function main() {
     const phrase = (await a.account.run({ action: 'recoveryPhrase' })).phrase
     check(typeof phrase === 'string', 'new disposable recovery phrase generated in memory')
     check((await a.account.run({ action: 'enable', phrase, confirm: true })).backupEnabled === true, 'owner consent and recovery capsule enrolled')
+    phase = 'first encrypted hosted backup'
     check((await a.account.run({ action: 'backup' })).backedUp === true, 'encrypted hosted backup and read-back')
     const deviceId = (await a.local.read()).deviceId
     const client = (session: Session) => createClient(deployment.dataUrl!, deployment.dataPublishableKey!, {
@@ -186,10 +209,11 @@ async function main() {
     if (directory) await rm(directory, { recursive: true, force: true })
   }
 }
-main().then(() => { if (cleanupFailures.length) throw new Error('QA cleanup incomplete') }).catch(() => {
+main().then(() => { if (cleanupFailures.length) throw new Error('QA cleanup incomplete') }).catch((error: unknown) => {
+  failureClass = error instanceof Error && ['Error', 'TypeError', 'CloudError'].includes(error.constructor.name) ? error.constructor.name : 'Error'
   process.exitCode = 1
 }).finally(async () => {
-  const receipt = { ok: !process.exitCode, phase, checks, disposableOwners: owners, cleanupFailures }
+  const receipt = { ok: !process.exitCode, phase, failureClass, requestFailures, checks, disposableOwners: owners, cleanupFailures }
   if (process.env.WATCHER_QA_RECEIPT) await writeFile(process.env.WATCHER_QA_RECEIPT, JSON.stringify(receipt, null, 2) + '\n', { mode: 0o600 })
   console.log(JSON.stringify({ ok: receipt.ok, phase, passedChecks: checks.length, cleanupFailures: cleanupFailures.length }))
 })

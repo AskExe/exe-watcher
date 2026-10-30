@@ -3,7 +3,7 @@ import { randomBytes, randomUUID } from 'node:crypto'
 import { captureSnapshot, decodeSnapshot, summarizeSnapshot, mergeSnapshotHistory, PROVIDERS } from '../src/cloud/snapshot.js'
 import { getAllProviders } from '../src/providers/index.js'
 import { createHash } from 'node:crypto'
-import { readFile } from 'node:fs/promises'
+import { readFile, readdir } from 'node:fs/promises'
 import { snapshotCipher } from '../src/cloud/cipher.js'
 import { OddCloudBackup, type BackupPointer, type VerifiedRecoveryOwner } from '@odd-core/recovery/backup'
 import { createRecoveryPhrase, recoveryRootFromPhrase, createRecoveryHeader, deriveAppRecoveryWrappingKey, wrapAppRecoveryKey, unwrapAppRecoveryKey } from '@odd-core/recovery/account'
@@ -29,6 +29,9 @@ describe('private history data boundary', () => {
     const base = new URL('../vendor/odd-core-recovery/', import.meta.url)
     const manifest = JSON.parse(await readFile(new URL('PROVENANCE.json', base), 'utf8'))
     const shared = JSON.parse(await readFile(new URL('../supabase/SHARED_PROJECT_PROVENANCE.json', import.meta.url), 'utf8'))
+    const migrations = new URL('../supabase/migrations/', import.meta.url)
+    expect((await readdir(migrations)).filter(path => path.endsWith('.sql')).sort()).toEqual(
+      Object.keys(shared.files).filter(path => path.startsWith('supabase/migrations/') && path.endsWith('.sql')).map(path => path.split('/').at(-1)).sort())
     for (const [path, pin] of Object.entries(shared.files) as Array<[string, { sha256: string }]>) {
       expect(createHash('sha256').update(await readFile(new URL('../' + path, import.meta.url))).digest('hex')).toBe(pin.sha256)
     }
