@@ -1,4 +1,4 @@
--- Register Watcher in the existing shared Odd project, alongside its reviewed storage migration.
+-- Compatibility/idempotent catalog check; canonical storage migration now registers Watcher atomically.
 -- Does not alter OAuth clients, other apps or backup paywall settings.
 begin;
 set local lock_timeout='2s';

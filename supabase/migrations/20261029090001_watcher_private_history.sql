@@ -12,6 +12,15 @@ create table watcher_private.watcher_settings (
   enabled boolean not null default false
 );
 insert into watcher_private.watcher_settings(id,enabled) values (true, false);
+-- Admin-seeded, short-lived owned QA identities can qualify hosted Storage
+-- while the public rollout remains disabled. No client can add or extend rows.
+create table watcher_private.watcher_qa_accounts (
+  user_id uuid primary key references auth.users(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  expires_at timestamptz not null,
+  check (expires_at > created_at and expires_at <= created_at + interval '4 hours')
+);
+revoke all on watcher_private.watcher_qa_accounts from public, anon, authenticated;
 create table watcher_private.watcher_accounts (
   user_id uuid primary key,
   enabled boolean not null default false,
@@ -37,7 +46,9 @@ language sql stable security definer set search_path = '' as $$
       and u.deleted_at is null and (u.banned_until is null or u.banned_until<=now()))
     and exists (select 1 from auth.sessions s where s.user_id=(select auth.uid())
       and s.id::text=(select auth.jwt())->>'session_id')
-    and exists (select 1 from watcher_private.watcher_settings where enabled)
+    and (exists (select 1 from watcher_private.watcher_settings where enabled)
+      or exists (select 1 from watcher_private.watcher_qa_accounts q
+        where q.user_id=(select auth.uid()) and q.expires_at>now()))
     and not exists (select 1 from watcher_private.watcher_accounts where user_id = (select auth.uid()) and deleted)
   then (select auth.uid()) else null end
 $$;
@@ -167,6 +178,7 @@ begin
       b.pointer->>'object_path'=o.name or (b.pointer->'part_paths') ? o.name or
       b.previous_pointer->>'object_path'=o.name or (b.previous_pointer->'part_paths') ? o.name)
   on conflict do nothing;
+  delete from watcher_private.watcher_qa_accounts where expires_at<=now();
   -- Match Odd's deletion-id retention; never drop a marker while ciphertext remains.
   delete from watcher_private.watcher_accounts a
   where a.deleted and a.deleted_at<now()-interval '90 days'
@@ -270,4 +282,12 @@ revoke all on function watcher_private.watcher_admit_object() from public,anon,a
 create trigger watcher_admit_object before insert on storage.objects for each row
   when (new.bucket_id='watcher-history') execute function watcher_private.watcher_admit_object();
 -- No client overwrite/delete policies. GC uses the Storage API, never DELETE FROM storage.objects.
+-- The shared project's canonical migration also records the app catalog entry.
+-- No OAuth clients, paywall flags or other app registrations are modified.
+do $$ begin
+  if exists(select 1 from public.apps where code='watcher' and name is distinct from 'Watcher') then
+    raise exception 'Existing Watcher catalog entry differs; inspect before registration';
+  end if;
+end $$;
+insert into public.apps(code,name) values('watcher','Watcher') on conflict(code) do nothing;
 commit;

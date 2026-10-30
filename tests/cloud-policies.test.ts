@@ -34,6 +34,7 @@ beforeAll(async () => {
     create table auth.users(id uuid primary key,email_confirmed_at timestamptz,is_anonymous boolean,deleted_at timestamptz,banned_until timestamptz);
     insert into auth.users(id,email_confirmed_at,is_anonymous) values('${alice}',now(),false),('${bob}',now(),false);
     insert into auth.sessions(id,user_id) values('30000000-0000-4000-8000-000000000001','${alice}'),('30000000-0000-4000-8000-000000000002','${bob}');
+    create table public.apps(code text primary key,name text);
     create schema private;
     create table private.unrelated_secret(id integer);
     grant usage on schema private to authenticated;
@@ -54,7 +55,17 @@ it('defaults to disabled and fails closed for wrong issuer, anonymous and OAuth 
   await asUser()
   expect((await db.query<{ owner: string | null }>('select watcher_private.watcher_owner() as owner')).rows[0]?.owner).toBeNull()
   await expect(db.query('select watcher_enable_backup()')).rejects.toThrow()
-  await db.exec('reset role; update watcher_private.watcher_settings set enabled=true')
+  await db.exec('reset role')
+  await db.query("insert into watcher_private.watcher_qa_accounts(user_id,expires_at) values($1,now()+interval '1 hour')", [alice])
+  await asUser(alice)
+  expect((await db.query<{ owner: string }>('select watcher_private.watcher_owner() as owner')).rows[0]?.owner).toBe(alice)
+  await asUser(bob)
+  expect((await db.query<{ owner: string | null }>('select watcher_private.watcher_owner() as owner')).rows[0]?.owner).toBeNull()
+  await expect(db.query("insert into watcher_private.watcher_qa_accounts(user_id,expires_at) values($1,now()+interval '1 hour')",[bob])).rejects.toThrow()
+  await db.exec("reset role; update watcher_private.watcher_qa_accounts set created_at=now()-interval '2 hours',expires_at=now()-interval '1 hour'")
+  await asUser(alice)
+  expect((await db.query<{ owner: string | null }>('select watcher_private.watcher_owner() as owner')).rows[0]?.owner).toBeNull()
+  await db.exec('reset role; delete from watcher_private.watcher_qa_accounts; update watcher_private.watcher_settings set enabled=true')
   for (const extra of [{ iss: 'https://other-project.example' }, { is_anonymous: true }, { client_id: 'unregistered' }, { role: 'service_role' }, { email: '' }, { session_id: 'revoked-or-unrecognized' }]) {
     await asUser(alice, extra)
     expect((await db.query<{ owner: string | null }>('select watcher_private.watcher_owner() as owner')).rows[0]?.owner).toBeNull()
