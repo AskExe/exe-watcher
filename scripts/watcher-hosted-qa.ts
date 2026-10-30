@@ -15,7 +15,7 @@ import type { BackupPointer } from '@odd-core/recovery/backup'
 const run = promisify(execFile)
 const ref = 'vjiexzktmduoguxvleiy'
 const checks: string[] = [], cleanupFailures: string[] = [], owners: string[] = []
-const requestFailures: Array<{ route: string; status: number; code?: string; hints?: string[] }> = []
+const requestFailures: Array<{ route: string; method: string; status: number; code?: string; hints?: string[] }> = []
 let failureClass: string | undefined
 let phase = 'preflight', directory = ''
 function check(condition: unknown, name: string): asserts condition {
@@ -39,9 +39,10 @@ const boundedFetch: typeof fetch = async (input, init) => {
         const text = JSON.stringify(body).toLowerCase()
         hints = ['permission denied', 'insufficient privilege', 'schema', 'function', 'column',
           'syntax', 'deadlock', 'duplicate', 'row-level security', 'trigger', 'read-only',
-          'watcher_private', 'auth', 'storage', '42501', '42703', '42883', '23505'].filter(x => text.includes(x))
+          'watcher_private', 'auth', 'storage', 'jwt', 'signature', 'expired', 'token', 'jws',
+          'new row', 'row level', 'operation', 'select', 'insert', '42501', '42703', '42883', '23505'].filter(x => text.includes(x))
       } catch {}
-      requestFailures.push({ route, status: response.status, ...(code ? { code } : {}), hints })
+      requestFailures.push({ route, method: ['GET','POST','PUT','DELETE'].includes(init?.method ?? 'GET') ? init?.method ?? 'GET' : 'other', status: response.status, ...(code ? { code } : {}), hints })
     }
     return response
   }
