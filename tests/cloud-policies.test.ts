@@ -19,7 +19,15 @@ async function objects(version: number, id = alice) {
   await asUser(id)
   await db.query('select watcher_enable_backup()')
   for (const name of [pointer(version, id).object_path, ...pointer(version, id).part_paths]) {
-    await db.query('insert into storage.objects(bucket_id,name) values($1,$2) on conflict do nothing', ['watcher-history', name])
+    // Actual Storage: check the user INSERT in a rolled-back transaction, then
+    // finalize the S3 upload under service_role with the authenticated owner.
+    await asUser(id)
+    await db.exec('begin')
+    await db.query('insert into storage.objects(bucket_id,name) values($1,$2) returning *', ['watcher-history', name])
+    await db.exec('rollback; reset role')
+    await db.query("select set_config('request.jwt.claims',$1,false)", [JSON.stringify({ role: 'service_role' })])
+    await db.exec('set role service_role')
+    await db.query('insert into storage.objects(bucket_id,name,owner,owner_id) values($1,$2,$3,$4) returning *', ['watcher-history', name,id,id])
   }
 }
 async function publish(value: unknown, expected: number) {
@@ -28,7 +36,7 @@ async function publish(value: unknown, expected: number) {
 beforeAll(async () => {
   db = new PGlite()
   await db.exec(`
-    create role anon; create role authenticated; create role service_role;
+    create role anon; create role authenticated; create role service_role bypassrls;
     create schema auth; create schema storage;
     create table auth.sessions(id uuid primary key,user_id uuid);
     create table auth.users(id uuid primary key,email_confirmed_at timestamptz,is_anonymous boolean,deleted_at timestamptz,banned_until timestamptz);
@@ -47,7 +55,7 @@ beforeAll(async () => {
     -- PL/pgSQL variable/column ambiguity in both upload admission and deletion.
     create table storage.objects(bucket_id text,name text,created_at timestamptz default now(),owner uuid,owner_id text,primary key(bucket_id,name));
     alter table storage.objects enable row level security;
-    grant select,insert,update,delete on storage.objects to anon,authenticated;
+    grant select,insert,update,delete on storage.objects to anon,authenticated,service_role;
   `)
   const migrations = new URL('../supabase/migrations/', import.meta.url)
   for (const file of (await readdir(migrations)).filter(x => x.endsWith('.sql')).sort())
@@ -122,6 +130,34 @@ it('keeps current and previous versions, queues older objects, and prevents queu
   expect((await db.query('select device_id from watcher_backups')).rows).toEqual([])
   await db.query('select watcher_enable_backup()')
   await expect(publish(pointer(3), 0)).rejects.toThrow('invalid immutable')
+})
+it('bounds trusted Storage finalization to consenting live owners, owned paths and quota', async () => {
+  await asUser(bob); await db.query('select watcher_enable_backup()')
+  async function finalize(name: string, owner = bob, ownerId = owner) {
+    await db.exec('reset role')
+    await db.query("select set_config('request.jwt.claims',$1,false)", [JSON.stringify({ role: 'service_role' })])
+    await db.exec('set role service_role')
+    return db.query('insert into storage.objects(bucket_id,name,owner,owner_id) values($1,$2,$3,$4)', ['watcher-history', name,owner,ownerId])
+  }
+  await expect(finalize(`watcher/${alice}/80001.blob`)).rejects.toThrow()
+  await expect(finalize(`watcher/${bob}/80001.blob`,bob,alice)).rejects.toThrow()
+  await asUser(bob); await db.query('select watcher_pause_backup()')
+  await expect(finalize(`watcher/${bob}/80001.blob`)).rejects.toThrow()
+  await asUser(bob); await db.query('select watcher_enable_backup()')
+  await db.exec('reset role; update watcher_private.watcher_settings set enabled=false')
+  await expect(finalize(`watcher/${bob}/80001.blob`)).rejects.toThrow()
+  await db.exec('reset role')
+  await db.query("insert into watcher_private.watcher_qa_accounts(user_id,expires_at) values($1,now()+interval '1 hour')",[bob])
+  const existing = Number((await db.query<{ count: string }>('select count(*)::text as count from storage.objects where bucket_id=$1 and name like $2',['watcher-history',`watcher/${bob}/%`])).rows[0]!.count)
+  const added: string[] = []
+  for (let i = existing; i < 100; i++) {
+    const name = `watcher/${bob}/${80001+i}.blob`
+    await finalize(name); added.push(name)
+  }
+  await expect(finalize(`watcher/${bob}/99999.blob`)).rejects.toThrow('quota')
+  await db.exec('reset role')
+  for (const name of added) await db.query('delete from storage.objects where bucket_id=$1 and name=$2',['watcher-history',name])
+  await db.exec('delete from watcher_private.watcher_qa_accounts; update watcher_private.watcher_settings set enabled=true')
 })
 it('tombstones a deleted account and refuses a stale signed-in device', async () => {
   await db.exec('reset role; set role service_role')

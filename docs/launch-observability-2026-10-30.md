@@ -43,6 +43,14 @@ structured newline escaping, rotation and symlink refusal. Trace timing now uses
 monotonic clock; serial writes prevent an older snapshot overwriting a newer one.
 These changes remain local support artifacts; no new network collection is added.
 
+After PR79's SQL correction was deployed, user admission succeeded but upload
+finalization still failed. The deployed Storage v1.80.2 source completes an upload
+with `asSuperUser()` after its rolled-back user permission check. Central PR80
+adds a trusted actual-service-role branch, bound to matching owner metadata,
+namespace, live verified owner, consent, deletion state, rollout/QA eligibility,
+account lock and quota. User RLS and immutable-object guards are unchanged.
+The SQL fixture now reproduces both Storage phases and tests those extra bounds.
+
 ## Runtime binding and receipts
 
 Read-only live binding: data.odd.community's Caddy mounts

@@ -1,6 +1,6 @@
 {
   "repository": "https://github.com/OddCommunity/odd-core-kits",
-  "revision": "97da4344a6a1679e98e839f9c2094860470f6720",
+  "revision": "84ebbd40d762455550a51b6542ed475e56817196",
   "files": {
     "supabase/migrations/20261029090001_watcher_private_history.sql": {
       "sourcePath": "supabase/migrations/20261029090001_watcher_private_history.sql",
@@ -13,6 +13,10 @@
     "supabase/migrations/20261030130001_watcher_storage_owner_qualification.sql": {
       "sourcePath": "supabase/migrations/20261030130001_watcher_storage_owner_qualification.sql",
       "sha256": "36d6185cf7102143fe49782d08f77fc0dfd009dc3837f9f97edffd76391bc85f"
+    },
+    "supabase/migrations/20261030140001_watcher_storage_finalization.sql": {
+      "sourcePath": "supabase/migrations/20261030140001_watcher_storage_finalization.sql",
+      "sha256": "4b79f5f2c7869c47e78420b24ee92b62924bb0a573fe277d3d553a1fb3b778c6"
     }
   }
 }
