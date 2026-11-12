@@ -45,21 +45,68 @@ describe('Odd sign-in and explicit cloud consent', () => {
   })
   it('stores session secrets only in the injected secure store and does not enable backup at sign-in', async () => {
     const x = await setup()
-    await x.account.run({ action: 'requestCode', email: x.user.email })
-    const result = await x.account.run({ action: 'verifyCode', email: x.user.email, code: '123456' })
+    await x.account.run({ action: 'requestCode', email: x.user.email, acceptTerms: true, acceptVerificationEmail: true })
+    const result = await x.account.run({
+      action: 'verifyCode', email: x.user.email, code: '123456', acceptEmailCommunications: false,
+    })
     expect(result).toMatchObject({ signedIn: true, backupEnabled: false })
     expect(x.values.get('session')).toContain('fixture-rotated-secret')
     expect(await readFile(join(x.directory, 'state.json'), 'utf8')).not.toContain('fixture-rotated-secret')
     expect(x.calls.every(url => !/rest|storage/.test(url))).toBe(true)
     await expect(x.account.run({ action: 'backup' })).rejects.toThrow('not available')
   })
-  it('requires separate Terms acknowledgement before requesting account creation', async () => {
+  it.each([false, true])('requires both agreements before requesting a code (sign up: %s)', async (createAccount) => {
     const x = await setup()
-    await expect(x.account.run({ action: 'requestCode', email: x.user.email, createAccount: true })).rejects.toThrow('Terms')
+    const request = { action: 'requestCode', email: x.user.email, createAccount }
+    await expect(x.account.run({ ...request, acceptVerificationEmail: true })).rejects.toThrow('Terms')
+    await expect(x.account.run({
+      ...request, acceptTerms: true, acceptEmailCommunications: true,
+    })).rejects.toThrow('verification code by email')
+    await expect(x.account.run({
+      ...request, email: 'invalid', acceptTerms: true, acceptVerificationEmail: true,
+    })).rejects.toThrow('valid email address')
     expect(x.calls).toEqual([])
-    await x.account.run({ action: 'requestCode', email: x.user.email, createAccount: true, acceptTerms: true })
-    const init = vi.mocked(x.fetcher).mock.calls[0]?.[1]
-    expect(JSON.parse(String(init?.body)).create_user).toBe(true)
+    await x.account.run({ ...request, email: ` ${x.user.email} `, acceptTerms: true, acceptVerificationEmail: true })
+    const body = JSON.parse(String(vi.mocked(x.fetcher).mock.calls[0]?.[1]?.body))
+    expect(body).toMatchObject({
+      email: x.user.email,
+      create_user: createAccount,
+      data: createAccount ? { terms_source: 'watcher', terms_accepted_at: expect.any(String) } : {},
+    })
+    expect(Object.keys(body.data)).toEqual(createAccount ? ['terms_accepted_at', 'terms_source'] : [])
+  })
+  it('writes an explicit email opt-in using the verified session', async () => {
+    const x = await setup()
+    x.rpcReplies.set('odd_set_marketing_consent', { status: 'ok', granted: true, policy_version: 'watcher-email-v1' })
+    await x.account.run({ action: 'requestCode', email: x.user.email, acceptTerms: true, acceptVerificationEmail: true })
+    expect(x.calls.some(url => url.includes('/rpc/'))).toBe(false)
+    const result = await x.account.run({
+      action: 'verifyCode', email: x.user.email, code: '123456', acceptEmailCommunications: true,
+    })
+    expect(result).toEqual({ signedIn: true, email: x.user.email, backupEnabled: false })
+    const consentCall = vi.mocked(x.fetcher).mock.calls.find(([url]) => String(url).endsWith('/rpc/odd_set_marketing_consent'))
+    expect(new Headers(consentCall?.[1]?.headers).get('authorization')).toBe('Bearer fixture-access-token')
+    expect(JSON.parse(String(consentCall?.[1]?.body))).toEqual({
+      p_granted: true, p_source: 'watcher', p_policy_version: 'watcher-email-v1',
+    })
+  })
+  it('keeps sign-in successful if the email preference cannot be saved', async () => {
+    const x = await setup()
+    x.rpcReplies.set('odd_set_marketing_consent', { status: 'invalid' })
+    const result = await x.account.run({
+      action: 'verifyCode', email: x.user.email, code: '123456', acceptEmailCommunications: true,
+    })
+    expect(result).toMatchObject({ signedIn: true, message: expect.stringContaining('couldn’t save your email preference') })
+    expect(x.values.has('session')).toBe(true)
+  })
+  it('does not write email preferences when code verification fails', async () => {
+    const x = await setup()
+    vi.mocked(x.fetcher).mockResolvedValueOnce(Response.json({ message: 'Expired code' }, { status: 400 }))
+    await expect(x.account.run({
+      action: 'verifyCode', email: x.user.email, code: '123456', acceptEmailCommunications: true,
+    })).rejects.toThrow('code expired')
+    expect(vi.mocked(x.fetcher).mock.calls.map(([url]) => new URL(String(url)).pathname)).toEqual(['/auth/v1/verify'])
+    expect(x.values.has('session')).toBe(false)
   })
   it('honors a durable pause even if an older operation saved enabled state afterward', async () => {
     const x = await setup()
@@ -79,9 +126,12 @@ describe('Odd sign-in and explicit cloud consent', () => {
     const x = await setup(), priorId = randomUUID()
     const original = JSON.stringify({ version: 1, userId: priorId, email: 'prior@example.test', refreshToken: 'prior-secret' })
     x.values.set('session', original)
-    const result = await x.account.run({ action: 'verifyCode', email: x.user.email, code: '123456' })
+    const result = await x.account.run({
+      action: 'verifyCode', email: x.user.email, code: '123456', acceptEmailCommunications: true,
+    })
     expect(result.accountSwitchRequired).toBe(true)
     expect(x.values.get('session')).toBe(original)
+    expect(x.calls.some(url => url.includes('/rpc/'))).toBe(false)
     expect((await x.local.read()).backupEnabled).toBe(false)
   })
   it('removes the local session and backup key even if remote sign-out is offline', async () => {

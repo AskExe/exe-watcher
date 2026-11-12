@@ -12,6 +12,8 @@ struct OddAccountRequest: Encodable, Sendable {
     var month: String? = nil
     var createAccount: Bool? = nil
     var acceptTerms: Bool? = nil
+    var acceptVerificationEmail: Bool? = nil
+    var acceptEmailCommunications: Bool? = nil
 }
 
 struct OddAccountReply: Decodable, Sendable {
@@ -63,11 +65,23 @@ enum OddAccountClient {
 
 @MainActor @Observable
 final class OddAccountModel {
+    private let runAccountRequest: (OddAccountRequest) async throws -> OddAccountReply
+
+    init(runAccountRequest: @escaping (OddAccountRequest) async throws -> OddAccountReply = OddAccountClient.run) {
+        self.runAccountRequest = runAccountRequest
+    }
+
     var isLayoutPreview = false
     static func layoutPreview(_ state: String) -> OddAccountModel {
         let model = OddAccountModel()
         model.isLayoutPreview = true
-        if state == "verification" { model.codeSent = true; model.email = "you@example.com" }
+        if state == "signup" { model.createAccount = true }
+        if state == "verification" {
+            model.email = "you@example.com"
+            model.acceptTerms = true
+            model.acceptVerificationEmail = true
+            model.codeSent = true
+        }
         if state == "recovery" {
             model.signedIn = true; model.backupAvailable = true; model.recoveryOpen = true
             model.email = "you@example.com"
@@ -77,11 +91,27 @@ final class OddAccountModel {
     var signedIn = false
     var backupAvailable = false
     var backupEnabled = false
-    var email = ""
+    var email = "" {
+        didSet {
+            guard email != oldValue else { return }
+            acceptVerificationEmail = false
+            acceptEmailCommunications = false
+            codeSent = false
+            code = ""
+            message = ""
+        }
+    }
     var code = ""
     var codeSent = false
-    var createAccount = false
+    var createAccount = false {
+        didSet {
+            guard createAccount != oldValue else { return }
+            restartSignIn()
+        }
+    }
     var acceptTerms = false
+    var acceptVerificationEmail = false
+    var acceptEmailCommunications = false
     var phrase = ""
     var generatedPhrase = ""
     var consent = false
@@ -94,38 +124,75 @@ final class OddAccountModel {
     var month = ""
     var lastBackupAt: String?
 
+    private var trimmedEmail: String { email.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var trimmedCode: String { code.trimmingCharacters(in: .whitespacesAndNewlines) }
+    var canRequestCode: Bool {
+        !signedIn && !busy && acceptTerms && acceptVerificationEmail &&
+            trimmedEmail.utf16.count <= 254 &&
+            trimmedEmail.range(of: #"^[^\s@]+@[^\s@]+\.[^\s@]+$"#, options: .regularExpression) != nil
+    }
+    var canVerifyCode: Bool {
+        !signedIn && !busy && codeSent && (6...10).contains(trimmedCode.count) &&
+            trimmedCode.allSatisfy { $0.isASCII && $0.isNumber }
+    }
+
+    func requestCode() async {
+        guard canRequestCode else { return }
+        await perform(.init(action: "requestCode", email: trimmedEmail, createAccount: createAccount,
+                            acceptTerms: acceptTerms, acceptVerificationEmail: acceptVerificationEmail))
+    }
+
+    func verifyCode() async {
+        guard canVerifyCode else { return }
+        await perform(.init(action: "verifyCode", email: trimmedEmail, code: trimmedCode,
+                            acceptEmailCommunications: acceptEmailCommunications))
+    }
+
+    func restartSignIn() {
+        codeSent = false
+        code = ""
+        acceptTerms = false
+        acceptVerificationEmail = false
+        acceptEmailCommunications = false
+        message = ""
+    }
+
     func perform(_ request: OddAccountRequest) async {
         guard !isLayoutPreview else { return }
         guard !busy else { return }
         busy = true; message = ""
         defer { busy = false }
         do {
-            let result = try await OddAccountClient.run(request)
+            let result = try await runAccountRequest(request)
             guard result.ok else { message = result.message ?? "Please try again."; return }
             if let value = result.signedIn { signedIn = value }
-            if let value = result.email { email = value }
+            if result.accountSwitchRequired != true, let value = result.email { email = value }
             if let value = result.backupAvailable { backupAvailable = value }
             if let value = result.backupEnabled { backupEnabled = value }
             if let value = result.lastBackupAt { lastBackupAt = value }
             if let value = result.devices { devices = value }
             if let value = result.history { history = value }
             message = result.message ?? ""
-            if request.action == "requestCode" { codeSent = true; message = "Enter the code sent to your Odd account email." }
+            if request.action == "requestCode" { codeSent = true; code = ""; message = "Enter the code sent to your Odd account email." }
             if request.action == "verifyCode" {
-                code = ""
-                if result.accountSwitchRequired == true { message = "This is a different Odd account. Sign out first, then request a new code. Your local history will stay here." }
-                else { codeSent = false; await refreshStatus() }
+                restartSignIn()
+                await refreshStatus()
+                message = result.accountSwitchRequired == true
+                    ? "This is a different Odd account. Sign out first, then request a new code. Your local history will stay here."
+                    : result.message ?? ""
             }
             if request.action == "recoveryPhrase" { recoveryOpen = true; generatedPhrase = result.phrase ?? "" }
             if request.action == "enable" { clearPhrase(); recoveryOpen = false }
             if request.action == "logout" || request.action == "delete" { history = nil; devices = []; clearPhrase(); recoveryOpen = false }
+            if request.action == "logout" { createAccount = false; restartSignIn() }
         } catch {
             message = "Watcher couldn’t complete the request. Check your connection and try again. Your saved history is safe."
         }
     }
     private func refreshStatus() async {
-        guard let reply = try? await OddAccountClient.run(.init(action: "status")), reply.ok else { return }
+        guard let reply = try? await runAccountRequest(.init(action: "status")), reply.ok else { return }
         signedIn = reply.signedIn ?? false; backupAvailable = reply.backupAvailable ?? false
+        if let email = reply.email { self.email = email }
         backupEnabled = reply.backupEnabled ?? false; lastBackupAt = reply.lastBackupAt
     }
     func clearPhrase() { phrase = ""; generatedPhrase = ""; consent = false }
@@ -149,8 +216,8 @@ enum OddAccountWindow {
         if controller == nil {
             let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: 680),
                                   styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
-            window.title = "Odd Community · Watcher"
-            window.backgroundColor = NSColor(OddAccountBrand.background)
+            window.title = "Watcher by EXE"
+            window.backgroundColor = NSColor(Theme.warmSurfaceDark)
             window.contentMinSize = NSSize(width: 500, height: 580)
             window.contentView = NSHostingView(rootView: OddAccountView(model: layoutPreview.map(OddAccountModel.layoutPreview) ?? OddAccountModel()))
             window.isReleasedWhenClosed = false
@@ -173,42 +240,35 @@ struct OddAccountView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
                 brandHeader
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Your AI history,\nin one place.").font(OddAccountBrand.display(30))
-                    Text("Keep a private backup of your AI spending and agent activity across your Macs.")
-                        .foregroundStyle(OddAccountBrand.muted)
-                }
                 VStack(alignment: .leading, spacing: 14) {
-                    Rectangle().fill(OddAccountBrand.orange).frame(height: 2)
-                    HStack {
-                        Text(model.signedIn ? "YOUR ACCOUNT" : "ONE-TIME EMAIL CODE")
-                            .font(OddAccountBrand.bold(10)).tracking(1.2)
-                        Spacer()
-                        Label("Private to you", systemImage: "lock.shield").font(OddAccountBrand.body(12))
-                    }.foregroundStyle(OddAccountBrand.muted)
-                    if model.signedIn { account } else { signIn }
-                    if !model.message.isEmpty { Text(model.message).font(OddAccountBrand.body(13)).textSelection(.enabled).accessibilityIdentifier("odd-account-message") }
+                    if model.signedIn {
+                        Text("Your account").font(.system(size: 24, weight: .semibold, design: .rounded))
+                        account
+                    } else {
+                        signIn
+                    }
+                    if !model.message.isEmpty { Text(model.message).font(.system(size: 13)).textSelection(.enabled).accessibilityIdentifier("odd-account-message") }
                     if model.busy { ProgressView().controlSize(.small) }
                 }
                 Divider()
                 DisclosureGroup(isExpanded: $historyExpanded) {
                     dashboard.padding(.top, 14)
-                } label: { Text("Private spending & activity").font(OddAccountBrand.bold(14)) }
+                } label: { Text("Private spending & activity").font(.system(size: 14, weight: .semibold)) }
                 Text("Local tracking works without an account. Product usage statistics and error diagnostics are separate settings. Watcher never publishes your spending or activity to your profile.")
-                    .font(OddAccountBrand.body(12)).foregroundStyle(OddAccountBrand.muted)
+                    .font(.system(size: 12)).foregroundStyle(.secondary)
             }.frame(maxWidth: 620, alignment: .leading)
                 .padding(24)
                 .frame(maxWidth: .infinity)
         }
         .background {
-            OddAccountBrand.background.overlay(alignment: .topLeading) {
-                RadialGradient(colors: [OddAccountBrand.glow, .clear], center: .topLeading, startRadius: 0, endRadius: 600)
+            Theme.warmSurfaceDark.overlay(alignment: .topLeading) {
+                RadialGradient(colors: [Theme.brandEmberDeep.opacity(0.35), .clear], center: .topLeading, startRadius: 0, endRadius: 600)
             }.ignoresSafeArea()
         }
-        .font(OddAccountBrand.body())
-        .foregroundStyle(OddAccountBrand.ink)
-        .tint(OddAccountBrand.link)
-        .buttonStyle(OddAccountButtonStyle())
+        .font(.system(size: 14))
+        .foregroundStyle(.primary)
+        .tint(Theme.brandAccent)
+        .buttonStyle(WatcherAccountButtonStyle())
         .preferredColorScheme(.dark)
         .frame(minWidth: 500, minHeight: 580)
         .disabled(model.busy)
@@ -227,14 +287,15 @@ struct OddAccountView: View {
 
     private var brandHeader: some View {
         HStack(spacing: 10) {
-            if let mark = OddAccountBrand.mark {
-                Image(nsImage: mark).resizable().interpolation(.high).scaledToFit()
-                    .frame(width: 40, height: 40).accessibilityHidden(true)
-            }
-            VStack(alignment: .leading, spacing: 3) {
-                Text("Odd Community").font(OddAccountBrand.heading(22))
-                Text("ONE ACCOUNT. ALL ODD APPS.").font(OddAccountBrand.bold(10)).tracking(1.2)
-                    .foregroundStyle(OddAccountBrand.muted)
+            AnimatedOwl(size: 42).accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("WATCHER")
+                    .font(.custom("Epilogue", size: 19).weight(.bold))
+                    .tracking(2)
+                    .foregroundStyle(Theme.brandWordmark)
+                Text("by EXE")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Theme.brandAccent)
             }
             Spacer()
         }
@@ -242,60 +303,73 @@ struct OddAccountView: View {
 
     private var signIn: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(model.codeSent ? "You’re almost here." : "Make yourself at home.").font(OddAccountBrand.heading(21))
-            TextField("Email address", text: $model.email).textFieldStyle(OddAccountFieldStyle())
-                .accessibilityIdentifier("odd-email")
-                .disabled(model.codeSent)
-            if !model.codeSent { Toggle("Create a new Odd account", isOn: $model.createAccount) }
-            if model.createAccount && !model.codeSent {
-                Toggle("I agree to the Odd Terms and have read the Privacy Policy", isOn: $model.acceptTerms)
-                HStack {
-                    Link("Terms", destination: URL(string: "https://odd.community/terms")!)
-                    Link("Privacy Policy", destination: URL(string: "https://odd.community/privacy")!)
-                }.font(OddAccountBrand.body(12)).buttonStyle(.plain).foregroundStyle(OddAccountBrand.link)
-            }
+            Text(model.codeSent ? "Verify your email" : "Sign In or Sign Up")
+                .font(.system(size: 24, weight: .semibold, design: .rounded))
             if model.codeSent {
-                SecureField("Email code", text: $model.code).textFieldStyle(OddAccountFieldStyle()).accessibilityIdentifier("odd-code")
-                Button { Task { await model.perform(.init(action: "verifyCode", email: model.email, code: model.code)) } } label: {
-                    HStack { Text("Verify and continue"); Spacer(); Image(systemName: "arrow.up.right") }
+                Text(model.email.trimmingCharacters(in: .whitespacesAndNewlines))
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                SecureField("Email code", text: $model.code).textFieldStyle(WatcherAccountFieldStyle()).accessibilityIdentifier("odd-code")
+                Button { Task { await model.verifyCode() } } label: {
+                    HStack { Text(model.createAccount ? "Verify and Sign Up" : "Verify and Sign In"); Spacer(); Image(systemName: "arrow.up.right") }
                 }
-                .buttonStyle(OddAccountButtonStyle(primary: true))
-                .disabled(!(6...10).contains(model.code.count))
+                .buttonStyle(WatcherAccountButtonStyle(primary: true))
+                .keyboardShortcut(.defaultAction)
+                .disabled(!model.canVerifyCode)
                 HStack {
-                    Button("Send another code") { Task { await requestCode() } }
+                    Button("Send another code") { Task { await model.requestCode() } }
+                        .disabled(!model.canRequestCode)
                     Spacer()
-                    Button("Use another email") { model.codeSent = false; model.code = ""; model.message = "" }
-                }.font(OddAccountBrand.body(12)).buttonStyle(.plain).foregroundStyle(OddAccountBrand.link)
+                    Button("Use another email") { model.restartSignIn() }
+                }.font(.system(size: 12)).buttonStyle(.plain).foregroundStyle(Theme.brandAccent)
             } else {
-                Button { Task { await requestCode() } } label: {
-                    HStack { Text("Email me a code"); Spacer(); Image(systemName: "arrow.up.right") }
+                Text("Use your Odd account in Watcher.").foregroundStyle(.secondary)
+                Picker("Account action", selection: $model.createAccount) {
+                    Text("Sign In").tag(false)
+                    Text("Sign Up").tag(true)
                 }
-                    .buttonStyle(OddAccountButtonStyle(primary: true))
-                    .disabled(model.email.isEmpty || (model.createAccount && !model.acceptTerms))
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                TextField("Email address", text: $model.email).textFieldStyle(WatcherAccountFieldStyle())
+                    .accessibilityIdentifier("odd-email")
+                Toggle("I agree to the Odd Community Terms of Use and have read the Privacy Policy", isOn: $model.acceptTerms)
+                    .accessibilityIdentifier("odd-accept-terms")
+                HStack {
+                    Link("Terms of Use", destination: URL(string: "https://odd.community/terms")!)
+                    Link("Privacy Policy", destination: URL(string: "https://odd.community/privacy")!)
+                }.font(.system(size: 12)).buttonStyle(.plain).foregroundStyle(Theme.brandAccent)
+                Toggle("I agree to receive a verification code by email from Odd Community.", isOn: $model.acceptVerificationEmail)
+                    .accessibilityIdentifier("odd-accept-verification-email")
+                Toggle("Email me product updates, marketing, and other messages from Odd Community and Exe AI.", isOn: $model.acceptEmailCommunications)
+                    .accessibilityIdentifier("odd-accept-email-communications")
+                Text("Optional. Manage email preferences in your Odd account.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                Button { Task { await model.requestCode() } } label: {
+                    HStack { Text("Send verification code"); Spacer(); Image(systemName: "arrow.up.right") }
+                }
+                .buttonStyle(WatcherAccountButtonStyle(primary: true))
+                .keyboardShortcut(.defaultAction)
+                .disabled(!model.canRequestCode)
             }
             Text("Signing in does not upload history or enable backup.")
-                .font(OddAccountBrand.body(12)).foregroundStyle(OddAccountBrand.muted)
+                .font(.system(size: 12)).foregroundStyle(.secondary)
         }
-    }
-
-    private func requestCode() async {
-        await model.perform(.init(action: "requestCode", email: model.email,
-                                  createAccount: model.createAccount, acceptTerms: model.acceptTerms))
     }
 
     private var account: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .top) {
-                Text(model.email).font(OddAccountBrand.bold(15))
+                Text(model.email).font(.system(size: 15, weight: .semibold))
                     .lineLimit(2).truncationMode(.middle).textSelection(.enabled)
                 Spacer()
                 Button("Sign out") { Task { await model.perform(.init(action: "logout")) } }
             }
             if !model.backupAvailable {
-                Text("Cloud backup isn’t available in this build yet. Your local history is available below.").foregroundStyle(OddAccountBrand.muted)
+                Text("Cloud backup isn’t available in this build yet. Your local history is available below.").foregroundStyle(.secondary)
             } else if model.backupEnabled {
                 Label("Encrypted cloud backup enabled", systemImage: "checkmark.shield")
-                if let at = model.lastBackupAt { Text("Last completed backup: \(at)").font(OddAccountBrand.body(12)).foregroundStyle(OddAccountBrand.muted) }
+                if let at = model.lastBackupAt { Text("Last completed backup: \(at)").font(.system(size: 12)).foregroundStyle(.secondary) }
                 ViewThatFits(in: .horizontal) {
                     HStack(spacing: 10) { backupButtons }
                     VStack(alignment: .leading, spacing: 10) { backupButtons }
@@ -309,9 +383,9 @@ struct OddAccountView: View {
                 Button("Delete Watcher cloud history…", role: .destructive) { confirmDelete = true }
             }
             HStack {
-                Link("Manage Odd account", destination: URL(string: "https://odd.community/account")!)
+                Link("Manage Odd account & email preferences", destination: URL(string: "https://odd.community/account")!)
                 Link("Delete Odd account…", destination: URL(string: "https://odd.community/account/delete")!)
-            }.font(OddAccountBrand.body(12)).buttonStyle(.plain).foregroundStyle(OddAccountBrand.link)
+            }.font(.system(size: 12)).buttonStyle(.plain).foregroundStyle(Theme.brandAccent)
         }
     }
 
@@ -323,19 +397,19 @@ struct OddAccountView: View {
 
     private var recovery: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Private backup").font(OddAccountBrand.heading(21))
+            Text("Private backup").font(.system(size: 21, weight: .semibold, design: .rounded))
             Text("Saves daily spending estimates, provider/token totals and estimated AI running time. No prompts, code, project names, file paths or credentials. History is encrypted on this Mac before upload; our servers cannot read it.")
-                .font(OddAccountBrand.body(14))
+                .font(.system(size: 14))
             if !model.generatedPhrase.isEmpty {
-                Text("Save your new Odd recovery phrase privately. Use this same phrase in your other Odd apps.").font(OddAccountBrand.bold(14))
+                Text("Save your new Odd recovery phrase privately. Use this same phrase in your other Odd apps.").font(.system(size: 14, weight: .semibold))
                 Text(model.generatedPhrase).font(.system(.body, design: .monospaced)).textSelection(.enabled)
             }
-            SecureField("Your 24-word Odd recovery phrase", text: $model.phrase).textFieldStyle(OddAccountFieldStyle())
+            SecureField("Your 24-word Odd recovery phrase", text: $model.phrase).textFieldStyle(WatcherAccountFieldStyle())
             Toggle("Enable encrypted backup of my Watcher history", isOn: $model.consent)
             HStack {
                 Button("Enable private backup") {
                     Task { await model.perform(.init(action: "enable", phrase: model.phrase, confirm: model.consent)) }
-                }.buttonStyle(OddAccountButtonStyle(primary: true))
+                }.buttonStyle(WatcherAccountButtonStyle(primary: true))
                     .disabled(!model.consent || model.phrase.split(separator: " ").count != 24)
                 Button("Cancel") { model.clearPhrase(); model.recoveryOpen = false }
             }
@@ -348,25 +422,25 @@ struct OddAccountView: View {
                 Text("This Mac").tag("local")
                 ForEach(model.devices) { device in Text("Device \(device.device_id.prefix(8)) · \(device.updated_at.prefix(10))").tag(device.device_id) }
             }
-            Text("Month (optional)").font(OddAccountBrand.bold(12))
+            Text("Month (optional)").font(.system(size: 12, weight: .semibold))
             HStack(spacing: 10) {
-                TextField("YYYY-MM · blank for all time", text: $model.month).textFieldStyle(OddAccountFieldStyle())
+                TextField("YYYY-MM · blank for all time", text: $model.month).textFieldStyle(WatcherAccountFieldStyle())
                 Button("View history") { Task { await model.loadHistory() } }
             }
             if let history = model.history {
-                Text(history.apiEquivalentUSD, format: .currency(code: "USD")).font(OddAccountBrand.bold(36))
-                Text("Recorded API-equivalent cost · \(history.calls) calls").foregroundStyle(OddAccountBrand.muted)
+                Text(history.apiEquivalentUSD, format: .currency(code: "USD")).font(.system(size: 36, weight: .semibold))
+                Text("Recorded API-equivalent cost · \(history.calls) calls").foregroundStyle(.secondary)
                 ForEach(history.providers) { provider in
                     HStack { Text(provider.provider); Spacer(); Text(provider.apiEquivalentUSD, format: .currency(code: "USD")) }
                 }
                 if let ms = history.timing?.aiRunningMs {
-                    Text("AI running time: \(ms / 3_600_000, specifier: "%.1f") hours").font(OddAccountBrand.heading(21))
-                    Text("Partial timing coverage; includes estimates. This is agent runtime, not human time saved.").font(OddAccountBrand.body(12)).foregroundStyle(OddAccountBrand.muted)
+                    Text("AI running time: \(ms / 3_600_000, specifier: "%.1f") hours").font(.system(size: 21, weight: .semibold, design: .rounded))
+                    Text("Partial timing coverage; includes estimates. This is agent runtime, not human time saved.").font(.system(size: 12)).foregroundStyle(.secondary)
                 }
-                if history.partial { Text("Some dates or providers have incomplete coverage.").font(OddAccountBrand.body(12)).foregroundStyle(OddAccountBrand.muted) }
+                if history.partial { Text("Some dates or providers have incomplete coverage.").font(.system(size: 12)).foregroundStyle(.secondary) }
             }
             Text("Costs are estimates, not invoices. Device histories stay separate so copied logs are not counted twice. Restored views preserve your current local logs and costs.")
-                .font(OddAccountBrand.body(12)).foregroundStyle(OddAccountBrand.muted)
+                .font(.system(size: 12)).foregroundStyle(.secondary)
         }
     }
 }

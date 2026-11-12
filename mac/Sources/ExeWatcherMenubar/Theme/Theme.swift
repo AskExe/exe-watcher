@@ -5,6 +5,7 @@ import SwiftUI
 enum Theme {
     // Brand accent — Exe Gold (#F5D76E)
     static let brandAccent       = Color(red: 0xF5/255.0, green: 0xD7/255.0, blue: 0x6E/255.0)
+    static let brandWordmark     = Color(red: 0xD4/255.0, green: 0x61/255.0, blue: 0x9C/255.0)
     // Hover / lighter gold (#FADF85)
     static let brandAccentDark   = Color(red: 0xFA/255.0, green: 0xDF/255.0, blue: 0x85/255.0)
     // Aura purple for depth/glow (#6B4C9A)

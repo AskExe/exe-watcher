@@ -285,7 +285,7 @@ private struct Header: View {
                 AnimatedOwl(size: 28, color: Theme.brandAccent)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("WATCHER")
-                    .foregroundStyle(Color(red: 0xD4/255.0, green: 0x61/255.0, blue: 0x9C/255.0))
+                    .foregroundStyle(Theme.brandWordmark)
                     .font(.custom("Epilogue", size: 14).weight(.bold))
                     .tracking(2)
                     Text("by EXE")

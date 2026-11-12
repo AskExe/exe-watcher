@@ -14,11 +14,25 @@ import { loadDailyCache } from '../daily-cache.js'
 import { readTimeIndex } from '../time-index.js'
 import { summarizeTime, TIME_HISTORY_START } from '../time-tracking.js'
 
-export type AccountRequest = { action: string; email?: string; code?: string; phrase?: string; confirm?: boolean; deviceId?: string; month?: string; createAccount?: boolean; acceptTerms?: boolean }
+export type AccountRequest = {
+  action: string
+  email?: string
+  code?: string
+  phrase?: string
+  confirm?: boolean
+  deviceId?: string
+  month?: string
+  createAccount?: boolean
+  acceptTerms?: boolean
+  acceptVerificationEmail?: boolean
+  acceptEmailCommunications?: boolean
+}
 type SavedSession = { version: 1; userId: string; refreshToken: string; email: string }
 type SavedKey = { version: 1; accountId: string; vaultId: string; revision: number; key: string }
 export type CloudDeployment = { authUrl: string; authPublishableKey: string; dataUrl: string | null; dataPublishableKey: string | null; enabled: boolean }
 const SERVICE_UNAVAILABLE = 'Cloud backup is not available in this build yet. Local Watcher tracking still works.'
+// This version identifies the exact email consent wording shown by Watcher.
+const EMAIL_CONSENT_POLICY_VERSION = 'watcher-email-v1'
 
 /** Every operation is serialized by the caller's account lock; SDK sessions never persist to disk. */
 export class WatcherAccount {
@@ -113,9 +127,11 @@ export class WatcherAccount {
     }
     if (request.action === 'localDashboard') return { history: summarizeSnapshot(await this.capture(state.deviceId), request.month), private: true }
     if (request.action === 'requestCode') {
-      if (typeof request.email !== 'string' || request.email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(request.email)) throw new CloudError('Enter a valid email address.')
-      if (request.createAccount === true && request.acceptTerms !== true) throw new CloudError('Accept the Odd Terms and read the Privacy Policy before creating an account.')
-      const { error } = await this.auth.auth.signInWithOtp({ email: request.email.trim(), options: {
+      const email = typeof request.email === 'string' ? request.email.trim() : ''
+      if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new CloudError('Enter a valid email address.')
+      if (request.acceptTerms !== true) throw new CloudError('Accept the Odd Community Terms of Use and read the Privacy Policy to continue.')
+      if (request.acceptVerificationEmail !== true) throw new CloudError('Agree to receive a verification code by email to continue.')
+      const { error } = await this.auth.auth.signInWithOtp({ email, options: {
         shouldCreateUser: request.createAccount === true,
         ...(request.createAccount === true ? { data: { terms_accepted_at: new Date().toISOString(), terms_source: 'watcher' } } : {}),
       } })
@@ -136,7 +152,19 @@ export class WatcherAccount {
         state.accountId = data.session.user.id; state.backupEnabled = false; delete state.lastBackupAt
         await this.local.save(state)
       }
-      return { signedIn: true, email: data.session.user.email, backupEnabled: state.backupEnabled }
+      const result = { signedIn: true, email: data.session.user.email, backupEnabled: state.backupEnabled }
+      if (request.acceptEmailCommunications !== true) return result
+
+      const consent = await this.auth.rpc('odd_set_marketing_consent', {
+        p_granted: true,
+        p_source: 'watcher',
+        p_policy_version: EMAIL_CONSENT_POLICY_VERSION,
+      })
+      if (consent.error || consent.data?.status !== 'ok' || consent.data.granted !== true ||
+          consent.data.policy_version !== EMAIL_CONSENT_POLICY_VERSION) {
+        return { ...result, message: 'Watcher couldn’t save your email preference. You can update it from your Odd account.' }
+      }
+      return result
     }
     if (request.action === 'status') {
       const saved = await this.saved()
