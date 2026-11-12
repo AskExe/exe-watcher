@@ -58,9 +58,10 @@ fingerprinted for preservation; no Watcher production DDL has been applied.
 - Settings → **Odd account & private history…**. Local tracking and history are
   available to guests. **Sign In** and **Sign Up** verify an email code in Watcher.
   Both require the Terms of Use and Privacy Policy acknowledgement and separate
-  permission for the verification email. Updates, marketing and messages have
-  their own optional checkbox. Resends reuse verification permission during the
-  same attempt. Changing the address resets both email choices. Auth uses the
+  permission for the verification email. The two required boxes start checked
+  and the send button confirms them. The optional marketing checkbox starts
+  unchecked and resets when the address changes. Resends reuse verification
+  permission during the same attempt. Auth uses the
   existing central public publishable key.
 - Refresh credentials and account-scoped backup keys use a native Keychain broker,
   with values in stdin, never argv. Account commands are excluded from analytics;

@@ -1,8 +1,11 @@
 # Changelog
 
-## 0.2.74 (2026-10-29)
+## 0.2.74 (2026-11-12)
 
-- Add optional Odd email-code sign-in and a private local spending-history view.
+- Sign in or create an Odd account with an email code in the Watcher app. The
+  required confirmations start selected. Email updates from Odd Community and
+  Exe AI are optional.
+- Add a private local spending-history view.
 - Prepare encrypted history backup in the existing Odd Supabase project with scoped storage, owner isolation, retention and account cleanup. Rollout stays disabled until live qualification and protected cleanup are ready; signing in alone never uploads history.
 - Keep account credentials in the Mac Keychain and account activity outside product telemetry.
 

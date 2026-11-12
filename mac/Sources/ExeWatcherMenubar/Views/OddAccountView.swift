@@ -78,8 +78,6 @@ final class OddAccountModel {
         if state == "signup" { model.createAccount = true }
         if state == "verification" {
             model.email = "you@example.com"
-            model.acceptTerms = true
-            model.acceptVerificationEmail = true
             model.codeSent = true
         }
         if state == "recovery" {
@@ -94,7 +92,6 @@ final class OddAccountModel {
     var email = "" {
         didSet {
             guard email != oldValue else { return }
-            acceptVerificationEmail = false
             acceptEmailCommunications = false
             codeSent = false
             code = ""
@@ -109,8 +106,8 @@ final class OddAccountModel {
             restartSignIn()
         }
     }
-    var acceptTerms = false
-    var acceptVerificationEmail = false
+    var acceptTerms = true
+    var acceptVerificationEmail = true
     var acceptEmailCommunications = false
     var phrase = ""
     var generatedPhrase = ""
@@ -151,8 +148,8 @@ final class OddAccountModel {
     func restartSignIn() {
         codeSent = false
         code = ""
-        acceptTerms = false
-        acceptVerificationEmail = false
+        acceptTerms = true
+        acceptVerificationEmail = true
         acceptEmailCommunications = false
         message = ""
     }
@@ -346,7 +343,7 @@ struct OddAccountView: View {
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
                 Button { Task { await model.requestCode() } } label: {
-                    HStack { Text("Send verification code"); Spacer(); Image(systemName: "arrow.up.right") }
+                    HStack { Text("Agree and send verification code"); Spacer(); Image(systemName: "arrow.up.right") }
                 }
                 .buttonStyle(WatcherAccountButtonStyle(primary: true))
                 .keyboardShortcut(.defaultAction)

@@ -41,13 +41,12 @@ struct OddAccountTests {
         }
         model.createAccount = createAccount
         model.email = "  person@example.test  "
-        #expect(!model.acceptTerms)
-        #expect(!model.acceptVerificationEmail)
+        #expect(model.acceptTerms)
+        #expect(model.acceptVerificationEmail)
         #expect(!model.acceptEmailCommunications)
-        #expect(!model.canRequestCode)
-        await model.requestCode()
+        #expect(model.canRequestCode)
 
-        model.acceptTerms = true
+        model.acceptVerificationEmail = false
         await model.requestCode()
         model.acceptTerms = false
         model.acceptVerificationEmail = true
@@ -56,8 +55,6 @@ struct OddAccountTests {
 
         model.acceptTerms = true
         model.email = "invalid"
-        #expect(!model.acceptVerificationEmail)
-        model.acceptVerificationEmail = true
         #expect(!model.canRequestCode)
         await model.requestCode()
         #expect(requests.isEmpty)
@@ -98,31 +95,29 @@ struct OddAccountTests {
     }
 
     @MainActor @Test
-    func verificationConsentIsClearedWhenChangingEmailOrStartingOver() async {
+    func changingEmailOrStartingOverClearsTheCodeAndMarketingChoice() async {
         let model = OddAccountModel { _ in OddAccountReply(ok: true) }
         model.email = "first@example.test"
-        model.acceptTerms = true
-        model.acceptVerificationEmail = true
         model.acceptEmailCommunications = true
         await model.requestCode()
         model.code = "123456"
 
         model.email = "second@example.test"
-        #expect(!model.acceptVerificationEmail)
+        #expect(model.acceptVerificationEmail)
         #expect(!model.acceptEmailCommunications)
         #expect(!model.codeSent)
         #expect(model.code.isEmpty)
-        #expect(!model.canRequestCode)
+        #expect(!model.canVerifyCode)
 
         model.acceptVerificationEmail = true
         model.acceptEmailCommunications = true
         await model.requestCode()
         model.restartSignIn()
-        #expect(!model.acceptTerms)
-        #expect(!model.acceptVerificationEmail)
+        #expect(model.acceptTerms)
+        #expect(model.acceptVerificationEmail)
         #expect(!model.acceptEmailCommunications)
         #expect(!model.codeSent)
-        #expect(!model.canRequestCode)
+        #expect(!model.canVerifyCode)
     }
 
     @MainActor @Test
