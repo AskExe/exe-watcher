@@ -77,7 +77,7 @@ describe('Odd sign-in and explicit cloud consent', () => {
   })
   it('writes an explicit email opt-in using the verified session', async () => {
     const x = await setup()
-    x.rpcReplies.set('odd_set_marketing_consent', { status: 'ok', granted: true, policy_version: 'watcher-email-v1' })
+    x.rpcReplies.set('odd_set_marketing_consent', { status: 'ok', granted: true, policy_version: 'watcher-email-v2' })
     await x.account.run({ action: 'requestCode', email: x.user.email, acceptTerms: true, acceptVerificationEmail: true })
     expect(x.calls.some(url => url.includes('/rpc/'))).toBe(false)
     const result = await x.account.run({
@@ -87,7 +87,7 @@ describe('Odd sign-in and explicit cloud consent', () => {
     const consentCall = vi.mocked(x.fetcher).mock.calls.find(([url]) => String(url).endsWith('/rpc/odd_set_marketing_consent'))
     expect(new Headers(consentCall?.[1]?.headers).get('authorization')).toBe('Bearer fixture-access-token')
     expect(JSON.parse(String(consentCall?.[1]?.body))).toEqual({
-      p_granted: true, p_source: 'watcher', p_policy_version: 'watcher-email-v1',
+      p_granted: true, p_source: 'watcher', p_policy_version: 'watcher-email-v2',
     })
   })
   it('keeps sign-in successful if the email preference cannot be saved', async () => {

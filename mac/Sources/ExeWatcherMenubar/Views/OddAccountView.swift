@@ -337,9 +337,11 @@ struct OddAccountView: View {
                 }.font(.system(size: 12)).buttonStyle(.plain).foregroundStyle(Theme.brandAccent)
                 Toggle("I agree to receive a verification code by email from Odd Community.", isOn: $model.acceptVerificationEmail)
                     .accessibilityIdentifier("odd-accept-verification-email")
-                Toggle("Email me product updates, marketing, and other messages from Odd Community and Exe AI.", isOn: $model.acceptEmailCommunications)
-                    .accessibilityIdentifier("odd-accept-email-communications")
-                Text("Optional. Manage email preferences in your Odd account.")
+                Toggle(isOn: $model.acceptEmailCommunications) {
+                    Text("Important Messages from Odd Community for Product Updates and Exclusive Member Access.").bold()
+                }
+                .accessibilityIdentifier("odd-accept-email-communications")
+                Text("Optional marketing emails. Unsubscribe anytime.")
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
                 Button { Task { await model.requestCode() } } label: {

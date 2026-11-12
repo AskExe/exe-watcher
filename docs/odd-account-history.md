@@ -4,9 +4,10 @@
 
 The Watcher branch `codex/watcher-native-sign-in` applies the Hansel handoff on
 top of merged main `c7f3d56`. The native account window uses the Watcher owl,
-wordmark and palette. The optional updates checkbox covers Odd Community and
-Exe AI email. After verification, Watcher saves an explicit opt-in with the
-existing Odd consent RPC, source `watcher` and policy version `watcher-email-v1`.
+wordmark and palette. The optional email subscription covers product updates
+and exclusive member access from Odd Community. After verification, Watcher
+saves an explicit opt-in with the existing Odd consent RPC, source `watcher`
+and policy version `watcher-email-v2`.
 Bump the version when the opt-in copy changes. People can change their preference
 in their Odd account settings. Local verification used fixtures. This change is
 unreleased. Native checks and Node integration logs are at
