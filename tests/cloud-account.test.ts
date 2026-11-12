@@ -75,6 +75,24 @@ describe('Odd sign-in and explicit cloud consent', () => {
     })
     expect(Object.keys(body.data)).toEqual(createAccount ? ['terms_accepted_at', 'terms_source'] : [])
   })
+  it('uses the same normalized email for code delivery and verification', async () => {
+    const x = await setup(), email = `  ${x.user.email}  `
+    await x.account.run({ action: 'requestCode', email, acceptTerms: true, acceptVerificationEmail: true })
+    await x.account.run({ action: 'verifyCode', email, code: ' 123456 ' })
+    const requests = vi.mocked(x.fetcher).mock.calls.filter(call => /\/(otp|verify)/.test(String(call[0])))
+    expect(requests).toHaveLength(2)
+    for (const request of requests) expect(JSON.parse(String(request[1]?.body)).email).toBe(x.user.email)
+  })
+  it('refreshes and revokes the current session on sign-out', async () => {
+    const x = await setup()
+    await x.account.run({ action: 'verifyCode', email: x.user.email, code: '123456' })
+    x.calls.length = 0
+    await expect(x.account.run({ action: 'logout' })).resolves.toMatchObject({ signedIn: false, remoteRevoked: true })
+    expect(x.calls.some(url => url.includes('/token'))).toBe(true)
+    expect(x.calls.some(url => url.includes('/user'))).toBe(true)
+    expect(x.calls.some(url => url.includes('/logout?scope=local'))).toBe(true)
+    expect(x.values.size).toBe(0)
+  })
   it('writes an explicit email opt-in using the verified session', async () => {
     const x = await setup()
     x.rpcReplies.set('odd_set_marketing_consent', { status: 'ok', granted: true, policy_version: 'watcher-email-v2' })

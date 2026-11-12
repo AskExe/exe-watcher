@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.75 (2026-11-12)
+
+- Normalize the Odd account email during code verification and cover successful session refresh and revocation on sign-out.
+- Keep unrelated environment secrets out of the native updater's shell arguments.
+- Require paired Mac/npm releases to record the exact source revision and zero untracked source files before reusing or publishing artifacts.
+- Make period controls native accessible buttons and run UI smoke tests against an exact binary with isolated preview data.
+
 ## 0.2.74 (2026-11-12)
 
 - Sign in or create an Odd account with an email code in the Watcher app. The
