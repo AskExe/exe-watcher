@@ -32,7 +32,7 @@ type SavedKey = { version: 1; accountId: string; vaultId: string; revision: numb
 export type CloudDeployment = { authUrl: string; authPublishableKey: string; dataUrl: string | null; dataPublishableKey: string | null; enabled: boolean }
 const SERVICE_UNAVAILABLE = 'Cloud backup is not available in this build yet. Local Watcher tracking still works.'
 // This version identifies the exact email consent wording shown by Watcher.
-const EMAIL_CONSENT_POLICY_VERSION = 'watcher-email-v1'
+const EMAIL_CONSENT_POLICY_VERSION = 'watcher-email-v2'
 
 /** Every operation is serialized by the caller's account lock; SDK sessions never persist to disk. */
 export class WatcherAccount {
