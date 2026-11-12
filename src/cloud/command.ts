@@ -24,7 +24,7 @@ async function readRequest(): Promise<AccountRequest> {
   }
   const request = JSON.parse(data)
   if (!request || typeof request !== 'object' || Array.isArray(request) || typeof request.action !== 'string' ||
-      Object.keys(request).some(k => !['action', 'email', 'code', 'phrase', 'confirm', 'deviceId', 'month', 'createAccount', 'acceptTerms'].includes(k))) throw new CloudError('Invalid account request.')
+      Object.keys(request).some(k => !['action', 'email', 'code', 'phrase', 'confirm', 'deviceId', 'month', 'createAccount', 'acceptTerms', 'acceptVerificationEmail', 'acceptEmailCommunications'].includes(k))) throw new CloudError('Invalid account request.')
   return request
 }
 export async function accountCommand(action: string, json: boolean): Promise<void> {
@@ -45,7 +45,11 @@ export async function accountCommand(action: string, json: boolean): Promise<voi
     if (json) result = await account.run(input!)
     else if (action === 'login') {
       const email = await ask('Odd account email: ')
-      await account.run({ action: 'requestCode', email })
+      process.stderr.write('Terms of Use: https://odd.community/terms\nPrivacy Policy: https://odd.community/privacy\n')
+      const acceptTerms = (await ask('Agree to the Terms of Use and confirm you have read the Privacy Policy? Type yes: ')) === 'yes'
+      if (!acceptTerms) throw new CloudError('Accept the Odd Community Terms of Use and read the Privacy Policy to continue.')
+      const acceptVerificationEmail = (await ask('Agree to receive a verification code by email from Odd Community? Type yes: ')) === 'yes'
+      await account.run({ action: 'requestCode', email, acceptTerms, acceptVerificationEmail })
       const code = await ask('Email code: ', true)
       result = await account.run({ action: 'verifyCode', email, code })
       if (result.accountSwitchRequired) throw new CloudError('That is a different Odd account. Sign out of Watcher first, then sign in again. Local history will be preserved.')

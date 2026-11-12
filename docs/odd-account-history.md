@@ -1,5 +1,18 @@
 # Watcher private account history
 
+## Native Sign In and Sign Up — 2026-11-12
+
+The Watcher branch `codex/watcher-native-sign-in` applies the Hansel handoff on
+top of merged main `c7f3d56`. The native account window uses the Watcher owl,
+wordmark and palette. The optional updates checkbox covers Odd Community and
+Exe AI email. After verification, Watcher saves an explicit opt-in with the
+existing Odd consent RPC, source `watcher` and policy version `watcher-email-v1`.
+Bump the version when the opt-in copy changes. People can change their preference
+in their Odd account settings. Local verification used fixtures. This change is
+unreleased. Native checks and Node integration logs are at
+`/tmp/watcher-sign-in-native-final.log` and `/tmp/watcher-sign-in-node-final.log`.
+Token usage figures are unavailable.
+
 ## Current handoff — shared-project decision, 2026-10-29
 
 Hosted qualification follow-up: the canonical central migration and cleanup core
@@ -42,9 +55,14 @@ fingerprinted for preservation; no Watcher production DDL has been applied.
 
 ## Implemented
 
-- Settings → **Odd account & private history…**. Local tracking/history requires no
-  account. In-app email-code login; new accounts require a separate Terms/Privacy
-  acknowledgement. Auth uses the existing central public publishable key.
+- Settings → **Odd account & private history…**. Local tracking and history are
+  available to guests. **Sign In** and **Sign Up** verify an email code in Watcher.
+  Both require the Terms of Use and Privacy Policy acknowledgement and separate
+  permission for the verification email. The two required boxes start checked
+  and the send button confirms them. The optional marketing checkbox starts
+  unchecked and resets when the address changes. Resends reuse verification
+  permission during the same attempt. Auth uses the
+  existing central public publishable key.
 - Refresh credentials and account-scoped backup keys use a native Keychain broker,
   with values in stdin, never argv. Account commands are excluded from analytics;
   unknown/network errors are sanitized before SDK logging.
@@ -141,7 +159,7 @@ dependency-download failures and build pending. Production is untouched.
 No new project, billing change, credential export or schedule was created.
 Token usage figures are unavailable.
 
-## Odd Community branding — 2026-10-26
+## Previous Odd Community branding — 2026-10-26
 
 Account, login, verification, backup and history screens now reuse the exact Odd
 website mark, Satoshi body fonts and Grandstander heading fonts. Native account

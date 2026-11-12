@@ -506,7 +506,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
     /// Register bundled custom fonts (Epilogue) so they're available via Font.custom().
     private func registerBundledFonts() {
-        OddAccountBrand.registerFonts()
         let resourceBundle = Bundle.main.resourceURL
             .flatMap { Bundle(url: $0.appendingPathComponent("ExeWatcherMenubar_ExeWatcherMenubar.bundle")) }
             ?? Bundle.module
