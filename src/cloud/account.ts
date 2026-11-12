@@ -141,7 +141,7 @@ export class WatcherAccount {
     if (request.action === 'verifyCode') {
       if (typeof request.email !== 'string' || typeof request.code !== 'string' || !/^\d{6,10}$/.test(request.code.trim())) throw new CloudError('Enter the code from your Odd email.')
       const prior = await this.saved()
-      const { data, error } = await this.auth.auth.verifyOtp({ email: request.email, token: request.code.trim(), type: 'email' })
+      const { data, error } = await this.auth.auth.verifyOtp({ email: request.email.trim(), token: request.code.trim(), type: 'email' })
       if (error || !data.session) throw new CloudError('That code expired or could not be verified. Request another code.')
       if (prior && prior.userId !== data.session.user.id && request.confirm !== true) {
         await this.auth.auth.signOut({ scope: 'local' })

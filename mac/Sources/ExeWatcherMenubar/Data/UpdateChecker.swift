@@ -142,7 +142,7 @@ final class UpdateChecker {
         let process = ExeWatcherCLI.makeProcess(subcommand: ["menubar", "--force"])
         let executable = process.executableURL?.path ?? "/usr/bin/env"
         let args = process.arguments ?? []
-        let env = process.environment ?? ProcessInfo.processInfo.environment
+        let env = Self.installerEnvironment(from: process.environment ?? ProcessInfo.processInfo.environment)
         // Use ~/.cache/ instead of NSTemporaryDirectory() — the per-app temp dir is cleaned
         // up when the app terminates, which kills the log file before the detached script runs.
         let cacheDir = FileManager.default.homeDirectoryForCurrentUser
@@ -150,36 +150,32 @@ final class UpdateChecker {
         try? FileManager.default.createDirectory(atPath: cacheDir, withIntermediateDirectories: true)
         let logPath = (cacheDir as NSString).appendingPathComponent("menubar-update.log")
 
-        let script = detachedInstallerScript(executable: executable, args: args, environment: env, logPath: logPath)
+        let script = detachedInstallerScript(executable: executable, args: args, logPath: logPath)
         let launcher = Process()
         launcher.executableURL = URL(fileURLWithPath: "/bin/zsh")
         launcher.arguments = ["-c", script]
+        launcher.environment = env
         launcher.standardOutput = FileHandle.nullDevice
         launcher.standardError = FileHandle.nullDevice
         try launcher.run()
+    }
+
+    static func installerEnvironment(from environment: [String: String]) -> [String: String] {
+        let allowed = ["HOME", "PATH", "NODE_OPTIONS", "NVM_DIR", "XDG_CONFIG_HOME", "DO_NOT_TRACK",
+            "EXE_WATCHER_BIN", "EXE_WATCHER_PARENT_PID", "EXE_WATCHER_KEYCHAIN_HELPER", "EXE_WATCHER_TELEMETRY",
+            "EXE_WATCHER_FORCE_MACOS_MAJOR", "EXE_WATCHER_APP_EXIT_TIMEOUT_MS", "EXE_WATCHER_APP_LAUNCH_TIMEOUT_MS"]
+        return environment.filter { allowed.contains($0.key) }
     }
 
     private func shellQuote(_ value: String) -> String {
         "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 
-    private func detachedInstallerScript(
-        executable: String,
-        args: [String],
-        environment: [String: String],
-        logPath: String
-    ) -> String {
-        let exports = environment
-            .filter { !$0.key.isEmpty && $0.key.range(of: "^[A-Za-z_][A-Za-z0-9_]*$", options: .regularExpression) != nil }
-            .map { "export \($0.key)=\(shellQuote($0.value))" }
-            .joined(separator: "\n")
+    func detachedInstallerScript(executable: String, args: [String], logPath: String) -> String {
         let argv = ([executable] + args).map(shellQuote).joined(separator: " ")
-        // nohup + disown + explicit setsid ensures the detached script survives the parent
-        // app terminating. The old version spawned a subshell with `&` but that stays in the
-        // same process group, so NSApp.terminate can kill it before the CLI runs.
+        // nohup + disown lets the installer outlive the app, which terminates after spawning it.
         return """
         nohup /bin/zsh -c \(shellQuote("""
-        \(exports)
         sleep 1
         echo "--- Exe Watcher menubar update $(date) ---" >> \(shellQuote(logPath))
         \(argv) >> \(shellQuote(logPath)) 2>&1

@@ -18,9 +18,7 @@
 
 Exe Watcher shows what your AI coding work costs, how long the agents run, and how each Exe OS employee's memory grows. Track nine coding clients, models, projects, tokens, and optimization findings from local usage files. Spend and time tracking need no API keys, account, proxy, or wrappers around your tools; employee memory and spend appear when Exe OS supplies its local agent stats.
 
-Optional Odd account backup and a private spending view are under development.
-Cloud rollout is disabled pending shared-project storage qualification; local tracking
-continues to work without an account. See the [implementation and activation status](docs/odd-account-history.md).
+In the Mac app, choose **Settings → Odd account & private history…** to sign in or create an odd.community account with a one-time email code. Terms/Privacy acknowledgement and consent to receive the verification email are required; product-update emails are optional. Signing in does not upload history or enable backup. Local tracking and the private spending view work without an account; encrypted cloud backup remains disabled while its rollout is off. See the [implementation and activation status](docs/odd-account-history.md).
 
 **Forked from [CodeBurn by AgentSeal](https://github.com/getagentseal/codeburn) on April 24, 2026.** Since then, Exe AI has developed Watcher for AI employee teams and parallel agent workflows. [Development timeline and comparison](#development-since-the-codeburn-fork) · [Origin and MIT attribution](#origin--attribution)
 

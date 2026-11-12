@@ -14,16 +14,18 @@ export function releaseNames(version) {
   return [`Watcher-v${version}-universal.dmg`, `ExeWatcherMenubar-v${version}.zip`, 'SHA256SUMS.txt', 'BUILD-INFO.txt'];
 }
 
-export function verifyRelease(release, version, sourceTree, buildInfo) {
+export function verifyRelease(release, version, sourceTree, buildInfo, sourceRevision) {
   const names = releaseNames(version);
   if (release.tag_name !== `mac-v${version}` || release.draft || release.prerelease) throw Error('The matching public stable Mac release is required.');
   for (const name of names) {
     const matches = release.assets.filter(asset => asset.name === name);
     if (matches.length !== 1 || matches[0].size <= 0) throw Error(`Missing or ambiguous release asset: ${name}`);
   }
-  if (!buildInfo.startsWith(`Watcher ${version}\n`) || !buildInfo.includes(`Source tree: ${sourceTree}\n`)
-    || !buildInfo.includes('Modified tracked files: 0\n') || !buildInfo.includes('Notarization: accepted and stapled\n')) {
-    throw Error('Mac artifacts must be notarized and built from the same clean source tree as npm.');
+  if (!/^[a-f0-9]{40}$/.test(sourceRevision) || !buildInfo.startsWith(`Watcher ${version}\n`)
+    || !buildInfo.includes(`Source base revision: ${sourceRevision}\n`) || !buildInfo.includes(`Source tree: ${sourceTree}\n`)
+    || !buildInfo.includes('Modified tracked files: 0\n') || !buildInfo.includes('Untracked files: 0\n')
+    || !buildInfo.includes('Notarization: accepted and stapled\n')) {
+    throw Error('Mac artifacts must be notarized and built from the same clean source revision and tree as npm.');
   }
 }
 
@@ -62,7 +64,7 @@ async function main() {
   if (existing && !existing.draft) {
     const info = existing.assets.find(asset => asset.name === 'BUILD-INFO.txt');
     if (!info) throw Error('The published Mac release has no provenance receipt.');
-    verifyRelease(existing, version, tree, downloadBuildInfo(info));
+    verifyRelease(existing, version, tree, downloadBuildInfo(info), source);
     console.log(`Verified paired Mac release ${version}; npm publication can proceed.`);
     return;
   }
@@ -72,7 +74,7 @@ async function main() {
   if (names.every(name => existsSync(join(output, name)))) {
     try {
       verifyRelease({ tag_name: tag, assets: names.map(name => ({ name, size: 1 })) }, version, tree,
-        readFileSync(join(output, 'BUILD-INFO.txt'), 'utf8'));
+        readFileSync(join(output, 'BUILD-INFO.txt'), 'utf8'), source);
       run('shasum', ['-a', '256', '-c', 'SHA256SUMS.txt'], { cwd: output, stdio: 'inherit' });
       ready = true;
     } catch { ready = false; }
@@ -89,7 +91,7 @@ async function main() {
   run('spctl', ['--assess', '--type', 'execute', '--verbose=2', app], { stdio: 'inherit' });
   run('xcrun', ['stapler', 'validate', join(output, names[0])], { stdio: 'inherit' });
   const buildInfo = readFileSync(join(output, 'BUILD-INFO.txt'), 'utf8');
-  verifyRelease({ tag_name: tag, assets: names.map(name => ({ name, size: 1 })) }, version, tree, buildInfo);
+  verifyRelease({ tag_name: tag, assets: names.map(name => ({ name, size: 1 })) }, version, tree, buildInfo, source);
   const changelog = readFileSync(join(root, 'CHANGELOG.md'), 'utf8').split(/\r?\n/);
   const heading = changelog.findIndex(line => line.startsWith(`## ${version} (`));
   if (heading < 0) throw Error('The release must have its own changelog section.');
@@ -107,7 +109,7 @@ async function main() {
   }
   run('gh', ['release', 'edit', tag, '--repo', repository, '--draft=false', '--latest'], { stdio: 'inherit' });
   const published = releaseMetadata(tag);
-  verifyRelease(published, version, tree, downloadBuildInfo(published.assets.find(asset => asset.name === 'BUILD-INFO.txt')));
+  verifyRelease(published, version, tree, downloadBuildInfo(published.assets.find(asset => asset.name === 'BUILD-INFO.txt')), source);
   console.log(`Published paired Mac release ${version}; npm publication can proceed.`);
 }
 

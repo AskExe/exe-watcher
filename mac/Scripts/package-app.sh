@@ -202,7 +202,7 @@ Watcher ${APP_VERSION}
 Source base revision: $(git -C "${ROOT}" rev-parse HEAD)
 Source tree: $(git -C "${ROOT}" rev-parse 'HEAD^{tree}')
 Modified tracked files: $(git -C "${ROOT}" status --porcelain --untracked-files=no | wc -l | tr -d ' ')
-Local source additions may also be included; this is not a merge receipt.
+Untracked files: $(git -C "${ROOT}" ls-files --others --exclude-standard | wc -l | tr -d ' ')
 Signing identity: ${IDENTITY}
 Notarization: $(if [[ -n "${NOTARY_PROFILE:-}" ]]; then echo 'accepted and stapled'; else echo 'not performed'; fi)
 Owl: ${OWL_LABEL}
