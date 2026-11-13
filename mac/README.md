@@ -11,7 +11,7 @@ Native Swift + SwiftUI menubar app. The Watcher menubar surface.
 
 ## Install (end users)
 
-Download the universal `.dmg` from [GitHub Releases](https://github.com/AskExe/exe-watcher/releases/latest), drag **Watcher by EXE** into **Applications**, then open it. No Node, npm, account, or command-line setup is needed for the packaged app. Public releases must be Developer ID signed and Apple notarized.
+Download the universal `.dmg` from [odd.community/watcher](https://odd.community/watcher), drag **Watcher by EXE** into **Applications**, then open it. No Node, npm, account, or command-line setup is needed for the packaged app. Public releases must be Developer ID signed and Apple notarized.
 
 Alternatively, with Node 22.5+ already installed:
 
@@ -135,14 +135,13 @@ REQUIRE_NOTARIZATION=1 mac/Scripts/package-app.sh v0.2.66
 
 The release mode signs the runtime and app with hardened runtime, submits both app and DMG to Apple, staples their tickets, and verifies the app's Gatekeeper assessment. An unsigned or unnotarized package is a review build, not a public launch artifact. See [Apple's notarization documentation](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution).
 
-Use cloud checks where supported and perform required native build, signing and installed-app QA locally, as authorized on 2026-10-25. Cloud CICD coordinates supported cloud work; the local Watcher chat is the single native publisher. The hosted `Release macOS Menubar` workflow is disabled: it has no signing secrets and only failed on each tag. To ship a version:
+Use cloud checks where supported and perform required native build, signing and installed-app QA on the authorized release Mac. The hosted Mac release workflow stays disabled.
 
-1. Bump `package.json`, `package-lock.json` and `CHANGELOG.md`, open the PR, and merge it once CI passes. Publish from a clean checkout of the actual merged main with successful CI on that commit.
-2. Set `CODESIGN_IDENTITY` and `NOTARY_PROFILE` to the release Mac's existing identity and Keychain profile. Run `npm run release:mac`, or `npm publish --registry=https://registry.npmjs.org` to publish both app and npm. The npm prepublish hook requires the paired Mac release first. Keep the npm token in the release environment or Keychain, never in source.
-3. The release helper builds and notarizes the app and DMG, or reuses a verified package whose source tree matches merged main. It checks Gatekeeper, signatures, checksums and all four uploaded asset digests before publishing the latest GitHub release at the merge commit. `BUILD-INFO.txt` records the exact source revision and tree with zero modified tracked files and zero untracked files. An existing matching public release is verified and reused for npm retries; an existing draft requires inspection rather than overwriting.
-4. The app checks GitHub's latest release and offers an Update button. npm users update their global CLI with `npm install -g exe-watcher@latest --registry=https://registry.npmjs.org`; `exe-watcher menubar --force` installs the matching latest native app. The paired release hook runs only when publishing, not when customers install npm.
-5. After the release resolver is deployed in `OddCommunity/odd-website`, `/watcher/release` and `/watcher/download` follow the same latest stable Mac release with a five-minute CDN cache. Future releases need no website version-pin edits. Website changes still require a merged PR and `vercel deploy --prod` from its clean merged main.
-6. Verify as a customer: the website version and download resolve to the new release, the downloaded DMG matches `SHA256SUMS.txt`, and `spctl` accepts the app as Notarized Developer ID. Exercise `exe-watcher menubar --force` and confirm the installed version and real timing totals.
+1. Bump the version in the npm manifests and changelog. Merge after CI passes, then wait for CI on the merged commit. Work from its clean checkout.
+2. On the release Mac, use the existing Developer ID and notarization profile with the package command above. Sparkle`s Watcher signing key is in the release Mac Keychain under account `watcher-updates`. The app pins the matching public key.
+3. Run `npm run release:mac -- --stage`. The script checks source provenance, code signatures, notarization and the pinned feed, then signs the DMG and verifies the bytes in the Odd release bucket. The versioned DMG is shared by the website, Sparkle and the npm installer.
+4. Verify the staged release and install it in the QA environment. Run `npm run release:mac` to promote it. Verify the live odd.community download, metadata and appcast. Older installations that use the previous channel need a one-time manual install from odd.community/watcher.
+5. Publish npm with the release Mac`s Keychain credential. The prepublish hook verifies that Odd serves the Mac release built from this exact revision. Confirm the version and package bytes on npm after publication.
 
 ## Owl artwork and review
 

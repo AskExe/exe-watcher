@@ -22,7 +22,7 @@ In the Mac app, choose **Settings → Odd account & private history…** to sign
 
 **Forked from [CodeBurn by AgentSeal](https://github.com/getagentseal/codeburn) on April 24, 2026.** Since then, Exe AI has developed Watcher for AI employee teams and parallel agent workflows. [Development timeline and comparison](#development-since-the-codeburn-fork) · [Origin and MIT attribution](#origin--attribution)
 
-**macOS app:** Download the universal DMG from [Releases](https://github.com/AskExe/exe-watcher/releases/latest), drag **Watcher by EXE** into **Applications**, and open it. macOS 14+ on Apple Silicon or Intel. From 0.2.55, Node and the CLI are included.
+**macOS app:** Download the universal DMG from [odd.community/watcher](https://odd.community/watcher), drag **Watcher by EXE** into **Applications**, and open it. macOS 14+ on Apple Silicon or Intel. From 0.2.55, Node and the CLI are included.
 
 **Terminal CLI** (Node 22.13+):
 
@@ -33,7 +33,7 @@ npm install -g exe-watcher
 exe-watcher report
 ```
 
-Version 0.2.70 adds local active AI app tracking and broader, clearly labeled historical personal-time estimates. It also explains that first-time history setup can take 10 minutes or more for large AI histories, with saved progress and recovery details. Large Claude history scans resume within the existing resource limits. Recorded API-equivalent costs and saved totals are preserved through refresh failures, restarts and day changes. AI time and the floating quota display are included. Terminal installs require Node 22.13 or newer; the Mac app includes its own compatible runtime. Download the matching app from [Releases](https://github.com/AskExe/exe-watcher/releases/latest) or [odd.community/watcher](https://odd.community/watcher). To run the current CLI from source:
+Version 0.2.70 adds local active AI app tracking and broader, clearly labeled historical personal-time estimates. It also explains that first-time history setup can take 10 minutes or more for large AI histories, with saved progress and recovery details. Large Claude history scans resume within the existing resource limits. Recorded API-equivalent costs and saved totals are preserved through refresh failures, restarts and day changes. AI time and the floating quota display are included. Terminal installs require Node 22.13 or newer; the Mac app includes its own compatible runtime. Download the matching app from [odd.community/watcher](https://odd.community/watcher). To run the current CLI from source:
 
 ```bash
 git clone https://github.com/AskExe/exe-watcher.git

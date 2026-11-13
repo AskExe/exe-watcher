@@ -138,7 +138,7 @@ describe('menubar-installer', () => {
       // The install should fail somewhere after the platform check.
       // Whatever error we get, it must NOT be the platform gate.
       try {
-        await installMenubarApp({ force: true })
+        await installMenubarApp({ force: true, version: fixtureVersion })
         // If it somehow succeeds, that's fine too — platform check passed.
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err)
@@ -238,7 +238,7 @@ describe('menubar-installer', () => {
         return proc
       })
 
-      const result = await installMenubarApp({ force: true })
+      const result = await installMenubarApp({ force: true, version: fixtureVersion })
 
       expect(result.launched).toBe(true)
       expect(spawnCalls).toContainEqual({ command: '/bin/kill', args: ['-TERM', '111'] })
@@ -252,8 +252,8 @@ describe('menubar-installer', () => {
       expect(commands).not.toContain('/usr/bin/xattr')
     })
 
-    it('unpacks the update with ditto so the app signature survives', async () => {
-      fixtureVersion = '0.2.59'
+    it('copies the verified Odd disk image app before replacing the installed copy', async () => {
+      fixtureVersion = '0.2.76'
       process.env.EXE_WATCHER_FORCE_MACOS_MAJOR = '15'
       process.env.EXE_WATCHER_APP_EXIT_TIMEOUT_MS = '0'
       process.env.EXE_WATCHER_APP_LAUNCH_TIMEOUT_MS = '1'
@@ -265,9 +265,10 @@ describe('menubar-installer', () => {
       vi.mocked(fsMock.rename).mockResolvedValue(undefined)
       vi.mocked(fsMock.rm).mockResolvedValue(undefined)
 
-      vi.stubGlobal('fetch', vi.fn()
-        .mockResolvedValueOnce({ ok: true, json: async () => ({ tag_name: 'mac-v0.2.59', assets: [{ name: 'ExeWatcherMenubar-v0.2.59.zip', digest: FIXTURE_DIGEST, size: ARCHIVE.length, browser_download_url: 'https://github.com/AskExe/exe-watcher/releases/download/mac-v0.2.59/ExeWatcherMenubar-v0.2.59.zip' }] }) } as unknown as Response)
-        .mockResolvedValueOnce({ ok: true, body: new ReadableStream({ start(controller) { controller.enqueue(new Uint8Array(ARCHIVE)); controller.close() } }) } as unknown as Response))
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ version: fixtureVersion, sha256: FIXTURE_DIGEST.slice(7), size: ARCHIVE.length, download: 'https://version.askexe.com/watcher/0.2.76/Watcher-v0.2.76-universal.dmg' }) } as unknown as Response)
+        .mockResolvedValueOnce({ ok: true, body: new ReadableStream({ start(controller) { controller.enqueue(new Uint8Array(ARCHIVE)); controller.close() } }) } as unknown as Response)
+      vi.stubGlobal('fetch', fetchMock)
 
       const pgrepOutputs = ['111\n', '', '222\n']
       const spawnCalls: Array<{ command: string; args: string[] }> = []
@@ -289,8 +290,18 @@ describe('menubar-installer', () => {
 
       await installMenubarApp({ force: true })
 
-      expect(spawnCalls).toContainEqual({ command: '/usr/bin/ditto', args: ['-x', '-k', '/tmp/exe-watcher-menubar-mock/ExeWatcherMenubar-v0.2.59.zip', '/tmp/exe-watcher-menubar-mock'] })
-      expect(spawnCalls.map(c => c.command)).not.toContain('/usr/bin/unzip')
+      expect(fetchMock.mock.calls[0]?.[0]).toBe('https://odd.community/watcher/release')
+      const commands = spawnCalls.map(call => [call.command, call.args[0]])
+      const mount = commands.findIndex(([cmd, action]) => cmd === '/usr/bin/hdiutil' && action === 'attach')
+      const verify = commands.findIndex(([cmd]) => cmd === '/usr/bin/codesign')
+      const copy = commands.findIndex(([cmd]) => cmd === '/usr/bin/ditto')
+      const detach = commands.findIndex(([cmd, action]) => cmd === '/usr/bin/hdiutil' && action === 'detach')
+      const replace = commands.findIndex(([cmd]) => cmd === '/bin/kill')
+      expect(mount).toBeGreaterThanOrEqual(0)
+      expect(verify).toBeGreaterThan(mount)
+      expect(copy).toBeGreaterThan(verify)
+      expect(detach).toBeGreaterThan(copy)
+      expect(replace).toBeGreaterThan(detach)
     })
 
 
@@ -356,7 +367,7 @@ describe('menubar-installer', () => {
         return proc
       })
 
-      await expect(installMenubarApp({ force: true })).rejects.toThrow(/Restored the previous working/)
+      await expect(installMenubarApp({ force: true, version: fixtureVersion })).rejects.toThrow(/Restored the previous working/)
 
       const renameMock = vi.mocked(fsMock.rename)
       expect(renameMock).toHaveBeenCalledWith(
@@ -419,7 +430,7 @@ describe('menubar-installer', () => {
         return proc
       })
 
-      await installMenubarApp({ force: true })
+      await installMenubarApp({ force: true, version: fixtureVersion })
 
       expect(spawnCalls).toContainEqual({ command: '/bin/kill', args: ['-TERM', '111'] })
       expect(spawnCalls).toContainEqual({ command: '/bin/kill', args: ['-KILL', '111'] })
@@ -473,13 +484,13 @@ describe('menubar-installer', () => {
       })
       const reason: Record<typeof failure, RegExp> = {
         'missing digest': /integrity metadata/, 'changed bytes': /SHA-256/, 'oversize stream': /exceeds/,
-        'truncated stream': /SHA-256/, 'wrong repository': /integrity metadata/, 'mixed version': /matching app archive/,
+        'truncated stream': /SHA-256/, 'wrong repository': /integrity metadata/, 'mixed version': /requested stable Watcher release/,
         'duplicate archive': /matching app archive/, 'draft': /stable Watcher release/, 'prerelease': /stable Watcher release/,
         'missing archive': /matching app archive/, 'foreign redirect': /untrusted destination/, 'HTTP redirect': /untrusted destination/,
         'wrong signing identity': /codesign exited/, 'missing notarization ticket': /xcrun exited/,
         'Gatekeeper denial': /spctl exited/, 'wrong signed version': /signed app version/,
       }
-      await expect(installMenubarApp({ force: true })).rejects.toThrow(reason[failure])
+      await expect(installMenubarApp({ force: true, version: fixtureVersion })).rejects.toThrow(reason[failure])
       expect(fs.rename).not.toHaveBeenCalled()
       expect(commands).not.toContain('/bin/kill')
       expect(commands).not.toContain('/usr/bin/open')

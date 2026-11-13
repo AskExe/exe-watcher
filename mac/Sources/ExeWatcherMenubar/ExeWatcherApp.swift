@@ -118,7 +118,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         setupWakeObservers()
         cleanupLegacyLaunchAgent()
         registerLoginItemIfNeeded()
-        Task { await updateChecker.checkIfNeeded() }
+        updateChecker.start()
 
         // Telemetry: Perfetto trace writer + self-healing health monitor
         RefreshTracer.shared.initialize()
@@ -486,10 +486,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             await store.refreshVisibleSelection()
             refreshStatusButton()
         }
-        // Force a fresh update check every time the popover opens, bypassing the 2-day
-        // cooldown. The interval is fine for background checks, but when the user actively
-        // opens the popover they should see newly available updates immediately.
-        Task { await updateChecker.check() }
     }
 
     func popoverDidClose(_ notification: Notification) {

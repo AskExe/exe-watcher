@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.76 (2026-11-13)
+
+- Move the Mac download and in-app updates to Odd Community. Install this
+  version once from odd.community/watcher to switch update channels.
+
 ## 0.2.75 (2026-11-12)
 
 - Normalize the Odd account email during code verification and cover successful session refresh and revocation on sign-out.

@@ -9,7 +9,9 @@ import { Readable, Transform } from 'node:stream'
 
 /// Public GitHub repo that hosts signed macOS release builds. `/releases/latest` returns the
 /// newest tagged release; we filter its assets list for our zipped .app bundle.
-const RELEASE_API_LATEST = 'https://api.github.com/repos/AskExe/exe-watcher/releases/latest'
+const ODD_RELEASE_API = 'https://odd.community/watcher/release'
+const ODD_ASSET_ORIGIN = 'https://version.askexe.com'
+const FIRST_ODD_RELEASE = '0.2.76'
 const RELEASE_API_BY_TAG = 'https://api.github.com/repos/AskExe/exe-watcher/releases/tags/'
 const APP_BUNDLE_NAME = 'Watcher by EXE.app'
 const MAX_ARCHIVE_BYTES = 256 * 1024 * 1024
@@ -25,7 +27,7 @@ const POLL_INTERVAL_MS = 150
 export type InstallResult = { installedPath: string; launched: boolean }
 
 type ReleaseAsset = { name: string; browser_download_url: string; digest: string; size: number }
-type VerifiedAsset = ReleaseAsset & { version: string }
+type VerifiedAsset = ReleaseAsset & { version: string; format: 'dmg' | 'zip' }
 type ReleaseResponse = { tag_name: string; assets: ReleaseAsset[]; draft?: boolean; prerelease?: boolean }
 
 function userApplicationsDir(): string {
@@ -66,10 +68,37 @@ async function sysProductVersion(): Promise<string> {
 }
 
 async function fetchLatestReleaseAsset(version?: string): Promise<VerifiedAsset> {
-  // If a specific version is requested, fetch that tag; otherwise use /releases/latest.
-  const tag = version ? (version.startsWith('mac-') ? version : `mac-${version.startsWith('v') ? version : `v${version}`}`) : undefined
-  if (tag && !/^mac-v\d+\.\d+\.\d+$/.test(tag)) throw new Error('Choose a stable Watcher release version.')
-  const url = tag ? `${RELEASE_API_BY_TAG}${tag}` : RELEASE_API_LATEST
+  const requested = version?.replace(/^(?:mac-)?v?/, '')
+  if (requested && !/^\d+\.\d+\.\d+$/.test(requested)) {
+    throw new Error('Choose a stable Watcher release version.')
+  }
+  if (requested && requested.localeCompare(FIRST_ODD_RELEASE, 'en', { numeric: true }) < 0) {
+    return fetchHistoricalReleaseAsset(requested)
+  }
+
+  const url = requested ? ODD_RELEASE_API + '?version=' + requested : ODD_RELEASE_API
+  const response = await fetch(url, { redirect: 'error', signal: AbortSignal.timeout(10_000) })
+  if (!response.ok) throw new Error('Odd Community release lookup failed: HTTP ' + response.status)
+  const body = await response.json() as { version: string; download: string; sha256: string; size: number } | null
+  if (!body || !/^\d+\.\d+\.\d+$/.test(body.version) ||
+      body.version.localeCompare(FIRST_ODD_RELEASE, 'en', { numeric: true }) < 0 ||
+      (requested && body.version !== requested)) {
+    throw new Error('Odd Community did not return the requested stable Watcher release.')
+  }
+  const name = 'Watcher-v' + body.version + '-universal.dmg'
+  const expectedURL = ODD_ASSET_ORIGIN + '/watcher/' + body.version + '/' + name
+  if (body.download !== expectedURL || !/^[a-f0-9]{64}$/.test(body.sha256) ||
+      !Number.isSafeInteger(body.size) || body.size <= 0 || body.size > MAX_ARCHIVE_BYTES) {
+    throw new Error('The Watcher disk image has missing or untrusted integrity metadata.')
+  }
+  return { name, browser_download_url: body.download, digest: 'sha256:' + body.sha256, size: body.size,
+    version: body.version, format: 'dmg' }
+}
+
+// Explicit requests for versions published before the Odd update channel.
+async function fetchHistoricalReleaseAsset(version: string): Promise<VerifiedAsset> {
+  const tag = 'mac-v' + version
+  const url = RELEASE_API_BY_TAG + tag
   const response = await fetch(url, {
     headers: {
       // Identify the installer so GitHub's abuse heuristics treat us as a known client.
@@ -106,7 +135,7 @@ async function fetchLatestReleaseAsset(version?: string): Promise<VerifiedAsset>
       !Number.isSafeInteger(asset.size) || asset.size <= 0 || asset.size > MAX_ARCHIVE_BYTES) {
     throw new Error('The Watcher archive has missing or untrusted integrity metadata.')
   }
-  return { ...asset, version: releaseVersion }
+  return { ...asset, version: releaseVersion, format: 'zip' }
 }
 
 async function downloadToFile(asset: VerifiedAsset, destPath: string): Promise<void> {
@@ -115,7 +144,7 @@ async function downloadToFile(asset: VerifiedAsset, destPath: string): Promise<v
   // Validate every redirect before sending another request, including HTTPS.
   for (let redirects = 0; ; redirects++) {
     const parsed = new URL(url)
-    if (parsed.protocol !== 'https:' || parsed.username || parsed.password || parsed.port || !DOWNLOAD_HOSTS.has(parsed.hostname)) {
+    if (parsed.protocol !== 'https:' || parsed.username || parsed.password || parsed.port || !(asset.format === 'dmg' ? parsed.origin === ODD_ASSET_ORIGIN : DOWNLOAD_HOSTS.has(parsed.hostname))) {
       throw new Error('The Watcher download redirected to an untrusted destination.')
     }
     response = await fetch(url, {
@@ -296,11 +325,22 @@ export async function installMenubarApp(options: { force?: boolean; version?: st
     await downloadToFile(asset, archivePath)
 
     console.log('Unpacking...')
-    // ditto, not unzip: the release ZIP is made with `ditto -c -k --sequesterRsrc`, and unzip
-    // writes its AppleDouble entries into the bundle as ._ files (._PkgInfo, .__CodeSignature,
-    // Helpers/._node). That breaks the sealed signature, so macOS reports the update as
-    // "damaged and can't be opened" and the install is rolled back.
-    await runCommand('/usr/bin/ditto', ['-x', '-k', archivePath, stagingDir])
+    if (asset.format === 'dmg') {
+      const mountpoint = join(stagingDir, 'volume')
+      await mkdir(mountpoint)
+      await runCommand('/usr/bin/hdiutil', ['attach', '-readonly', '-nobrowse', '-noautoopen',
+        '-mountpoint', mountpoint, archivePath])
+      try {
+        const source = join(mountpoint, APP_BUNDLE_NAME)
+        await verifyMacCandidate(source, asset.version)
+        await runCommand('/usr/bin/ditto', [source, join(stagingDir, APP_BUNDLE_NAME)])
+      } finally {
+        await runCommand('/usr/bin/hdiutil', ['detach', mountpoint])
+      }
+    } else {
+      // ditto preserves signed bundle metadata and symlinks.
+      await runCommand('/usr/bin/ditto', ['-x', '-k', archivePath, stagingDir])
+    }
 
     const unpackedApp = join(stagingDir, APP_BUNDLE_NAME)
     if (!(await exists(unpackedApp))) {

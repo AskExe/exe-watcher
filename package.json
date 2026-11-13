@@ -1,6 +1,6 @@
 {
   "name": "exe-watcher",
-  "version": "0.2.75",
+  "version": "0.2.76",
   "description": "The owl watching your AI coding spend \u2014 cost, tokens, agents, and projects in your terminal and menu bar",
   "type": "module",
   "main": "./dist/cli.js",
@@ -20,7 +20,7 @@
     "test": "vitest",
     "test:release": "node --test mac/Scripts/publish-release.test.mjs",
     "release:mac": "node mac/Scripts/publish-release.mjs",
-    "prepublishOnly": "npm run build && npm run release:mac"
+    "prepublishOnly": "npm run build && npm run release:mac -- --verify-published"
   },
   "keywords": [
     "claude-code",

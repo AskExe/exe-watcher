@@ -1,116 +1,164 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { readFileSync, existsSync } from 'node:fs';
+import { createReadStream, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-const repository = 'AskExe/exe-watcher';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const output = join(root, 'mac/.build/dist');
+const sparkle = join(root, 'mac/.build/artifacts/sparkle/Sparkle/bin');
+const bucket = 'exe-releases/watcher';
+const origin = 'https://version.askexe.com/watcher/';
+const publicFeed = 'https://odd.community/watcher/appcast.xml';
+const signingRequirement = '=anchor apple generic and certificate leaf[subject.OU] = "ZNU2X48VW5" and identifier "com.askexe.exe-watcher-menubar"';
 const run = (command, args, options = {}) => execFileSync(command, args, { cwd: root, encoding: 'utf8', ...options });
 
-export function releaseNames(version) {
-  if (!/^\d+\.\d+\.\d+$/.test(version)) throw Error('A stable release version is required.');
-  return [`Watcher-v${version}-universal.dmg`, `ExeWatcherMenubar-v${version}.zip`, 'SHA256SUMS.txt', 'BUILD-INFO.txt'];
-}
-
-export function verifyRelease(release, version, sourceTree, buildInfo, sourceRevision) {
-  const names = releaseNames(version);
-  if (release.tag_name !== `mac-v${version}` || release.draft || release.prerelease) throw Error('The matching public stable Mac release is required.');
-  for (const name of names) {
-    const matches = release.assets.filter(asset => asset.name === name);
-    if (matches.length !== 1 || matches[0].size <= 0) throw Error(`Missing or ambiguous release asset: ${name}`);
-  }
-  if (!/^[a-f0-9]{40}$/.test(sourceRevision) || !buildInfo.startsWith(`Watcher ${version}\n`)
-    || !buildInfo.includes(`Source base revision: ${sourceRevision}\n`) || !buildInfo.includes(`Source tree: ${sourceTree}\n`)
-    || !buildInfo.includes('Modified tracked files: 0\n') || !buildInfo.includes('Untracked files: 0\n')
-    || !buildInfo.includes('Notarization: accepted and stapled\n')) {
-    throw Error('Mac artifacts must be notarized and built from the same clean source revision and tree as npm.');
+export function verifyBuildInfo(info, version, revision, tree) {
+  const lines = info.trimEnd().split('\n');
+  const required = [
+    'Watcher ' + version, 'Source base revision: ' + revision, 'Source tree: ' + tree,
+    'Modified tracked files: 0', 'Untracked files: 0', 'Notarization: accepted and stapled',
+    'Architectures: arm64 x86_64',
+  ];
+  if (lines[0] !== required[0] || required.some(line => !lines.includes(line))) {
+    throw Error('The notarized Mac release must match the clean merged source and package version.');
   }
 }
 
-export function releaseMetadata(tag, invoke = run) {
-  const options = { stdio: ['ignore', 'pipe', 'pipe'] };
-  try { return JSON.parse(invoke('gh', ['api', `repos/${repository}/releases/tags/${tag}`], options)); }
-  catch (error) {
-    if (!String(error.stderr).includes('HTTP 404')) throw Error('Could not read GitHub release metadata. Check gh authentication/network access.');
-    // The tag endpoint exposes published releases. Include authenticated drafts
-    // so a new upload can be verified and interrupted uploads cannot be replaced.
-    const pages = JSON.parse(invoke('gh', ['api', '--paginate', '--slurp', `repos/${repository}/releases`],
-      { ...options, maxBuffer: 32 * 1024 * 1024 }));
-    const matches = pages.flat().filter(release => release.tag_name === tag);
-    if (matches.length > 1) throw Error('Multiple releases use this tag. Inspect them before publishing.');
-    return matches[0] ?? null;
+export function verifyMetadata(metadata, expected) {
+  for (const key of ['version', 'sha256', 'size', 'edSignature', 'revision', 'tree']) {
+    if (metadata?.[key] !== expected[key]) throw Error('Release metadata mismatch: ' + key);
   }
 }
 
-function downloadBuildInfo(asset) {
-  return run('gh', ['api', `repos/${repository}/releases/assets/${asset.id}`, '-H', 'Accept: application/octet-stream'], { stdio: ['ignore', 'pipe', 'pipe'] });
+async function get(path, optional = false) {
+  const response = await fetch(origin + path, { redirect: 'error', signal: AbortSignal.timeout(180_000) });
+  if (response.status === 404 && optional) return null;
+  if (!response.ok) throw Error('Odd release storage returned HTTP ' + response.status + ' for ' + path);
+  return response;
+}
+
+async function digest(body) {
+  const hash = createHash('sha256');
+  let size = 0;
+  for await (const chunk of body) {
+    size += chunk.length;
+    if (size > 256 * 1024 * 1024) throw Error('Watcher image exceeds its size limit.');
+    hash.update(chunk);
+  }
+  return { sha256: hash.digest('hex'), size };
+}
+
+function put(path, file, contentType, cache) {
+  run('wrangler', ['r2', 'object', 'put', bucket + '/' + path, '--remote', '--file', file,
+    '--content-type', contentType, '--cache-control', cache], { stdio: 'inherit' });
 }
 
 async function main() {
   const { version } = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
-  const tag = `mac-v${version}`;
-  const names = releaseNames(version);
-  if (run('git', ['status', '--porcelain']).trim()) throw Error('Commit and merge the tested release source before publishing.');
-  const source = run('git', ['rev-parse', 'HEAD']).trim();
+  if (!/^\d+\.\d+\.\d+$/.test(version)) throw Error('A stable version is required.');
+  if (run('git', ['status', '--porcelain']).trim()) throw Error('Publish from a clean merged main checkout.');
+  const revision = run('git', ['rev-parse', 'HEAD']).trim();
   const tree = run('git', ['rev-parse', 'HEAD^{tree}']).trim();
-  const trustedMain = run('gh', ['api', `repos/${repository}/commits/main`, '--jq', '.sha']).trim();
-  if (source !== trustedMain) throw Error('Publish from the actual merged main commit.');
-  const runs = JSON.parse(run('gh', ['run', 'list', '--repo', repository, '--workflow', 'ci.yml', '--commit', source,
+  const repo = 'AskExe/exe-watcher';
+  if (revision !== run('gh', ['api', 'repos/' + repo + '/commits/main', '--jq', '.sha']).trim()) {
+    throw Error('Publish from the actual merged main commit.');
+  }
+  const runs = JSON.parse(run('gh', ['run', 'list', '--repo', repo, '--workflow', 'ci.yml', '--commit', revision,
     '--limit', '5', '--json', 'status,conclusion']));
-  if (!runs.some(job => job.status === 'completed' && job.conclusion === 'success')) throw Error('Wait for successful CI on merged main before publishing.');
-  const existing = releaseMetadata(tag);
-  if (existing && !existing.draft) {
-    const info = existing.assets.find(asset => asset.name === 'BUILD-INFO.txt');
-    if (!info) throw Error('The published Mac release has no provenance receipt.');
-    verifyRelease(existing, version, tree, downloadBuildInfo(info), source);
-    console.log(`Verified paired Mac release ${version}; npm publication can proceed.`);
+  if (!runs.some(item => item.status === 'completed' && item.conclusion === 'success')) {
+    throw Error('Wait for successful CI on merged main before publishing.');
+  }
+
+  const imageName = 'Watcher-v' + version + '-universal.dmg';
+  const imagePath = join(output, imageName);
+  const app = join(output, 'Watcher by EXE.app');
+  const versionedMetadataPath = version + '/release.json';
+  if (process.argv.includes('--verify-published')) {
+    const [result, file] = await Promise.all([get(versionedMetadataPath), get(version + '/' + imageName)]);
+    const metadata = await result.json();
+    const observed = await digest(file.body);
+    if (!/^[A-Za-z0-9+/]{86}==$/.test(metadata?.edSignature ?? '')) throw Error('Missing Sparkle signature.');
+    verifyMetadata(metadata, { version, revision, tree, ...observed, edSignature: metadata.edSignature });
+    const latest = await (await get('release.json')).json();
+    verifyMetadata(latest, metadata);
+    const publicRelease = await fetch('https://odd.community/watcher/release', { redirect: 'error', signal: AbortSignal.timeout(15_000) });
+    if (!publicRelease.ok) throw Error('Odd Community has not made the release public.');
+    const publicMetadata = await publicRelease.json();
+    const feed = await fetch(publicFeed, { redirect: 'error', signal: AbortSignal.timeout(15_000) });
+    const expectedImageURL = origin + version + '/' + imageName;
+    if (publicMetadata.version !== version || publicMetadata.download !== expectedImageURL ||
+        publicMetadata.sha256 !== metadata.sha256 || publicMetadata.size !== metadata.size ||
+        publicMetadata.edSignature !== metadata.edSignature || !feed.ok) {
+      throw Error('Public download and npm source do not identify the same release.');
+    }
+    const appcast = await feed.text();
+    if (!appcast.includes('<sparkle:version>' + version + '</sparkle:version>') ||
+        !appcast.includes('url="' + expectedImageURL + '" length="' + metadata.size + '"') ||
+        !appcast.includes('sparkle:edSignature="' + metadata.edSignature + '"')) {
+      throw Error('The public appcast does not identify the verified Mac release.');
+    }
+    console.log('Verified the paired Odd Mac release ' + version);
     return;
   }
-  if (existing) throw Error('A draft already exists. Inspect/recover it rather than replacing its assets.');
-  if (process.platform !== 'darwin') throw Error('The paired notarized Mac release must be prepared on the release Mac.');
-  let ready = false;
-  if (names.every(name => existsSync(join(output, name)))) {
-    try {
-      verifyRelease({ tag_name: tag, assets: names.map(name => ({ name, size: 1 })) }, version, tree,
-        readFileSync(join(output, 'BUILD-INFO.txt'), 'utf8'), source);
-      run('shasum', ['-a', '256', '-c', 'SHA256SUMS.txt'], { cwd: output, stdio: 'inherit' });
-      ready = true;
-    } catch { ready = false; }
+
+  verifyBuildInfo(readFileSync(join(output, 'BUILD-INFO.txt'), 'utf8'), version, revision, tree);
+  run('codesign', ['--verify', '--deep', '--strict', '--all-architectures', '-R', signingRequirement, app]);
+  run('xcrun', ['stapler', 'validate', app]);
+  run('spctl', ['--assess', '--type', 'execute', app]);
+  run('codesign', ['--verify', '--strict', imagePath]);
+  run('xcrun', ['stapler', 'validate', imagePath]);
+  const plist = join(app, 'Contents/Info.plist');
+  const plistValue = name => run('/usr/libexec/PlistBuddy', ['-c', 'Print :' + name, plist]).trim();
+  if (plistValue('CFBundleShortVersionString') !== version || plistValue('SUFeedURL') !== publicFeed ||
+      plistValue('SUVerifyUpdateBeforeExtraction') !== 'true') throw Error('The app has the wrong updater configuration.');
+  const publicKey = run(join(sparkle, 'generate_keys'), ['--account', 'watcher-updates', '-p']).trim();
+  if (publicKey !== plistValue('SUPublicEDKey')) throw Error('The Sparkle key does not match the packaged app.');
+  if (statSync(imagePath).size > 256 * 1024 * 1024) throw Error('Watcher image exceeds its size limit.');
+  const edSignature = run(join(sparkle, 'sign_update'), ['--account', 'watcher-updates', '-p', imagePath]).trim();
+  if (!/^[A-Za-z0-9+/]{86}==$/.test(edSignature)) throw Error('Sparkle did not sign the DMG.');
+  const metadata = { version, revision, tree, ...(await digest(createReadStream(imagePath))), edSignature };
+
+  const scratch = mkdtempSync(join(tmpdir(), 'watcher-publication-'));
+  try {
+    const metadataFile = join(scratch, 'release.json');
+    writeFileSync(metadataFile, JSON.stringify(metadata) + '\n', { mode: 0o600 });
+    const imageKey = version + '/' + imageName;
+    if (!(await get(imageKey, true))) {
+      put(imageKey, imagePath, 'application/x-apple-diskimage', 'public, max-age=31536000, immutable');
+    }
+    const observed = await digest((await get(imageKey)).body);
+    if (observed.sha256 !== metadata.sha256 || observed.size !== metadata.size) {
+      throw Error('The versioned DMG already exists with different bytes or failed readback.');
+    }
+    const existing = await get(versionedMetadataPath, true);
+    if (existing) verifyMetadata(await existing.json(), metadata);
+    else put(versionedMetadataPath, metadataFile, 'application/json', 'public, max-age=31536000, immutable');
+    verifyMetadata(await (await get(versionedMetadataPath)).json(), metadata);
+    if (process.argv.includes('--stage')) {
+      console.log('Verified the immutable Odd release assets for ' + version);
+      return;
+    }
+    const latest = await get('release.json', true);
+    if (latest) {
+      const current = await latest.json();
+      if (current.version === version) {
+        verifyMetadata(current, metadata);
+        console.log('Odd release ' + version + ' is already current.');
+        return;
+      }
+      if (typeof current.version !== 'string' || !/^\d+\.\d+\.\d+$/.test(current.version) ||
+          current.version.localeCompare(version, 'en', { numeric: true }) > 0) {
+        throw Error('Refusing to replace an invalid or newer update pointer.');
+      }
+    }
+    put('release.json', metadataFile, 'application/json', 'no-cache');
+    verifyMetadata(await (await get('release.json')).json(), metadata);
+    console.log('Published Odd update pointer for ' + version);
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
   }
-  if (!ready) {
-    if (!process.env.CODESIGN_IDENTITY || !process.env.NOTARY_PROFILE) throw Error('Set CODESIGN_IDENTITY and NOTARY_PROFILE to prepare the paired Mac release.');
-    run('bash', ['mac/Scripts/package-app.sh', `v${version}`], {
-      env: { ...process.env, REQUIRE_NOTARIZATION: '1' }, stdio: 'inherit',
-    });
-  }
-  const app = join(output, 'Watcher by EXE.app');
-  run('codesign', ['--verify', '--deep', '--strict', app], { stdio: 'inherit' });
-  run('xcrun', ['stapler', 'validate', app], { stdio: 'inherit' });
-  run('spctl', ['--assess', '--type', 'execute', '--verbose=2', app], { stdio: 'inherit' });
-  run('xcrun', ['stapler', 'validate', join(output, names[0])], { stdio: 'inherit' });
-  const buildInfo = readFileSync(join(output, 'BUILD-INFO.txt'), 'utf8');
-  verifyRelease({ tag_name: tag, assets: names.map(name => ({ name, size: 1 })) }, version, tree, buildInfo, source);
-  const changelog = readFileSync(join(root, 'CHANGELOG.md'), 'utf8').split(/\r?\n/);
-  const heading = changelog.findIndex(line => line.startsWith(`## ${version} (`));
-  if (heading < 0) throw Error('The release must have its own changelog section.');
-  const following = changelog.findIndex((line, index) => index > heading && line.startsWith('## '));
-  const changes = changelog.slice(heading + 1, following < 0 ? undefined : following).join('\n').trim();
-  if (!changes) throw Error('The release changelog section is empty.');
-  const notes = `${changes}\n\nDownload the universal DMG for macOS 14+. The app is Developer ID signed and Apple notarized, and includes its matching CLI. Existing users can select Update in Watcher. Terminal users can run npm install -g exe-watcher@latest --registry=https://registry.npmjs.org.\n\nIncludes CodeBurn by AgentSeal (MIT); full notices ship in the app and npm package.`;
-  run('gh', ['release', 'create', tag, '--repo', repository, '--target', source, '--draft', '--title', `Watcher ${version}`,
-    '--notes', notes, ...names.map(name => join(output, name))], { stdio: 'inherit' });
-  const draft = releaseMetadata(tag);
-  for (const name of names) {
-    const asset = draft.assets.find(item => item.name === name);
-    const hash = createHash('sha256').update(readFileSync(join(output, name))).digest('hex');
-    if (asset?.digest !== `sha256:${hash}`) throw Error(`Uploaded asset digest mismatch: ${name}`);
-  }
-  run('gh', ['release', 'edit', tag, '--repo', repository, '--draft=false', '--latest'], { stdio: 'inherit' });
-  const published = releaseMetadata(tag);
-  verifyRelease(published, version, tree, downloadBuildInfo(published.assets.find(asset => asset.name === 'BUILD-INFO.txt')), source);
-  console.log(`Published paired Mac release ${version}; npm publication can proceed.`);
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {

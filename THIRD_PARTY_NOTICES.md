@@ -49,3 +49,7 @@ Watcher's account backup uses a pinned subset of Odd Core's MIT-licensed
 `@odd/crypto` account recovery and backup engine. Source hashes and the small
 Watcher/type-checking adaptations are in `vendor/odd-core-recovery/PROVENANCE.json`;
 its license is included alongside it.
+
+## Sparkle
+
+The macOS updater includes Sparkle 2. Its license is bundled as Sparkle-LICENSE.

@@ -18,11 +18,12 @@ configured. No paid runners, budget increases, EAS or new schedules are authoriz
 Never copy personal Keychains, profiles or credentials into a cloud handoff.
 Keep credentials in their existing protected local storage.
 
-Keep paired npm/Mac gates in `mac/Scripts/publish-release.mjs`: clean actual merged
-main, successful CI, matching version/source tree, signed and stapled notarized
-artifacts, Gatekeeper acceptance and verified uploaded digests. Observe actual npm
-latest, updater assets and installed app before claiming delivery. See
-`mac/README.md` and `docs/cloud-release-0.2.72-status.md`.
+Keep paired npm/Mac gates in mac/Scripts/publish-release.mjs. Publish from clean
+actual merged main after CI passes. Keep the Developer ID and Sparkle keys on
+the release Mac and verify notarization, Gatekeeper, immutable DMG readback and
+version/source provenance. Odd Community serves the update feed and website
+download using the existing exe-releases bucket. Keep a single publisher and
+verify the live feed, updater install and npm registry after promotion.
 
 ## Odd account history — shared-project decision, 2026-10-29
 

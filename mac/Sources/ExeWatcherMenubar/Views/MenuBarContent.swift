@@ -277,7 +277,6 @@ private struct FirstLoadErrorOverlay: View {
 
 private struct Header: View {
     @Environment(AppStore.self) private var store
-    @Environment(UpdateChecker.self) private var updateChecker
 
     var body: some View {
         HStack {
@@ -306,58 +305,11 @@ private struct Header: View {
                         .font(.system(size: 9, weight: .medium))
                         .foregroundStyle(.orange.opacity(0.8))
                 }
-                if updateChecker.shouldShowUpdateButton {
-                    UpdateBadge()
-                }
             }
         }
         .padding(.horizontal, 14)
         .padding(.top, 10)
         .padding(.bottom, 8)
-    }
-}
-
-private struct UpdateBadge: View {
-    @Environment(UpdateChecker.self) private var updateChecker
-
-    var body: some View {
-        VStack(spacing: 2) {
-            Button {
-                updateChecker.performUpdate()
-            } label: {
-                HStack(spacing: 4) {
-                    if updateChecker.isUpdating {
-                        ProgressView()
-                            .controlSize(.mini)
-                            .scaleEffect(0.7)
-                    } else if updateChecker.updateError != nil {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .font(.system(size: 10))
-                            .foregroundStyle(.orange)
-                    } else {
-                        Image(systemName: "arrow.down.circle.fill")
-                            .font(.system(size: 10))
-                    }
-                    Text(updateChecker.isUpdating ? "Updating..." : updateChecker.updateError != nil ? "Retry" : "Update Available")
-                        .font(.system(size: 10, weight: .medium))
-                }
-                .padding(.horizontal, 7)
-                .padding(.vertical, 3)
-            }
-            .goldButton()
-            .controlSize(.mini)
-            .disabled(updateChecker.isUpdating)
-
-            if let error = updateChecker.updateError {
-                Text(error)
-                    .font(.system(size: 8.5))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .multilineTextAlignment(.trailing)
-                    .frame(maxWidth: 220, alignment: .trailing)
-            }
-        }
     }
 }
 
@@ -438,6 +390,7 @@ struct StarBanner: View {
 }
 
 struct FooterBar: View {
+    @Environment(UpdateChecker.self) private var updateChecker
     @AppStorage(MenuBarOwlAnimator.preferenceKey) private var animateMenuBarOwl = true
     @Environment(AppStore.self) private var store
     @Environment(FloatingQuotaPreferences.self) private var quotaPreferences
@@ -495,6 +448,8 @@ struct FooterBar: View {
 
             Menu {
                 Button("Odd account & private history…") { OddAccountWindow.show() }
+                Button("Check for Updates…") { updateChecker.checkForUpdates() }
+                    .disabled(!updateChecker.isAvailable)
                 Divider()
                 Toggle("Animate menu bar owl", isOn: $animateMenuBarOwl)
                 Divider()
