@@ -101,10 +101,11 @@ struct ResourceAuditTests {
     @Test
     func scannerRunsAtLowPriority() async throws {
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
-        process.arguments = ["-c", "import os,time; time.sleep(0.05); print(os.getpriority(os.PRIO_PROCESS,0))"]
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = ["-c", "sleep 0.05; exec /bin/ps -o nice= -p \"$$\""]
         let result = try await CLIProcessRunner(process: process, timeout: 5).run()
-        #expect(Int(String(data: result.0, encoding: .utf8)!.trimmingCharacters(in: .whitespacesAndNewlines))! >= 10)
+        let priority = try #require(Int(String(decoding: result.0, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)))
+        #expect(priority >= 10)
     }
 
     @Test @MainActor
@@ -178,7 +179,7 @@ struct ResourceAuditTests {
         defer { try? FileManager.default.removeItem(at: dir) }
         let script = dir.appendingPathComponent("fake-cli")
         let marker = dir.appendingPathComponent("started")
-        let code = "#!/usr/bin/python3\nimport time\nopen('" + marker.path + "', 'w').close()\ntime.sleep(2)\nprint('{}')\n"
+        let code = "#!/bin/sh\n: > \"${0%/*}/started\"\nexec /bin/sleep 2\n"
         try code.write(to: script, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: script.path)
         let previous = ProcessInfo.processInfo.environment["EXE_WATCHER_BIN"]
