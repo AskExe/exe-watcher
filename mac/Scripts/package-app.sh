@@ -100,6 +100,14 @@ cat > "${BUNDLE}/Contents/Info.plist" <<PLIST
     <string>${MIN_MACOS}</string>
     <key>LSUIElement</key>
     <true/>
+    <key>SUFeedURL</key>
+    <string>https://odd.community/watcher/appcast.xml</string>
+    <key>SUPublicEDKey</key>
+    <string>CRkMgcjjWivQVrB9meXieel3aMfPvYZLc1z1SZn1FZg=</string>
+    <key>SUVerifyUpdateBeforeExtraction</key>
+    <true/>
+    <key>SUEnableAutomaticChecks</key>
+    <true/>
     <key>NSHighResolutionCapable</key>
     <true/>
     <key>NSHumanReadableCopyright</key>
@@ -133,6 +141,12 @@ for rb in "${BIN_PATH}"/*.bundle; do
   echo "  → $(basename "${rb}")"
 done
 
+SPARKLE_ARTIFACT="${MAC_DIR}/.build/artifacts/sparkle/Sparkle"
+SPARKLE_FRAMEWORK="${SPARKLE_ARTIFACT}/Sparkle.xcframework/macos-arm64_x86_64/Sparkle.framework"
+mkdir -p "${BUNDLE}/Contents/Frameworks"
+ditto "${SPARKLE_FRAMEWORK}" "${BUNDLE}/Contents/Frameworks/Sparkle.framework"
+cp "${SPARKLE_ARTIFACT}/LICENSE" "${BUNDLE}/Contents/Resources/Sparkle-LICENSE"
+lipo "${BUNDLE}/Contents/Frameworks/Sparkle.framework/Sparkle" -verify_arch arm64 x86_64
 echo "▸ Bundling pinned Node runtime and production CLI..."
 "${MAC_DIR}/Scripts/bundle-runtime.sh" "${BUNDLE}/Contents"
 lipo "${BUNDLE}/Contents/MacOS/${EXECUTABLE_NAME}" -verify_arch arm64 x86_64
@@ -146,6 +160,13 @@ else
   SIGN_ARGS+=(--options runtime --timestamp)
 fi
 codesign "${SIGN_ARGS[@]}" --entitlements "${MAC_DIR}/Scripts/node-entitlements.plist" "${BUNDLE}/Contents/Helpers/node"
+SPARKLE_VERSION_DIR="${BUNDLE}/Contents/Frameworks/Sparkle.framework/Versions/B"
+codesign "${SIGN_ARGS[@]}" --preserve-metadata=entitlements "${SPARKLE_VERSION_DIR}/Autoupdate"
+codesign "${SIGN_ARGS[@]}" --preserve-metadata=entitlements "${SPARKLE_VERSION_DIR}/Updater.app"
+for service in "${SPARKLE_VERSION_DIR}"/XPCServices/*.xpc; do
+  codesign "${SIGN_ARGS[@]}" --preserve-metadata=entitlements "${service}"
+done
+codesign "${SIGN_ARGS[@]}" "${SPARKLE_VERSION_DIR}"
 codesign "${SIGN_ARGS[@]}" "${BUNDLE}"
 codesign --verify --deep --strict "${BUNDLE}"
 # Exercise the signed runtime, not only the pre-signing binary.
