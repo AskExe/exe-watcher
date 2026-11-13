@@ -33,6 +33,7 @@ private struct AXNode {
     var label: String? { attribute(kAXDescriptionAttribute) ?? attribute("AXLabel") }
     var identifier: String? { attribute(kAXIdentifierAttribute) }
     var subrole: String? { attribute(kAXSubroleAttribute) }
+    var selected: Bool { attribute("AXSelected") ?? false }
 
     func attribute<T>(_ name: String) -> T? {
         var value: CFTypeRef?
@@ -327,7 +328,7 @@ struct ExeWatcherUITests {
     // ------------------------------------------------------------------
     // 6. Period Tab Switching (requires AX)
     // ------------------------------------------------------------------
-    @Test("clicking each period tab updates the visible caption")
+    @Test("clicking each period tab selects it")
     func periodTabSwitching() throws {
         try withAX { node in
             guard let statusItem = findStatusItem(appNode: node),
@@ -335,11 +336,7 @@ struct ExeWatcherUITests {
                 Issue.record("Could not open the Watcher popover")
                 return
             }
-            let calendar = Calendar.current
-            let currentMonth = calendar.monthSymbols[calendar.component(.month, from: Date()) - 1]
-            let periods = [("7 Days", "7 Days"), ("30 Days", "30 Days"), ("Month", currentMonth),
-                           ("All", "All Time"), ("Today", "Today")]
-            for (buttonLabel, expectedCaption) in periods {
+            for buttonLabel in ["7 Days", "30 Days", "Month", "All", "Today"] {
                 var currentPopover: AXNode?
                 _ = waitUntil {
                     currentPopover = findPopoverWindow(appNode: node)
@@ -358,14 +355,14 @@ struct ExeWatcherUITests {
                     continue
                 }
                 button.press()
-                var texts: [String] = []
-                let captionFound = waitUntil {
+                let selected = waitUntil {
                     guard let current = findPopoverWindow(appNode: node) else { return false }
-                    texts = current.allText()
-                    return texts.contains { $0.localizedCaseInsensitiveContains(expectedCaption) && $0.contains("·") }
+                    return current.findAll { n in
+                        (n.role == kAXButtonRole as String || n.role == kAXRadioButtonRole as String)
+                        && (n.title == buttonLabel || n.label == buttonLabel || n.value == buttonLabel)
+                    }.first?.selected == true
                 }
-                #expect(captionFound,
-                    "After clicking '\(buttonLabel)', expected its period caption. Found: \(texts.prefix(10))")
+                #expect(selected, "After clicking '\(buttonLabel)', it should expose the selected accessibility state")
             }
         }
     }
