@@ -228,7 +228,7 @@ xcrun SetFile -a C "${DMG_MOUNT_DIR}"
 # Older npm installers and stapler need a real app at the original path.
 # Hard links share the packaged files without doubling the download size.
 cp -al "${DMG_MOUNT_DIR}/${DMG_BUNDLE_NAME}" "${DMG_MOUNT_DIR}/${BUNDLE_NAME}"
-xcrun SetFile -a V "${DMG_MOUNT_DIR}/${BUNDLE_NAME}"
+chflags hidden "${DMG_MOUNT_DIR}/${BUNDLE_NAME}"
 hdiutil detach -quiet "${DMG_MOUNT_DIR}"
 DMG_MOUNTED=0
 hdiutil convert -quiet "${DMG_WRITABLE}" -format UDZO -o "${DMG_PATH}"
