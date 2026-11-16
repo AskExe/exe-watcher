@@ -11,7 +11,7 @@ Native Swift + SwiftUI menubar app. The Watcher menubar surface.
 
 ## Install (end users)
 
-Download the universal `.dmg` from [odd.community/watcher](https://odd.community/watcher), drag **Watcher by EXE** into **Applications**, then open it. No Node, npm, account, or command-line setup is needed for the packaged app. Public releases must be Developer ID signed and Apple notarized.
+Download the universal `.dmg` from [odd.community/watcher](https://odd.community/watcher), drag **Watcher** into **Applications**, then open it. No Node, npm, account, or command-line setup is needed for the packaged app. Public releases must be Developer ID signed and Apple notarized.
 
 Alternatively, with Node 22.13+ already installed:
 

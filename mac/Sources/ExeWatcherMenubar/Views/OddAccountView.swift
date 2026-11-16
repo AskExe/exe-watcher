@@ -213,7 +213,7 @@ enum OddAccountWindow {
         if controller == nil {
             let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: 680),
                                   styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
-            window.title = "Watcher by EXE"
+            window.title = "Watcher"
             window.backgroundColor = NSColor(Theme.warmSurfaceDark)
             window.contentMinSize = NSSize(width: 500, height: 580)
             window.contentView = NSHostingView(rootView: OddAccountView(model: layoutPreview.map(OddAccountModel.layoutPreview) ?? OddAccountModel()))

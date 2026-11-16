@@ -12,6 +12,7 @@ set -euo pipefail
 VERSION="${1:-dev}"
 [[ "${VERSION}" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || { echo "Invalid version label" >&2; exit 1; }
 BUNDLE_NAME="Watcher by EXE.app"
+DMG_BUNDLE_NAME="Watcher.app"
 BUNDLE_ID="com.askexe.exe-watcher-menubar"
 EXECUTABLE_NAME="ExeWatcherMenubar"
 MIN_MACOS="14.0"
@@ -29,6 +30,7 @@ fi
 for tool in swift node npm lipo codesign hdiutil curl; do
   command -v "${tool}" >/dev/null || { echo "Missing ${tool}" >&2; exit 1; }
 done
+xcrun --find SetFile >/dev/null
 node -e 'const [major, minor] = process.versions.node.split(".").map(Number); if (major < 22 || (major === 22 && minor < 13) || (major === 23 && minor < 4)) process.exit(1)'
 plutil -lint "${MAC_DIR}/Scripts/node-entitlements.plist"
 bash -n "${MAC_DIR}/Scripts/bundle-runtime.sh"
@@ -37,7 +39,15 @@ if [[ "${IDENTITY}" != - ]]; then
 fi
 mkdir -p "${MAC_DIR}/.build"
 DIST_DIR="$(mktemp -d "${MAC_DIR}/.build/package.XXXXXX")"
-trap 'rm -rf "${DIST_DIR}"' EXIT
+DMG_MOUNT_DIR="${DIST_DIR}/dmg-mount"
+DMG_MOUNTED=0
+cleanup() {
+  if [[ "${DMG_MOUNTED}" == 1 ]]; then
+    hdiutil detach -quiet "${DMG_MOUNT_DIR}" || return
+  fi
+  rm -rf "${DIST_DIR}"
+}
+trap cleanup EXIT
 
 echo "▸ Building bundled CLI..."
 (cd "${ROOT}" && npm run build)
@@ -77,7 +87,7 @@ cat > "${BUNDLE}/Contents/Info.plist" <<PLIST
     <key>CFBundleDevelopmentRegion</key>
     <string>en</string>
     <key>CFBundleDisplayName</key>
-    <string>Watcher by EXE</string>
+    <string>Watcher</string>
     <key>CFBundleExecutable</key>
     <string>${EXECUTABLE_NAME}</string>
     <key>CFBundleIconName</key>
@@ -89,7 +99,7 @@ cat > "${BUNDLE}/Contents/Info.plist" <<PLIST
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>
-    <string>Watcher by EXE</string>
+    <string>Watcher</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
@@ -191,24 +201,39 @@ echo "▸ Packaging ${ZIP_NAME}..."
 echo "▸ Building drag-to-install disk image..."
 DMG_STAGE="${DIST_DIR}/dmg-content"
 mkdir "${DMG_STAGE}"
-ditto "${BUNDLE}" "${DMG_STAGE}/${BUNDLE_NAME}"
+ditto "${BUNDLE}" "${DMG_STAGE}/${DMG_BUNDLE_NAME}"
+cp "${BUNDLE}/Contents/Resources/AppIcon.icns" "${DMG_STAGE}/.VolumeIcon.icns"
 ln -s /Applications "${DMG_STAGE}/Applications"
 cat > "${DMG_STAGE}/Read me.txt" <<'README'
-Watcher by EXE — macOS 14 or later (Apple Silicon and Intel)
+Watcher — macOS 14 or later (Apple Silicon and Intel)
 
-Drag Watcher by EXE into Applications, then open it.
+Drag Watcher into Applications, then open it.
 Watcher lives in your menu bar. Click the owl to see your local AI coding usage.
 Node and the Watcher CLI are included. No npm install or account is required.
 Costs are API-equivalent estimates, not subscription invoices.
 
 Includes code from CodeBurn by AgentSeal (MIT).
-License and attribution notices: Watcher by EXE.app/Contents/Resources/cli/
+License and attribution notices: Watcher.app/Contents/Resources/cli/
 
 Support: https://github.com/AskExe/exe-watcher/issues
 README
 DMG_PATH="${DIST_DIR}/Watcher-${VERSION}-universal.dmg"
-hdiutil create -quiet -volname "Watcher by EXE" -srcfolder "${DMG_STAGE}" -format UDZO "${DMG_PATH}"
-rm -rf "${DMG_STAGE}"
+DMG_WRITABLE="${DIST_DIR}/watcher-writable.dmg"
+hdiutil create -quiet -volname "Watcher" -srcfolder "${DMG_STAGE}" -format UDRW "${DMG_WRITABLE}"
+mkdir "${DMG_MOUNT_DIR}"
+hdiutil attach -quiet -nobrowse -mountpoint "${DMG_MOUNT_DIR}" "${DMG_WRITABLE}"
+DMG_MOUNTED=1
+# Finder reads the custom icon flag from the volume root, not the staging folder.
+xcrun SetFile -a C "${DMG_MOUNT_DIR}"
+# Older npm installers and stapler need a real app at the original path.
+# Hard links share the packaged files without doubling the download size.
+cp -al "${DMG_MOUNT_DIR}/${DMG_BUNDLE_NAME}" "${DMG_MOUNT_DIR}/${BUNDLE_NAME}"
+xcrun SetFile -a V "${DMG_MOUNT_DIR}/${BUNDLE_NAME}"
+hdiutil detach -quiet "${DMG_MOUNT_DIR}"
+DMG_MOUNTED=0
+hdiutil convert -quiet "${DMG_WRITABLE}" -format UDZO -o "${DMG_PATH}"
+rm -f "${DMG_WRITABLE}"
+rm -rf "${DMG_STAGE}" "${DMG_MOUNT_DIR}"
 if [[ "${IDENTITY}" != - ]]; then
   codesign --force --sign "${IDENTITY}" --timestamp "${DMG_PATH}"
 fi
