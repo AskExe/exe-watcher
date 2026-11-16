@@ -341,9 +341,6 @@ struct OddAccountView: View {
                     Text("Important Messages from Odd Community for Product Updates and Exclusive Member Access.").bold()
                 }
                 .accessibilityIdentifier("odd-accept-email-communications")
-                Text("Optional marketing emails. Unsubscribe anytime.")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
                 Button { Task { await model.requestCode() } } label: {
                     HStack { Text("Agree and send verification code"); Spacer(); Image(systemName: "arrow.up.right") }
                 }
@@ -351,8 +348,6 @@ struct OddAccountView: View {
                 .keyboardShortcut(.defaultAction)
                 .disabled(!model.canRequestCode)
             }
-            Text("Signing in does not upload history or enable backup.")
-                .font(.system(size: 12)).foregroundStyle(.secondary)
         }
     }
 
