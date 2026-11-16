@@ -21,7 +21,8 @@ let package = Package(
                 .copy("Resources/owl.pdf"),
                 .copy("Resources/owl-menubar.pdf"),
                 .copy("Resources/Epilogue-Bold.ttf"),
-                .copy("Resources/AppIcon.icns")
+                .copy("Resources/AppIcon.icns"),
+                .copy("Resources/odd-community-mark.png")
             ],
             swiftSettings: [
                 .enableUpcomingFeature("StrictConcurrency")

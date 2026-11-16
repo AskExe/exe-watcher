@@ -73,7 +73,7 @@ for (const name of [...Object.keys(studies), ...Object.keys(eyeStudies)]) {
 }
 writeFileSync(`${root}/assets/owls/selected.svg`, svg(selection.style));
 writeFileSync(`${root}/assets/owls/selected-menubar.svg`, svg(selection.style, false, true));
-const oddMark = readFileSync(`${root}/assets/owls/brand/odd-community-mark.png`).toString('base64');
+const oddMark = readFileSync(`${root}/mac/Sources/ExeWatcherMenubar/Resources/odd-community-mark.png`).toString('base64');
 const selectedAppIcon = svg(selection.style, true).replace('</svg>', `<image x="372" y="406" width="80" height="80" href="data:image/png;base64,${oddMark}"/></svg>`);
 writeFileSync(`${root}/assets/owls/selected-app.svg`, selectedAppIcon);
 // Tahoe applies the enclosure itself; the catalog source must have opaque square corners.
