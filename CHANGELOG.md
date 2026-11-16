@@ -1,6 +1,11 @@
 # Changelog
 
-## Unreleased
+## 0.2.77 (2026-11-17)
+
+### Mac installer and Odd account
+
+- Show **Watcher** beside the Applications shortcut in the installer. The Watcher icon carries the Odd Community logo.
+- Keep the Odd Community logo visible throughout sign-in and verification. Group account settings and align the account email with **Sign out**.
 
 ### Security and launch hardening
 
