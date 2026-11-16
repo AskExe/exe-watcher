@@ -73,9 +73,11 @@ for (const name of [...Object.keys(studies), ...Object.keys(eyeStudies)]) {
 }
 writeFileSync(`${root}/assets/owls/selected.svg`, svg(selection.style));
 writeFileSync(`${root}/assets/owls/selected-menubar.svg`, svg(selection.style, false, true));
-writeFileSync(`${root}/assets/owls/selected-app.svg`, svg(selection.style, true));
+const oddMark = readFileSync(`${root}/mac/Sources/ExeWatcherMenubar/Resources/odd-community-mark.png`).toString('base64');
+const selectedAppIcon = svg(selection.style, true).replace('</svg>', `<image x="372" y="406" width="80" height="80" href="data:image/png;base64,${oddMark}"/></svg>`);
+writeFileSync(`${root}/assets/owls/selected-app.svg`, selectedAppIcon);
 // Tahoe applies the enclosure itself; the catalog source must have opaque square corners.
-writeFileSync(`${root}/assets/owls/selected-app-unmasked.svg`, svg(selection.style, true).replace(' rx="112"', ''));
+writeFileSync(`${root}/assets/owls/selected-app-unmasked.svg`, selectedAppIcon.replace(' rx="112"', ''));
 writeFileSync(`${root}/assets/owls/selected-black-on-yellow.svg`, svg(selection.style, false, false, 'blackOnYellow'));
 const mark = svg(selection.style).replace(/^<svg[^>]*>/, '').replace(/<\/svg>\s*$/, '');
 writeFileSync(`${root}/assets/owl-header.svg`, `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 200" width="800" height="200">\n  <rect width="800" height="200" rx="16" fill="#1A1528"/>\n  <g transform="translate(341.2500, 40.3687) scale(1.175)">${mark}</g>\n  <text x="28" y="184" font-family="Futura, Avenir Next, Helvetica Neue, sans-serif" font-weight="bold" font-size="18" letter-spacing="4" fill="#F5D76E">EXE</text>\n</svg>\n`);

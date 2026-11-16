@@ -80,9 +80,11 @@ final class OddAccountModel {
             model.email = "you@example.com"
             model.codeSent = true
         }
-        if state == "recovery" {
-            model.signedIn = true; model.backupAvailable = true; model.recoveryOpen = true
+        if state == "account" || state == "recovery" {
+            model.signedIn = true
             model.email = "you@example.com"
+            model.backupAvailable = state == "recovery"
+            model.recoveryOpen = state == "recovery"
         }
         return model
     }
@@ -213,7 +215,7 @@ enum OddAccountWindow {
         if controller == nil {
             let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: 680),
                                   styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
-            window.title = "Watcher by EXE"
+            window.title = "Watcher"
             window.backgroundColor = NSColor(Theme.warmSurfaceDark)
             window.contentMinSize = NSSize(width: 500, height: 580)
             window.contentView = NSHostingView(rootView: OddAccountView(model: layoutPreview.map(OddAccountModel.layoutPreview) ?? OddAccountModel()))
@@ -247,12 +249,7 @@ struct OddAccountView: View {
                     if !model.message.isEmpty { Text(model.message).font(.system(size: 13)).textSelection(.enabled).accessibilityIdentifier("odd-account-message") }
                     if model.busy { ProgressView().controlSize(.small) }
                 }
-                Divider()
-                DisclosureGroup(isExpanded: $historyExpanded) {
-                    dashboard.padding(.top, 14)
-                } label: { Text("Private spending & activity").font(.system(size: 14, weight: .semibold)) }
-                Text("Local tracking works without an account. Product usage statistics and error diagnostics are separate settings. Watcher never publishes your spending or activity to your profile.")
-                    .font(.system(size: 12)).foregroundStyle(.secondary)
+                accountHistory
             }.frame(maxWidth: 620, alignment: .leading)
                 .padding(24)
                 .frame(maxWidth: .infinity)
@@ -269,10 +266,8 @@ struct OddAccountView: View {
         .preferredColorScheme(.dark)
         .frame(minWidth: 500, minHeight: 580)
         .disabled(model.busy)
-        .overlay(alignment: .bottomTrailing) {
-            if model.busy && model.backupEnabled {
-                Button("Pause backup") { Task { await model.pause() } }.padding()
-            }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            accountFooter
         }
         .task { await model.perform(.init(action: "status")) }
         .onDisappear { model.clearPhrase(); model.code = "" }
@@ -280,6 +275,32 @@ struct OddAccountView: View {
             Button("Cancel", role: .cancel) {}
             Button("Delete cloud history", role: .destructive) { Task { await model.perform(.init(action: "delete", confirm: true)) } }
         } message: { Text("Deletes Watcher backups from all devices. Your local tracking and Odd account remain. Backup is paused.") }
+    }
+
+    @MainActor private static let oddCommunityMark: NSImage? = {
+        let resources = Bundle.main.resourceURL
+            .flatMap { Bundle(url: $0.appendingPathComponent("ExeWatcherMenubar_ExeWatcherMenubar.bundle")) }
+            ?? Bundle.module
+        return resources.image(forResource: "odd-community-mark")
+    }()
+
+    private var accountFooter: some View {
+        HStack {
+            if model.busy && model.backupEnabled {
+                Button("Pause backup") { Task { await model.pause() } }
+            }
+            Spacer(minLength: 0)
+            if let mark = Self.oddCommunityMark {
+                Image(nsImage: mark)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 36, height: 36)
+                    .accessibilityLabel("Odd Community")
+            }
+        }
+        .padding(.horizontal, 24)
+        .padding(.vertical, 12)
+        .background(Theme.warmSurfaceDark)
     }
 
     private var brandHeader: some View {
@@ -341,9 +362,6 @@ struct OddAccountView: View {
                     Text("Important Messages from Odd Community for Product Updates and Exclusive Member Access.").bold()
                 }
                 .accessibilityIdentifier("odd-accept-email-communications")
-                Text("Optional marketing emails. Unsubscribe anytime.")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
                 Button { Task { await model.requestCode() } } label: {
                     HStack { Text("Agree and send verification code"); Spacer(); Image(systemName: "arrow.up.right") }
                 }
@@ -351,21 +369,16 @@ struct OddAccountView: View {
                 .keyboardShortcut(.defaultAction)
                 .disabled(!model.canRequestCode)
             }
-            Text("Signing in does not upload history or enable backup.")
-                .font(.system(size: 12)).foregroundStyle(.secondary)
         }
     }
 
     private var account: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top) {
-                Text(model.email).font(.system(size: 15, weight: .semibold))
-                    .lineLimit(2).truncationMode(.middle).textSelection(.enabled)
-                Spacer()
-                Button("Sign out") { Task { await model.perform(.init(action: "logout")) } }
-            }
+        VStack(alignment: .leading, spacing: 16) {
+            accountActions
             if !model.backupAvailable {
-                Text("Cloud backup isn’t available in this build yet. Your local history is available below.").foregroundStyle(.secondary)
+                Label("Cloud backup is unavailable in this build.", systemImage: "lock")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
             } else if model.backupEnabled {
                 Label("Encrypted cloud backup enabled", systemImage: "checkmark.shield")
                 if let at = model.lastBackupAt { Text("Last completed backup: \(at)").font(.system(size: 12)).foregroundStyle(.secondary) }
@@ -381,10 +394,77 @@ struct OddAccountView: View {
             if model.backupAvailable {
                 Button("Delete Watcher cloud history…", role: .destructive) { confirmDelete = true }
             }
-            HStack {
-                Link("Manage Odd account & email preferences", destination: URL(string: "https://odd.community/account")!)
-                Link("Delete Odd account…", destination: URL(string: "https://odd.community/account/delete")!)
-            }.font(.system(size: 12)).buttonStyle(.plain).foregroundStyle(Theme.brandAccent)
+        }
+    }
+
+    private var accountActions: some View {
+        VStack(spacing: 0) {
+            HStack(alignment: .center, spacing: 14) {
+                Text(model.email)
+                    .font(.system(size: 16, weight: .semibold))
+                    .lineLimit(2)
+                    .truncationMode(.middle)
+                    .textSelection(.enabled)
+                    .layoutPriority(1)
+                Spacer(minLength: 0)
+                Button("Sign out") { Task { await model.perform(.init(action: "logout")) } }
+                    .fixedSize()
+            }
+            .padding(16)
+
+            Divider().padding(.horizontal, 16)
+            accountLink("Manage Odd account & email preferences", systemImage: "person.crop.circle",
+                        destination: URL(string: "https://odd.community/account")!)
+            Divider().padding(.horizontal, 16)
+            accountLink("Delete Odd account…", systemImage: "trash",
+                        destination: URL(string: "https://odd.community/account/delete")!)
+        }
+        .background {
+            RoundedRectangle(cornerRadius: 12)
+                .fill(.white.opacity(0.045))
+                .overlay { RoundedRectangle(cornerRadius: 12).strokeBorder(.white.opacity(0.1)) }
+        }
+    }
+
+    private func accountLink(_ title: String, systemImage: String, destination: URL) -> some View {
+        Link(destination: destination) {
+            HStack(spacing: 10) {
+                Image(systemName: systemImage)
+                    .foregroundStyle(Theme.brandAccent)
+                    .frame(width: 18)
+                    .accessibilityHidden(true)
+                Text(title)
+                Spacer(minLength: 8)
+                Image(systemName: "arrow.up.right")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
+            }
+            .font(.system(size: 13, weight: .medium))
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var accountHistory: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            DisclosureGroup(isExpanded: $historyExpanded) {
+                dashboard.padding(.top, 14)
+            } label: {
+                Text("Private spending & activity").font(.system(size: 14, weight: .semibold))
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background {
+                RoundedRectangle(cornerRadius: 10)
+                    .strokeBorder(.white.opacity(0.12))
+            }
+
+            Text("Local tracking works without an account. Product usage statistics and error diagnostics are separate settings. Watcher never publishes your spending or activity to your profile.")
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
         }
     }
 

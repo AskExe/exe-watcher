@@ -14,9 +14,11 @@ export interface SecureStore {
 export class WatcherSecureStore implements SecureStore {
   private request(action: string, key: string, value?: string): Promise<string | null> {
     if (process.platform !== 'darwin') throw new CloudError('Cloud sign-in currently requires the Watcher Mac app and macOS Keychain.')
+    const applications = [join(homedir(), 'Applications'), '/Applications']
+    const bundleNames = ['Watcher.app', 'Watcher by EXE.app']
     const candidates = [process.env['EXE_WATCHER_KEYCHAIN_HELPER'],
-      join(homedir(), 'Applications/Watcher by EXE.app/Contents/MacOS/ExeWatcherMenubar'),
-      '/Applications/Watcher by EXE.app/Contents/MacOS/ExeWatcherMenubar']
+      ...applications.flatMap(directory => bundleNames.map(name =>
+        join(directory, name, 'Contents/MacOS/ExeWatcherMenubar')))]
     const executable = candidates.find((v): v is string => !!v && existsSync(v))
     if (!executable) throw new CloudError('Install the matching Watcher Mac app to store your Odd session securely.')
     return new Promise((resolve, reject) => {
