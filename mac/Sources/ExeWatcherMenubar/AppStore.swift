@@ -163,9 +163,7 @@ final class AppStore {
         self.personalActivity = PersonalActivityStore(url: badgeCacheURL?.deletingLastPathComponent().appendingPathComponent("personal-activity-v1.json"))
         let todayKey = PayloadCacheKey(period: .today, provider: .all, now: now())
         if let url = badgeCacheURL,
-           let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize,
-           size <= 2 * 1024 * 1024,
-           let data = try? Data(contentsOf: url),
+           let data = try? SafeFile.read(from: url.path, maxBytes: 2 * 1024 * 1024),
            let saved = try? JSONDecoder().decode(BadgeSnapshot.self, from: data),
            saved.dateAnchor == todayKey.dateAnchor,
            saved.fetchedAt <= now(),
@@ -937,14 +935,14 @@ final class AppStore {
                 subscription = nil
                 subscriptionConnectionMessage = "Select Refresh to allow Watcher to read your Claude Code sign-in from Keychain. You can also sign in again below."
             case SubscriptionError.credentialsInvalid,
-                 SubscriptionError.usageFetchFailed(401, _),
-                 SubscriptionError.usageFetchFailed(403, _),
-                 SubscriptionError.refreshFailed(400, _),
-                 SubscriptionError.refreshFailed(401, _),
-                 SubscriptionError.refreshFailed(403, _):
+                 SubscriptionError.usageFetchFailed(401),
+                 SubscriptionError.usageFetchFailed(403),
+                 SubscriptionError.refreshFailed(400),
+                 SubscriptionError.refreshFailed(401),
+                 SubscriptionError.refreshFailed(403):
                 subscription = nil
                 subscriptionConnectionMessage = "Your Claude sign-in needs to be renewed. Select Sign in with Claude, finish in your browser, then Refresh here."
-            case SubscriptionError.usageFetchFailed(429, _), SubscriptionError.refreshFailed(429, _):
+            case SubscriptionError.usageFetchFailed(429), SubscriptionError.refreshFailed(429):
                 subscriptionRateLimitedUntil = now().addingTimeInterval(15 * 60)
             default: break
             }

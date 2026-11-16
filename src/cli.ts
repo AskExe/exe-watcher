@@ -275,7 +275,7 @@ function buildJsonReport(projects: ProjectSummary[], period: string, periodKey: 
     .sort(([, a], [, b]) => b.cost - a.cost)
     .map(([name, { cost, ...rest }]) => ({ name, ...rest, callsIncomplete: false, cost: convertCost(cost) }))
 
-  const catMap: Record<string, { turns: number; cost: number; editTurns: number; oneShotTurns: number }> = {}
+  const catMap: Record<string, { turns: number; cost: number; editTurns: number; oneShotTurns: number }> = Object.create(null)
   for (const sess of sessions) {
     for (const [cat, d] of Object.entries(sess.categoryBreakdown)) {
       if (!catMap[cat]) { catMap[cat] = { turns: 0, cost: 0, editTurns: 0, oneShotTurns: 0 } }
@@ -288,7 +288,7 @@ function buildJsonReport(projects: ProjectSummary[], period: string, periodKey: 
   const activities = Object.entries(catMap)
     .sort(([, a], [, b]) => b.cost - a.cost)
     .map(([cat, d]) => ({
-      category: CATEGORY_LABELS[cat as TaskCategory] ?? cat,
+      category: Object.hasOwn(CATEGORY_LABELS, cat) ? CATEGORY_LABELS[cat as TaskCategory] : cat,
       cost: convertCost(d.cost),
       turns: d.turns,
       editTurns: d.editTurns,
@@ -296,9 +296,9 @@ function buildJsonReport(projects: ProjectSummary[], period: string, periodKey: 
       oneShotRate: d.editTurns > 0 ? Math.round((d.oneShotTurns / d.editTurns) * 1000) / 10 : null,
     }))
 
-  const toolMap: Record<string, number> = {}
-  const mcpMap: Record<string, number> = {}
-  const bashMap: Record<string, number> = {}
+  const toolMap: Record<string, number> = Object.create(null)
+  const mcpMap: Record<string, number> = Object.create(null)
+  const bashMap: Record<string, number> = Object.create(null)
   for (const sess of sessions) {
     for (const [tool, d] of Object.entries(sess.toolBreakdown)) {
       toolMap[tool] = (toolMap[tool] ?? 0) + d.calls
@@ -395,7 +395,7 @@ program
 
 function buildPeriodData(label: string, projects: ProjectSummary[]): PeriodData {
   const sessions = projects.flatMap(p => p.sessions)
-  const catTotals: Record<string, { turns: number; cost: number; editTurns: number; oneShotTurns: number }> = {}
+  const catTotals: Record<string, { turns: number; cost: number; editTurns: number; oneShotTurns: number }> = Object.create(null)
   const modelTotals: Record<string, { calls: number; cost: number }> = Object.create(null)
   let inputTokens = 0, outputTokens = 0, cacheReadTokens = 0, cacheWriteTokens = 0
 
@@ -426,7 +426,7 @@ function buildPeriodData(label: string, projects: ProjectSummary[]): PeriodData 
     inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens,
     categories: Object.entries(catTotals)
       .sort(([, a], [, b]) => b.cost - a.cost)
-      .map(([cat, d]) => ({ name: CATEGORY_LABELS[cat as TaskCategory] ?? cat, ...d })),
+      .map(([cat, d]) => ({ name: Object.hasOwn(CATEGORY_LABELS, cat) ? CATEGORY_LABELS[cat as TaskCategory] : cat, ...d })),
     models: Object.entries(modelTotals)
       .sort(([, a], [, b]) => b.cost - a.cost)
       .map(([name, d]) => ({ name, ...d })),
@@ -731,7 +731,7 @@ program
           warnings.push(warn)
           process.stderr.write(`[exe-watcher] WARNING: ${warn}\n`)
         }
-        const providerTotals: Record<string, number> = {}
+        const providerTotals: Record<string, number> = Object.create(null)
         for (const d of allDaysForProviders) {
           for (const [name, p] of Object.entries(d.providers)) {
             providerTotals[name] = (providerTotals[name] ?? 0) + p.cost

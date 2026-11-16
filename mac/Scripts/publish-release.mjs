@@ -13,13 +13,15 @@ const origin = 'https://version.askexe.com/watcher/';
 const publicFeed = 'https://odd.community/watcher/appcast.xml';
 const signingRequirement = '=anchor apple generic and certificate leaf[subject.OU] = "ZNU2X48VW5" and identifier "com.askexe.exe-watcher-menubar"';
 const run = (command, args, options = {}) => execFileSync(command, args, { cwd: root, encoding: 'utf8', ...options });
+const runtimeScript = readFileSync(join(root, 'mac/Scripts/bundle-runtime.sh'), 'utf8');
+const bundledNodeVersion = runtimeScript.match(/^NODE_VERSION="([^"]+)"$/m)?.[1];
 
 export function verifyBuildInfo(info, version, revision, tree) {
   const lines = info.trimEnd().split('\n');
   const required = [
     'Watcher ' + version, 'Source base revision: ' + revision, 'Source tree: ' + tree,
     'Modified tracked files: 0', 'Untracked files: 0', 'Notarization: accepted and stapled',
-    'Architectures: arm64 x86_64',
+    'Architectures: arm64 x86_64', 'Bundled Node: ' + bundledNodeVersion,
   ];
   if (lines[0] !== required[0] || required.some(line => !lines.includes(line))) {
     throw Error('The notarized Mac release must match the clean merged source and package version.');

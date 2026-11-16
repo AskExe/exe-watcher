@@ -208,22 +208,24 @@ async function captureCommand(command: string, args: string[]): Promise<{ code: 
   })
 }
 
-function parsePids(output: string): number[] {
-  return output
-    .split(/\s+/)
-    .map(s => Number(s))
-    .filter(pid => Number.isInteger(pid) && pid > 0 && pid !== process.pid)
+export function parseRunningAppPids(output: string, targetPath: string): number[] {
+  const executable = join(targetPath, 'Contents/MacOS', APP_PROCESS_NAME)
+  return output.split('\n').flatMap(line => {
+    const match = line.match(/^\s*(\d+)\s+(.+)$/)
+    if (!match || match[2]!.trim() !== executable) return []
+    const pid = Number(match[1])
+    return Number.isSafeInteger(pid) && pid > 0 && pid !== process.pid ? [pid] : []
+  })
 }
 
-async function runningAppPids(): Promise<number[]> {
-  // `pgrep -f` is intentionally used instead of relying only on bundle APIs: it catches stale
-  // menu bar helpers that survived a bundle replacement and still have the old executable mapped.
-  const result = await captureCommand('/usr/bin/pgrep', ['-f', APP_PROCESS_NAME])
-  return result.code === 0 ? parsePids(result.stdout) : []
+async function runningAppPids(targetPath: string): Promise<number[]> {
+  const result = await captureCommand('/bin/ps', ['-axo', 'pid=,comm='])
+  if (result.code !== 0) throw new Error('Could not inspect running Watcher processes; the installed app was preserved.')
+  return parseRunningAppPids(result.stdout, targetPath)
 }
 
-async function isAppRunning(): Promise<boolean> {
-  return (await runningAppPids()).length > 0
+async function isAppRunning(targetPath: string): Promise<boolean> {
+  return (await runningAppPids(targetPath)).length > 0
 }
 
 function timeoutFromEnv(name: string, fallback: number): number {
@@ -231,22 +233,22 @@ function timeoutFromEnv(name: string, fallback: number): number {
   return Number.isFinite(value) && value >= 0 ? value : fallback
 }
 
-async function waitForNoRunningApp(timeoutMs = timeoutFromEnv('EXE_WATCHER_APP_EXIT_TIMEOUT_MS', DEFAULT_APP_EXIT_TIMEOUT_MS)): Promise<boolean> {
+async function waitForNoRunningApp(targetPath: string, timeoutMs = timeoutFromEnv('EXE_WATCHER_APP_EXIT_TIMEOUT_MS', DEFAULT_APP_EXIT_TIMEOUT_MS)): Promise<boolean> {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
-    if ((await runningAppPids()).length === 0) return true
+    if ((await runningAppPids(targetPath)).length === 0) return true
     await sleep(POLL_INTERVAL_MS)
   }
-  return (await runningAppPids()).length === 0
+  return (await runningAppPids(targetPath)).length === 0
 }
 
-async function waitForRunningApp(timeoutMs = timeoutFromEnv('EXE_WATCHER_APP_LAUNCH_TIMEOUT_MS', DEFAULT_APP_LAUNCH_TIMEOUT_MS)): Promise<boolean> {
+async function waitForRunningApp(targetPath: string, timeoutMs = timeoutFromEnv('EXE_WATCHER_APP_LAUNCH_TIMEOUT_MS', DEFAULT_APP_LAUNCH_TIMEOUT_MS)): Promise<boolean> {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
-    if ((await runningAppPids()).length > 0) return true
+    if ((await runningAppPids(targetPath)).length > 0) return true
     await sleep(POLL_INTERVAL_MS)
   }
-  return (await runningAppPids()).length > 0
+  return (await runningAppPids(targetPath)).length > 0
 }
 
 async function signalPids(signal: 'TERM' | 'KILL', pids: number[]): Promise<void> {
@@ -273,28 +275,28 @@ async function movePath(source: string, dest: string): Promise<void> {
 
 async function restoreExistingApp(backupPath: string, targetPath: string): Promise<void> {
   if (!(await exists(backupPath))) return
-  await killRunningApp().catch(() => {})
+  await killRunningApp(targetPath).catch(() => {})
   await rm(targetPath, { recursive: true, force: true }).catch(() => {})
   await movePath(backupPath, targetPath)
   await runCommand('/usr/bin/open', [targetPath]).catch(() => {})
-  await waitForRunningApp().catch(() => false)
+  await waitForRunningApp(targetPath).catch(() => false)
 }
 
-async function killRunningApp(): Promise<void> {
-  const initialPids = await runningAppPids()
+async function killRunningApp(targetPath: string): Promise<void> {
+  const initialPids = await runningAppPids(targetPath)
   if (initialPids.length === 0) return
 
   console.log(`Stopping existing Exe Watcher Menubar (${initialPids.join(', ')})...`)
   await signalPids('TERM', initialPids)
-  if (await waitForNoRunningApp()) return
+  if (await waitForNoRunningApp(targetPath)) return
 
-  const stubbornPids = await runningAppPids()
+  const stubbornPids = await runningAppPids(targetPath)
   if (stubbornPids.length > 0) {
     console.log(`Force-stopping stale Exe Watcher Menubar (${stubbornPids.join(', ')})...`)
     await signalPids('KILL', stubbornPids)
   }
 
-  if (!(await waitForNoRunningApp())) {
+  if (!(await waitForNoRunningApp(targetPath))) {
     throw new Error('Could not stop the existing Exe Watcher Menubar process. Please quit it and retry.')
   }
 }
@@ -307,7 +309,7 @@ export async function installMenubarApp(options: { force?: boolean; version?: st
   const alreadyInstalled = await exists(targetPath)
 
   if (alreadyInstalled && !options.force) {
-    if (!(await isAppRunning())) {
+    if (!(await isAppRunning(targetPath))) {
       await runCommand('/usr/bin/open', [targetPath])
     }
     return { installedPath: targetPath, launched: true }
@@ -359,7 +361,7 @@ export async function installMenubarApp(options: { force?: boolean; version?: st
       if (alreadyInstalled && backupPath) {
         // Production updater rule: never delete the only installed copy. Move it aside first,
         // install the candidate, and restore the backup if launch verification fails.
-        await killRunningApp()
+        await killRunningApp(targetPath)
         await movePath(targetPath, backupPath)
       }
 
@@ -368,7 +370,7 @@ export async function installMenubarApp(options: { force?: boolean; version?: st
 
       console.log('Launching Exe Watcher Menubar...')
       await runCommand('/usr/bin/open', [targetPath])
-      if (!(await waitForRunningApp())) {
+      if (!(await waitForRunningApp(targetPath))) {
         throw new Error('Installed Exe Watcher Menubar, but the app did not launch.')
       }
 

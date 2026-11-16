@@ -64,6 +64,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
     private var usageLogWatcher: UsageLogWatcher?
     private var usageLogDebounceWork: DispatchWorkItem?
+    private var systemResumeWork: DispatchWorkItem?
     private var healthMonitor: HealthMonitor?
     private var appActivityTracker: AppActivityTracker?
     /// Held for the lifetime of the app to prevent Automatic Termination.
@@ -140,7 +141,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            Task { @MainActor in self?.forceRefresh() }
+            Task { @MainActor in self?.scheduleSystemResume() }
         }
 
         NSWorkspace.shared.notificationCenter.addObserver(
@@ -148,7 +149,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            Task { @MainActor in self?.forceRefresh() }
+            Task { @MainActor in self?.scheduleSystemResume() }
         }
 
         NSWorkspace.shared.notificationCenter.addObserver(
@@ -156,7 +157,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            Task { @MainActor in self?.forceRefresh() }
+            Task { @MainActor in self?.scheduleSystemResume() }
         }
     }
 
@@ -188,6 +189,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
                 NSLog("Exe Watcher: Login Item registration failed: \(error)")
             }
         }
+    }
+
+    private func scheduleSystemResume() {
+        systemResumeWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            self?.systemResumeWork = nil
+            self?.forceRefresh()
+        }
+        systemResumeWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
     }
 
     private func forceRefresh() {
@@ -241,6 +252,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         RefreshTracer.shared.instant(name: "app_terminating", category: "lifecycle", tid: .lifecycle)
         RefreshTracer.shared.writeToDisk()
         usageLogDebounceWork?.cancel()
+        systemResumeWork?.cancel()
         usageLogWatcher?.stop()
     }
 
@@ -274,7 +286,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         var additionalClaudeRoots: [String] = []
         let configRoot = environment["XDG_CONFIG_HOME"] ?? "\(home)/.config"
         let configURL = URL(fileURLWithPath: "\(configRoot)/exe-watcher/config.json")
-        if let data = try? Data(contentsOf: configURL),
+        if let data = try? SafeFile.read(from: configURL.path, maxBytes: 1024 * 1024),
            let config = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
            let roots = config["claudeConfigDirs"] as? [String] {
             additionalClaudeRoots = roots

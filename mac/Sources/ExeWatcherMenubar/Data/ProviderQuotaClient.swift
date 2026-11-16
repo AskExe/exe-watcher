@@ -18,7 +18,7 @@ struct ProviderQuotaClient {
         static var live: Self {
             Self(home: FileManager.default.homeDirectoryForCurrentUser, environment: ProcessInfo.processInfo.environment,
                 now: Date.init, readFile: readCredential, readKeychain: keychainCredential,
-                cursorToken: cursorAccessToken, request: QuotaHTTP.request)
+                cursorToken: cursorAccessToken, request: { try await QuotaHTTP.request($0) })
         }
     }
 
@@ -316,17 +316,17 @@ enum QuotaHTTP {
         func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
                         newRequest request: URLRequest, completionHandler: @escaping @Sendable (URLRequest?) -> Void) { completionHandler(nil) }
     }
-    static func request(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+    static func request(_ request: URLRequest, maxBytes: Int = 512 * 1024) async throws -> (Data, HTTPURLResponse) {
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = 20; config.timeoutIntervalForResource = 25
         config.httpCookieStorage = nil; config.httpShouldSetCookies = false; config.urlCache = nil
         let session = URLSession(configuration: config, delegate: NoRedirect(), delegateQueue: nil)
         defer { session.invalidateAndCancel() }
         let (bytes, response) = try await session.bytes(for: request)
-        guard let http = response as? HTTPURLResponse, response.expectedContentLength <= 512 * 1024 else { throw ProviderQuotaFailure(kind: .invalidResponse) }
+        guard maxBytes > 0, let http = response as? HTTPURLResponse, response.expectedContentLength <= maxBytes else { throw ProviderQuotaFailure(kind: .invalidResponse) }
         var output = Data()
         for try await byte in bytes {
-            guard output.count < 512 * 1024 else { throw ProviderQuotaFailure(kind: .invalidResponse) }
+            guard output.count < maxBytes else { throw ProviderQuotaFailure(kind: .invalidResponse) }
             output.append(byte)
         }
         return (output, http)

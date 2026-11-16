@@ -1,5 +1,6 @@
-import { writeFile, mkdir, readdir, stat, rm } from 'fs/promises'
-import { dirname, join, resolve } from 'path'
+import { writeFile, mkdir, readdir, lstat, rename, rm, chmod } from 'fs/promises'
+import { randomUUID } from 'node:crypto'
+import { basename, dirname, join, resolve } from 'path'
 
 import { CATEGORY_LABELS, type ProjectSummary, type TaskCategory } from './types.js'
 import { getCurrency, convertCost } from './currency.js'
@@ -27,6 +28,16 @@ function rowsToCsv(rows: Row[]): string {
   return lines.join('\n') + '\n'
 }
 
+async function writeExportFile(path: string, content: string): Promise<void> {
+  const temp = join(dirname(path), `.${basename(path)}.${randomUUID()}.tmp`)
+  try {
+    await writeFile(temp, content, { encoding: 'utf8', mode: 0o600, flag: 'wx' })
+    await rename(temp, path)
+  } finally {
+    await rm(temp, { force: true })
+  }
+}
+
 function round2(n: number): number {
   return Math.round(n * 100) / 100
 }
@@ -46,7 +57,7 @@ type DailyAgg = {
 }
 
 function buildDailyRows(projects: ProjectSummary[], period: string): Row[] {
-  const daily: Record<string, DailyAgg> = {}
+  const daily: Record<string, DailyAgg> = Object.create(null)
   for (const project of projects) {
     for (const session of project.sessions) {
       for (const turn of session.turns) {
@@ -82,7 +93,7 @@ function buildDailyRows(projects: ProjectSummary[], period: string): Row[] {
 }
 
 function buildActivityRows(projects: ProjectSummary[], period: string): Row[] {
-  const catTotals: Record<string, { turns: number; cost: number }> = {}
+  const catTotals: Record<string, { turns: number; cost: number }> = Object.create(null)
   for (const project of projects) {
     for (const session of project.sessions) {
       for (const [cat, d] of Object.entries(session.categoryBreakdown)) {
@@ -98,7 +109,7 @@ function buildActivityRows(projects: ProjectSummary[], period: string): Row[] {
     .sort(([, a], [, b]) => b.cost - a.cost)
     .map(([cat, d]) => ({
       Period: period,
-      Activity: CATEGORY_LABELS[cat as TaskCategory] ?? cat,
+      Activity: Object.hasOwn(CATEGORY_LABELS, cat) ? CATEGORY_LABELS[cat as TaskCategory] : cat,
       [`Cost (${code})`]: round2(convertCost(d.cost)),
       'Share (%)': pct(d.cost, totalCost),
       Turns: d.turns,
@@ -106,7 +117,7 @@ function buildActivityRows(projects: ProjectSummary[], period: string): Row[] {
 }
 
 function buildModelRows(projects: ProjectSummary[], period: string): Row[] {
-  const modelTotals: Record<string, { calls: number; cost: number; input: number; output: number; cacheRead: number; cacheWrite: number }> = {}
+  const modelTotals: Record<string, { calls: number; cost: number; input: number; output: number; cacheRead: number; cacheWrite: number }> = Object.create(null)
   for (const project of projects) {
     for (const session of project.sessions) {
       for (const [model, d] of Object.entries(session.modelBreakdown)) {
@@ -139,7 +150,7 @@ function buildModelRows(projects: ProjectSummary[], period: string): Row[] {
 }
 
 function buildToolRows(projects: ProjectSummary[]): Row[] {
-  const toolTotals: Record<string, number> = {}
+  const toolTotals: Record<string, number> = Object.create(null)
   for (const project of projects) {
     for (const session of project.sessions) {
       for (const [tool, d] of Object.entries(session.toolBreakdown)) {
@@ -158,7 +169,7 @@ function buildToolRows(projects: ProjectSummary[]): Row[] {
 }
 
 function buildBashRows(projects: ProjectSummary[]): Row[] {
-  const bashTotals: Record<string, number> = {}
+  const bashTotals: Record<string, number> = Object.create(null)
   for (const project of projects) {
     for (const session of project.sessions) {
       for (const [cmd, d] of Object.entries(session.bashBreakdown)) {
@@ -268,7 +279,7 @@ function buildReadme(periods: PeriodExport[]): string {
 const EXPORT_MARKER_FILE = '.exe-watcher-export'
 
 async function isExeWatcherExportFolder(path: string): Promise<boolean> {
-  const markerStat = await stat(join(path, EXPORT_MARKER_FILE)).catch(() => null)
+  const markerStat = await lstat(join(path, EXPORT_MARKER_FILE)).catch(() => null)
   return markerStat?.isFile() ?? false
 }
 
@@ -281,8 +292,7 @@ async function clearExeWatcherExportFolder(path: string): Promise<void> {
 
 /// Writes a folder of one-table-per-file CSVs. The outputPath is treated as a directory. If it
 /// ends in `.csv` the extension is stripped to form the folder name. Refuses to delete a
-/// pre-existing file or a non-exe-watcher folder, so a typo like `-o ~/.ssh/id_ed25519` can't
-/// wipe a sensitive file (prior versions did `rm(path, { force: true })` unconditionally).
+/// pre-existing file, symlink or non-exe-watcher folder.
 export async function exportCsv(periods: PeriodExport[], outputPath: string): Promise<string> {
   const thirtyDays = periods.find(p => p.label === '30 Days')
   const thirtyDayProjects = thirtyDays?.projects ?? periods[periods.length - 1]?.projects ?? []
@@ -292,9 +302,9 @@ export async function exportCsv(periods: PeriodExport[], outputPath: string): Pr
     folder = folder.slice(0, -4)
   }
 
-  const existingStat = await stat(folder).catch(() => null)
-  if (existingStat?.isFile()) {
-    throw new Error(`Refusing to overwrite existing file at ${folder}. Pass a directory path instead.`)
+  const existingStat = await lstat(folder).catch(() => null)
+  if (existingStat?.isSymbolicLink() || (existingStat && !existingStat.isDirectory())) {
+    throw new Error(`Refusing to overwrite non-directory or symlink at ${folder}. Pass a new directory path instead.`)
   }
   if (existingStat?.isDirectory()) {
     if (!(await isExeWatcherExportFolder(folder))) {
@@ -305,22 +315,23 @@ export async function exportCsv(periods: PeriodExport[], outputPath: string): Pr
     }
     await clearExeWatcherExportFolder(folder)
   }
-  await mkdir(folder, { recursive: true })
-  await writeFile(join(folder, EXPORT_MARKER_FILE), '', 'utf-8')
+  await mkdir(folder, { recursive: true, mode: 0o700 })
+  await chmod(folder, 0o700)
+  await writeExportFile(join(folder, EXPORT_MARKER_FILE), '')
 
   const dailyRows = periods.flatMap(p => buildDailyRows(p.projects, p.label))
   const activityRows = periods.flatMap(p => buildActivityRows(p.projects, p.label))
   const modelRows = periods.flatMap(p => buildModelRows(p.projects, p.label))
 
-  await writeFile(join(folder, 'README.txt'), buildReadme(periods), 'utf-8')
-  await writeFile(join(folder, 'summary.csv'), rowsToCsv(buildSummaryRows(periods)), 'utf-8')
-  await writeFile(join(folder, 'daily.csv'), rowsToCsv(dailyRows), 'utf-8')
-  await writeFile(join(folder, 'activity.csv'), rowsToCsv(activityRows), 'utf-8')
-  await writeFile(join(folder, 'models.csv'), rowsToCsv(modelRows), 'utf-8')
-  await writeFile(join(folder, 'projects.csv'), rowsToCsv(buildProjectRows(thirtyDayProjects)), 'utf-8')
-  await writeFile(join(folder, 'sessions.csv'), rowsToCsv(buildSessionRows(thirtyDayProjects)), 'utf-8')
-  await writeFile(join(folder, 'tools.csv'), rowsToCsv(buildToolRows(thirtyDayProjects)), 'utf-8')
-  await writeFile(join(folder, 'shell-commands.csv'), rowsToCsv(buildBashRows(thirtyDayProjects)), 'utf-8')
+  await writeExportFile(join(folder, 'README.txt'), buildReadme(periods))
+  await writeExportFile(join(folder, 'summary.csv'), rowsToCsv(buildSummaryRows(periods)))
+  await writeExportFile(join(folder, 'daily.csv'), rowsToCsv(dailyRows))
+  await writeExportFile(join(folder, 'activity.csv'), rowsToCsv(activityRows))
+  await writeExportFile(join(folder, 'models.csv'), rowsToCsv(modelRows))
+  await writeExportFile(join(folder, 'projects.csv'), rowsToCsv(buildProjectRows(thirtyDayProjects)))
+  await writeExportFile(join(folder, 'sessions.csv'), rowsToCsv(buildSessionRows(thirtyDayProjects)))
+  await writeExportFile(join(folder, 'tools.csv'), rowsToCsv(buildToolRows(thirtyDayProjects)))
+  await writeExportFile(join(folder, 'shell-commands.csv'), rowsToCsv(buildBashRows(thirtyDayProjects)))
 
   return folder
 }
@@ -349,6 +360,6 @@ export async function exportJson(periods: PeriodExport[], outputPath: string): P
 
   const target = resolve(outputPath.toLowerCase().endsWith('.json') ? outputPath : `${outputPath}.json`)
   await mkdir(dirname(target), { recursive: true })
-  await writeFile(target, JSON.stringify(data, null, 2), 'utf-8')
+  await writeExportFile(target, JSON.stringify(data, null, 2))
   return target
 }

@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { mkdtemp, readFile, readdir, rm } from 'fs/promises'
+import { mkdtemp, mkdir, readFile, readdir, rm, stat, symlink, writeFile } from 'fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
 
-import { exportCsv, type PeriodExport } from '../src/export.js'
+import { exportCsv, exportJson, type PeriodExport } from '../src/export.js'
 import type { ProjectSummary } from '../src/types.js'
 
 let tmpDir: string
@@ -155,5 +155,52 @@ describe('exportCsv', () => {
     const folder = await exportCsv([], outputPath)
     const entries = await readdir(folder)
     expect(entries.length).toBeGreaterThanOrEqual(0)
+  })
+
+  it('keeps exports private and refuses to clear a symlinked folder', async () => {
+    const periods: PeriodExport[] = [{ label: '30 Days', projects: [makeProject('fixture')] }]
+    const folder = await exportCsv(periods, join(tmpDir, 'private.csv'))
+    expect((await stat(folder)).mode & 0o777).toBe(0o700)
+    expect((await stat(join(folder, 'projects.csv'))).mode & 0o777).toBe(0o600)
+
+    const linked = join(tmpDir, 'linked')
+    await symlink(folder, linked, 'dir')
+    await expect(exportCsv(periods, linked)).rejects.toThrow(/symlink/)
+    expect(await readFile(join(folder, 'projects.csv'), 'utf8')).toContain('fixture')
+  })
+
+  it('replaces a JSON output symlink without writing through to its target', async () => {
+    const directory = join(tmpDir, 'json')
+    await mkdir(directory)
+    const sensitive = join(directory, 'sensitive.txt')
+    const output = join(directory, 'report.json')
+    await writeFile(sensitive, 'preserve')
+    await symlink(sensitive, output)
+
+    await exportJson([], output)
+    expect(await readFile(sensitive, 'utf8')).toBe('preserve')
+    expect(JSON.parse(await readFile(output, 'utf8')).schema).toBe('exe-watcher.export.v2')
+    expect((await stat(output)).mode & 0o777).toBe(0o600)
+  })
+
+  it('retains prototype-like log labels without mutating Object.prototype', async () => {
+    const project = makeProject('prototype-labels')
+    const session = project.sessions[0]!
+    Object.defineProperty(session.modelBreakdown, '__proto__', {
+      value: session.modelBreakdown['+danger-model'], enumerable: true,
+    })
+    Object.defineProperty(session.categoryBreakdown, '__proto__', {
+      value: session.categoryBreakdown.coding, enumerable: true,
+    })
+    const prototype = Object.prototype as Record<string, unknown>
+    const fields = ['calls', 'cost', 'costUSD', 'turns', 'input', 'output', 'cacheRead', 'cacheWrite']
+    try {
+      const folder = await exportCsv([{ label: '30 Days', projects: [project] }], join(tmpDir, 'prototype.csv'))
+      expect(await readFile(join(folder, 'models.csv'), 'utf8')).toContain('__proto__')
+      expect(await readFile(join(folder, 'activity.csv'), 'utf8')).toContain('__proto__')
+      for (const field of fields) expect(prototype[field]).toBeUndefined()
+    } finally {
+      for (const field of fields) delete prototype[field]
+    }
   })
 })

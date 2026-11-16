@@ -313,18 +313,6 @@ final class HealthMonitor {
         let now = Date()
         let state = diagnose(store: store, now: now)
 
-        RefreshTracer.shared.instant(
-            name: "health_check", category: "health", tid: .health,
-            args: [
-                "state": .string(state.rawValue),
-                "active_fetches": .int(store.activeFetchCount),
-                "consecutive_failures": .int(consecutiveFailures),
-                "last_success_age_s": .double(
-                    store.lastBadgeRefreshSuccessAt.map { now.timeIntervalSince($0) } ?? -1
-                ),
-            ]
-        )
-
         if state != lastHealthState {
             watcherLog("HEALTH: \(lastHealthState.rawValue) → \(state.rawValue)")
             RefreshTracer.shared.instant(

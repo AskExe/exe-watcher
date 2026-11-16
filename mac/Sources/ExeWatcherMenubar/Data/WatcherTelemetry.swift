@@ -41,7 +41,7 @@ final class WatcherTelemetry {
     }
     private func settings() -> [String: Any]? {
         if !FileManager.default.fileExists(atPath: configURL.path) { return [:] }
-        guard let data = try? Data(contentsOf: configURL),
+        guard let data = try? SafeFile.read(from: configURL.path, maxBytes: 1024 * 1024),
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
         return object
     }
@@ -123,21 +123,26 @@ final class WatcherTelemetry {
     private func save(_ data: Data, to url: URL) throws {
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: root.path)
-        try data.write(to: url, options: .atomic)
-        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+        try SafeFile.write(data, to: url.path)
     }
     private func queueURL(_ lane: String) -> URL { root.appendingPathComponent("telemetry-mac-\(lane).json") }
     private func persist(_ lane: String) { try? save(encoder.encode(queues[lane] ?? []), to: queueURL(lane)) }
     private func id() -> String? {
         let url = root.appendingPathComponent("telemetry-id")
-        if let value = try? String(contentsOf: url, encoding: .utf8), UUID(uuidString: value.trimmingCharacters(in: .whitespacesAndNewlines)) != nil { return value.trimmingCharacters(in: .whitespacesAndNewlines) }
+        func existing() -> String? {
+            guard let data = try? SafeFile.read(from: url.path, maxBytes: 128),
+                  let value = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  UUID(uuidString: value) != nil else { return nil }
+            return value
+        }
+        if let value = existing() { return value }
         let value = UUID().uuidString.lowercased()
         do {
             try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
             try Data(value.utf8).write(to: url, options: .withoutOverwriting)
             try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
-            return value
-        } catch { return (try? String(contentsOf: url, encoding: .utf8)).flatMap { UUID(uuidString: $0) == nil ? nil : $0 } }
+            return existing()
+        } catch { return existing() }
     }
     func sanitized(_ row: Entry, lane: String) -> Entry? {
         guard UUID(uuidString: row.uuid) != nil, row.timestamp <= Date(), Date().timeIntervalSince(row.timestamp) < 7 * 86400 else { return nil }
@@ -220,12 +225,12 @@ final class WatcherTelemetry {
     }
     static func start() {
         let s = shared
-        if let data = try? Data(contentsOf: s.root.appendingPathComponent("telemetry-mac-consent.json")),
+        if let data = try? SafeFile.read(from: s.root.appendingPathComponent("telemetry-mac-consent.json").path, maxBytes: 4096),
            let epochs = try? JSONSerialization.jsonObject(with: data) as? [String: String] {
             s.usageEpoch = epochs["usage"] ?? "initial"; s.diagnosticsEpoch = epochs["diagnostics"] ?? "initial"
         }
         for lane in ["usage", "errors"] {
-            if let data = try? Data(contentsOf: s.queueURL(lane)), data.count <= 262144,
+            if let data = try? SafeFile.read(from: s.queueURL(lane).path, maxBytes: 262144),
                let entries = try? s.decoder.decode([Entry].self, from: data) {
                 s.queues[lane] = entries.suffix(100).compactMap { s.sanitized($0, lane: lane) }
             }
@@ -265,7 +270,7 @@ final class WatcherTelemetry {
         do { throw NSError(domain: "Watcher handled test", code: 1) }
         catch { fetchFailed(); shared.flush("errors") }
     }
-    static func stop() { menuClosed(); shared.timer?.invalidate(); for task in shared.tasks.values { task.cancel() } }
+    static func stop() { menuClosed(); shared.timer?.invalidate(); shared.timer = nil; for task in shared.tasks.values { task.cancel() }; shared.tasks = [:] }
 }
 
 private final class NoRedirect: NSObject, URLSessionTaskDelegate, Sendable {

@@ -7,19 +7,19 @@ Native Swift + SwiftUI menubar app. The Watcher menubar surface.
 - macOS 14+ (Sonoma)
 - Swift 6.0+ toolchain (bundled with Xcode 16 or standalone)
 - Packaged app: Node and the matching CLI are included (from 0.2.55).
-- Source builds: Node 22.5+ and `exe-watcher` installed globally, or a local CLI passed via `EXE_WATCHER_BIN`.
+- Source builds: Node 22.13+ and `exe-watcher` installed globally, or a local CLI passed via `EXE_WATCHER_BIN`.
 
 ## Install (end users)
 
 Download the universal `.dmg` from [odd.community/watcher](https://odd.community/watcher), drag **Watcher by EXE** into **Applications**, then open it. No Node, npm, account, or command-line setup is needed for the packaged app. Public releases must be Developer ID signed and Apple notarized.
 
-Alternatively, with Node 22.5+ already installed:
+Alternatively, with Node 22.13+ already installed:
 
 ```bash
 npx exe-watcher menubar
 ```
 
-That's it. The command downloads the latest `.app` from GitHub Releases, drops it into `~/Applications`, clears Gatekeeper quarantine, and launches it. Re-running it upgrades in place with `--force`, or just launches the existing copy otherwise.
+The command verifies the latest signed and notarized Odd Community disk image, installs it in `~/Applications`, preserves quarantine and launches it. Re-running it upgrades in place with `--force`, or just launches the existing copy otherwise.
 
 If you already have the CLI installed globally (`npm install -g exe-watcher`), `exe-watcher menubar` works the same way.
 
@@ -87,7 +87,7 @@ Supported live readers:
 
 The five new adapters never refresh or write OAuth tokens, copy credentials to Watcher storage, read browser cookies or change a provider’s login. Codex can request Keychain access only on an explicit refresh. Expired sessions need the provider’s own client to renew them. API-key Codex accounts, custom Codex gateways, encrypted/ephemeral stores and ineligible Gemini tiers can have no readable subscription quota. Missing or unlimited percentages remain dashes, not zero.
 
-Copilot credentials stay bound to their GitHub.com or Enterprise Cloud (`*.ghe.com`) host; unsupported or unidentified hosts fail without a request to GitHub.com. New adapters reject HTTP redirects, use ephemeral sessions without cookie/cache persistence, cap response/credential sizes and suppress response bodies in errors. Endpoints are informed by CodeBurn’s adapters and may change; an unrecognized response is unavailable. Quota support does not add a local spend/time importer for a previously unsupported client.
+Copilot credentials stay bound to their GitHub.com or Enterprise Cloud (`*.ghe.com`) host; unsupported or unidentified hosts fail without a request to GitHub.com. Every provider adapter rejects HTTP redirects, uses ephemeral sessions without cookie/cache persistence, caps response/credential sizes and suppresses response bodies in errors. Endpoints are informed by CodeBurn’s adapters and may change; an unrecognized response is unavailable. Quota support does not add a local spend/time importer for a previously unsupported client.
 
 For a credential-free visual review, launch a developer build with `--floating-quota-preview`. Add `--quota-providers=all` for all six rings, `--quota-provider=codex` to select one, `--quota-preview-card` to review only its expanded card, or `--quota-state=stale|disconnected|loading|expired` for failure states. This uses isolated preferences and sample quota/time data, bypassing normal usage, login-item and updater startup.
 
@@ -123,7 +123,7 @@ npm ci
 mac/Scripts/package-app.sh v0.2.66
 ```
 
-This builds a universal app, updater ZIP, drag-to-install DMG and `SHA256SUMS.txt` in `mac/.build/dist`. It freezes the CLI's production dependencies and a checksum-pinned universal Node 22.23.3 runtime. Only explicit build outputs/manifests are copied; local credentials and configuration are excluded. Watcher's `LICENSE` and `THIRD_PARTY_NOTICES.md`, including CodeBurn's original MIT notice, ship at `Contents/Resources/cli/`. The original Node license and dependency licenses also ship with the app.
+This builds a universal app, updater ZIP, drag-to-install DMG and `SHA256SUMS.txt` in `mac/.build/dist`. It freezes the CLI's production dependencies and a checksum-pinned universal Node 22.23.5 runtime. Only explicit build outputs/manifests are copied; local credentials and configuration are excluded. Watcher's `LICENSE` and `THIRD_PARTY_NOTICES.md`, including CodeBurn's original MIT notice, ship at `Contents/Resources/cli/`. The original Node license and dependency licenses also ship with the app.
 
 Local builds default to ad-hoc signing for development. To produce a public download:
 

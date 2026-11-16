@@ -169,7 +169,7 @@ struct FloatingQuotaRefreshTests {
         store.subscription = quotaUsage()
         let request = Task { await store.refreshSubscription(allowKeychainPrompt: false) }
         while await gate.prompts.isEmpty { await Task.yield() }
-        await gate.resolve(.failure(SubscriptionError.usageFetchFailed(429, nil)))
+        await gate.resolve(.failure(SubscriptionError.usageFetchFailed(429)))
         await request.value
         #expect(store.subscription?.fiveHourPercent == 64)
         #expect(store.subscriptionLoadState == .failed)
@@ -181,7 +181,7 @@ struct FloatingQuotaRefreshTests {
 
     @Test("rejected credentials clear the prior account's quota")
     @MainActor func authenticationFailure() async throws {
-        let store = AppStore(now: { quotaNow }, fetchSubscription: { _ in throw SubscriptionError.usageFetchFailed(401, nil) }, persistSubscriptionSnapshots: false)
+        let store = AppStore(now: { quotaNow }, fetchSubscription: { _ in throw SubscriptionError.usageFetchFailed(401) }, persistSubscriptionSnapshots: false)
         store.subscription = quotaUsage()
         await store.refreshSubscription(allowKeychainPrompt: false)
         #expect(store.subscription == nil)

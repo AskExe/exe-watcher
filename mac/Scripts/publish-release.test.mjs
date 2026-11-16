@@ -4,13 +4,14 @@ import { verifyBuildInfo, verifyMetadata } from './publish-release.mjs';
 
 const version = '0.2.76', revision = 'a'.repeat(40), tree = 'b'.repeat(40);
 const info = 'Watcher ' + version + '\nSource base revision: ' + revision + '\nSource tree: ' + tree +
-  '\nModified tracked files: 0\nUntracked files: 0\nNotarization: accepted and stapled\nArchitectures: arm64 x86_64\n';
+  '\nModified tracked files: 0\nUntracked files: 0\nNotarization: accepted and stapled\nArchitectures: arm64 x86_64\nBundled Node: 22.23.5\n';
 
 test('publication requires the notarized universal app from the exact clean revision', () => {
   assert.doesNotThrow(() => verifyBuildInfo(info, version, revision, tree));
   for (const altered of [info.replace(revision, 'c'.repeat(40)), info.replace(tree, 'other'),
     info.replace('Untracked files: 0', 'Untracked files: 1'), info.replace('accepted and stapled', 'not performed'),
-    info.replace('arm64 x86_64', 'arm64'), info.replace(version, '0.2.75')]) {
+    info.replace('arm64 x86_64', 'arm64'), info.replace(version, '0.2.75'),
+    info.replace('Bundled Node: 22.23.5', 'Bundled Node: 22.23.3')]) {
     assert.throws(() => verifyBuildInfo(altered, version, revision, tree));
   }
 });

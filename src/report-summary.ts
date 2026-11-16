@@ -14,22 +14,28 @@ const planning = new Set(['TaskCreate', 'TaskUpdate', 'TodoWrite', 'EnterPlanMod
 
 /** Preserve report and comparison metrics before releasing per-call objects. */
 export function compactReportSession(session: SessionSummary): SessionSummary {
-  const report: ReportSummary = { daily: Object.create(null), dailyEntries: Object.fromEntries(aggregateProjectsIntoDays([{ project: session.project, projectPath: '', sessions: [session], totalCostUSD: session.totalCostUSD, totalApiCalls: session.apiCalls }]).map(day => [day.date, day])), models: Object.create(null), categories: Object.create(null), styles: Object.create(null) }
-  for (const model of aggregateModelStats([{ project: session.project, projectPath: '', sessions: [session], totalCostUSD: session.totalCostUSD, totalApiCalls: session.apiCalls }])) report.models[model.model] = model
+  const daily: ReportSummary['daily'] = Object.create(null)
+  const models: ReportSummary['models'] = Object.create(null)
+  const categories: ReportSummary['categories'] = Object.create(null)
+  const styles: ReportSummary['styles'] = Object.create(null)
+  const report: ReportSummary = { daily, dailyEntries: Object.fromEntries(aggregateProjectsIntoDays([{ project: session.project, projectPath: '', sessions: [session], totalCostUSD: session.totalCostUSD, totalApiCalls: session.apiCalls }]).map(day => [day.date, day])), models, categories, styles }
+  for (const model of aggregateModelStats([{ project: session.project, projectPath: '', sessions: [session], totalCostUSD: session.totalCostUSD, totalApiCalls: session.apiCalls }])) models[model.model] = model
   for (const turn of session.turns) {
     for (const call of turn.assistantCalls) {
       if (!call.timestamp) continue
       const day = dateKey(call.timestamp)
-      const d = report.daily[day] ??= { cost: 0, calls: 0 }
+      const d = daily[day] ??= { cost: 0, calls: 0 }
       d.cost += call.costUSD
       d.calls++
     }
     const model = turn.assistantCalls[0]?.model
     if (!model) continue
-    const cats = report.categories[model] ??= Object.create(null)
-    const cat = cats[turn.category] ??= { turns: 0, editTurns: 0, oneShotTurns: 0 }
+    if (!Object.hasOwn(categories, model)) categories[model] = Object.create(null)
+    const cats = categories[model]!
+    if (!Object.hasOwn(cats, turn.category)) cats[turn.category] = { turns: 0, editTurns: 0, oneShotTurns: 0 }
+    const cat = cats[turn.category]!
     cat.turns++; if (turn.hasEdits) { cat.editTurns++; if (!turn.retries) cat.oneShotTurns++ }
-    const style = report.styles[model] ??= { totalTurns: 0, agentSpawns: 0, planModeUses: 0, totalToolCalls: 0, fastModeCalls: 0 }
+    const style = styles[model] ??= { totalTurns: 0, agentSpawns: 0, planModeUses: 0, totalToolCalls: 0, fastModeCalls: 0 }
     style.totalTurns++
     if (turn.assistantCalls.some(c => c.hasPlanMode || c.tools.some(t => planning.has(t)))) style.planModeUses++
     for (const call of turn.assistantCalls) {

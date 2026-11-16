@@ -229,7 +229,7 @@ Notarization: $(if [[ -n "${NOTARY_PROFILE:-}" ]]; then echo 'accepted and stapl
 Owl: ${OWL_LABEL}
 Architectures: arm64 x86_64
 Minimum macOS: ${MIN_MACOS}
-Bundled Node: 22.23.3
+Bundled Node: 22.23.5
 INFO
 OUTPUT_DIR="${MAC_DIR}/.build/dist"
 rm -rf "${OUTPUT_DIR}"

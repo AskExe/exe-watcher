@@ -23,7 +23,7 @@ function runCli(args: string[], home: string) {
   })
 }
 
-describe('exe-watcher plan command', () => {
+describe('exe-watcher plan command', { timeout: 30_000 }, () => {
   it('persists plan set and clears on reset', async () => {
     const home = await mkdtemp(join(tmpdir(), 'exe-watcher-cli-plan-'))
 

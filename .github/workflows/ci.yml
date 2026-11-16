@@ -5,6 +5,9 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
@@ -16,10 +19,10 @@ jobs:
         # the CLI at all — testing them was testing something we do not ship.
         node-version: [22.13.0, 22]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Use Node.js ${{ matrix.node-version }}
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: ${{ matrix.node-version }}
           cache: npm
@@ -44,7 +47,7 @@ jobs:
   semgrep:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Install Semgrep
         run: pip install semgrep
@@ -53,8 +56,8 @@ jobs:
         run: |
           set -e
           semgrep --config .semgrep/rules/no-bracket-assign-hot-paths.yml \
-            --strict --json \
-            src/providers/ src/parser.ts > semgrep-out.json
+            --strict --timeout 30 --json \
+            src/ > semgrep-out.json
           FINDINGS=$(jq '.results | length' semgrep-out.json)
           if [ "$FINDINGS" -gt 0 ]; then
             jq -r '.results[] | "::error file=\(.path),line=\(.start.line)::\(.extra.message)"' semgrep-out.json
@@ -64,8 +67,8 @@ jobs:
   macos-resource-tests:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
           cache: npm
@@ -76,7 +79,7 @@ jobs:
         run: mac/Scripts/package-app.sh ci
 
       - name: Retain the tested Mac app
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: watcher-mac-tested
           path: mac/.build/dist/ExeWatcherMenubar-ci.zip
