@@ -17,8 +17,8 @@ enum SubscriptionError: Error, LocalizedError {
     case noCredentials
     case credentialsInvalid
     case keychainAccessRequired
-    case refreshFailed(Int, String?)
-    case usageFetchFailed(Int, String?)
+    case refreshFailed(Int)
+    case usageFetchFailed(Int)
     case decodeFailed(Error)
 
     var errorDescription: String? {
@@ -26,8 +26,8 @@ enum SubscriptionError: Error, LocalizedError {
         case .noCredentials: "No Claude OAuth credentials found"
         case .credentialsInvalid: "Claude OAuth credentials malformed"
         case .keychainAccessRequired: "Allow Watcher to read your Claude Code sign-in by selecting Refresh."
-        case let .refreshFailed(code, body): "Token refresh failed (\(code))\(body.map { ": \($0)" } ?? "")"
-        case let .usageFetchFailed(code, body): "Usage fetch failed (\(code))\(body.map { ": \($0)" } ?? "")"
+        case let .refreshFailed(code): "Token refresh failed (\(code))"
+        case let .usageFetchFailed(code): "Usage fetch failed (\(code))"
         case let .decodeFailed(err): "Decode failed: \(err.localizedDescription)"
         }
     }
@@ -41,11 +41,11 @@ struct SubscriptionClient {
         do {
             let response = try await fetchUsage(token: creds.accessToken)
             return mapResponse(response, rawTier: creds.rateLimitTier)
-        } catch SubscriptionError.usageFetchFailed(401, _) {
+        } catch SubscriptionError.usageFetchFailed(401) {
             // Passive dock refreshes never rotate credentials owned by another app.
-            guard allowKeychainPrompt else { throw SubscriptionError.usageFetchFailed(401, nil) }
+            guard allowKeychainPrompt else { throw SubscriptionError.usageFetchFailed(401) }
             guard let refreshToken = creds.refreshToken, !refreshToken.isEmpty else {
-                throw SubscriptionError.usageFetchFailed(401, "no refresh token available")
+                throw SubscriptionError.usageFetchFailed(401)
             }
             let newToken = try await refreshAccessToken(refreshToken: refreshToken)
             let response = try await fetchUsage(token: newToken)
@@ -161,13 +161,9 @@ struct SubscriptionClient {
         ]
         request.httpBody = (components.percentEncodedQuery ?? "").data(using: .utf8)
 
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse else {
-            throw SubscriptionError.refreshFailed(-1, nil)
-        }
+        let (data, http) = try await QuotaHTTP.request(request, maxBytes: 1024 * 1024)
         guard http.statusCode == 200 else {
-            let body = String(data: data, encoding: .utf8)
-            throw SubscriptionError.refreshFailed(http.statusCode, body)
+            throw SubscriptionError.refreshFailed(http.statusCode)
         }
         do {
             let decoded = try JSONDecoder().decode(TokenRefreshResponse.self, from: data)
@@ -188,13 +184,9 @@ struct SubscriptionClient {
         request.setValue(betaHeader, forHTTPHeaderField: "anthropic-beta")
         request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
 
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse else {
-            throw SubscriptionError.usageFetchFailed(-1, nil)
-        }
+        let (data, http) = try await QuotaHTTP.request(request, maxBytes: 1024 * 1024)
         guard http.statusCode == 200 else {
-            let body = String(data: data, encoding: .utf8)
-            throw SubscriptionError.usageFetchFailed(http.statusCode, body)
+            throw SubscriptionError.usageFetchFailed(http.statusCode)
         }
         do {
             return try JSONDecoder().decode(UsageResponse.self, from: data)

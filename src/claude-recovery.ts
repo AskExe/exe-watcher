@@ -72,13 +72,15 @@ export async function readClaudeUsageSnapshot(): Promise<ClaudeUsageSnapshot | n
   }
   const current = await read(path), saved = await read(savedPath)
   if (!current) return saved
-  const combined = structuredClone(current)
+  const modelUsage: ClaudeUsageSnapshot['modelUsage'] = Object.create(null)
+  for (const [model, counters] of Object.entries(current.modelUsage)) modelUsage[model] = counters
+  const combined: ClaudeUsageSnapshot = { ...structuredClone(current), modelUsage }
   if (saved) {
     combined.firstSessionDate = saved.firstSessionDate < current.firstSessionDate ? saved.firstSessionDate : current.firstSessionDate
     combined.lastComputedDate = saved.lastComputedDate > current.lastComputedDate ? saved.lastComputedDate : current.lastComputedDate
     for (const [model, counters] of Object.entries(saved.modelUsage)) {
       if (!counters || typeof counters !== 'object') continue
-      const row = combined.modelUsage[model] ??= {}
+      const row = modelUsage[model] ??= {}
       for (const key of ['inputTokens', 'outputTokens', 'cacheReadInputTokens', 'cacheCreationInputTokens'] as const) {
         if (Number.isFinite(counters[key]) && (counters[key] ?? 0) >= 0) row[key] = Math.max(row[key] ?? 0, counters[key] ?? 0)
       }

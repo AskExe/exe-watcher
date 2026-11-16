@@ -47,7 +47,7 @@ export function buildPeriodSnapshots(
   const periodDays = (start: string) => days.filter(d => d.date >= start)
   const week = windows.find(w => w.key === 'week')!
   const month = windows.find(w => w.key === '30days')!
-  const result: Record<string, PeriodSnapshot> = {}
+  const result: Record<string, PeriodSnapshot> = Object.create(null)
   for (const window of windows) {
     const required = Math.max(0, Math.round((Date.parse(today) - Date.parse(window.start)) / 86_400_000))
     const covered = [...dates].filter(d => d >= window.start && !partial.has(d)).length
@@ -70,7 +70,7 @@ export function buildPeriodSnapshots(
     const selected = periodDays(window.start)
     const scoped = provider === 'all' ? selected : filterDaysToProvider(selected, provider)
     const data = buildPeriodDataFromDays(scoped, window.label)
-    const totals: Record<string, number> = {}
+    const totals: Record<string, number> = Object.create(null)
     for (const day of scoped) for (const [name, usage] of Object.entries(day.providers)) {
       totals[name] = (totals[name] ?? 0) + usage.cost
     }

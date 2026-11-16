@@ -6,6 +6,7 @@ The September 2026 audit traced filesystem events, timer/wake recovery, badge/de
 
 - The existing 30-second completion cooldown coalesces automatic refreshes. Badge and detail share per-key ownership, with one lane each and a global maximum of two CLI fetch processes. Each queue is capped at 32; cancelled waiters never launch later.
 - Failed requests back off from 30 seconds to five minutes per key across all refresh entry points; health recovery cannot bypass that deadline.
+- Wake, screen-wake and session-activation notifications coalesce into one recovery refresh. Healthy idle health checks do not write trace files. Native configuration and telemetry reads use bounded, non-following regular-file I/O, and inherited Node loader flags are not passed to app-owned CLI processes.
 - Cancellation, timeout and output overflow terminate the child, escalate to SIGKILL and reap it before releasing its permit. Live pipes enforce 20 MiB stdout and 256 KiB stderr limits. Child lifetime is at most 60 seconds plus termination/reaping.
 - A PID lease serializes status ingestion across processes, with bounded waiting and dead-owner recovery.
 - Unchanged parsed files survive process restarts in a versioned disk cache, invalidated by source identity, size, timestamps, WAL changes and pricing. Changed snapshots are not cached. Cache entries are at most 16 MiB and the disk budget is 256 MiB. Yesterday is revalidated every five minutes; identical index/daily-cache writes are skipped.

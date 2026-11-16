@@ -187,7 +187,7 @@ function loadSessionAgentMap(): Map<string, string> {
  */
 export function computeAgentSpend(projects: ProjectSummary[]): Record<string, number> {
   const agentMap = loadSessionAgentMap()
-  const spend: Record<string, number> = {}
+  const spend: Record<string, number> = Object.create(null)
 
   for (const p of projects) {
     for (const sess of p.sessions) {
@@ -394,7 +394,7 @@ function buildOptimize(optimize: OptimizeResult | null): MenubarPayload['optimiz
 }
 
 function buildProviders(providers: ProviderCost[]): Record<string, number> {
-  const map: Record<string, number> = {}
+  const map: Record<string, number> = Object.create(null)
   for (const p of providers) {
     if (p.cost < 0) continue
     map[p.name.toLowerCase()] = p.cost

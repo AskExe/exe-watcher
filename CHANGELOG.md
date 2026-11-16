@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Security and launch hardening
+
+- Bundle Node 22.23.5, which includes the current Node 22 security fixes, and verify the packaged runtime during release publication. Upgrade the build/test toolchain to eliminate all known npm advisories.
+- Bound native configuration, telemetry and cache reads; reject symlinks and non-regular files through the shared native file reader.
+- Scope forced-install process termination to the exact target app executable; preserve unrelated processes and developer copies.
+- Remove inherited Node loader flags from native CLI processes, reject redirects and response-body disclosure in Claude quota requests, and bound their responses.
+- Make exports private and atomic, refuse symlinked export directories, and extend prototype-pollution checks across all TypeScript sources.
+- Keep the hosted Mac workflow manual and review-only, pin GitHub Actions, stop idle health-check trace writes, and coalesce wake recovery.
+
 ## 0.2.76 (2026-11-13)
 
 - Move the Mac download and in-app updates to Odd Community. Install this

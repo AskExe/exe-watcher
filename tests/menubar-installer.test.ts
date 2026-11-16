@@ -7,6 +7,10 @@ import { createHash } from 'node:crypto'
 const ARCHIVE = Buffer.from('fixture signed app archive')
 const FIXTURE_DIGEST = `sha256:${createHash('sha256').update(ARCHIVE).digest('hex')}`
 let fixtureVersion = '0.2.21'
+const TARGET_EXECUTABLE = `${os.homedir()}/Applications/Watcher by EXE.app/Contents/MacOS/ExeWatcherMenubar`
+function formatProcessList(output: string): string {
+  return output.split(/\s+/).filter(Boolean).map(pid => `${pid} ${TARGET_EXECUTABLE}`).join('\n')
+}
 
 // Mock os.platform before importing the module under test.
 // The module reads platform() at call time, so vi.mock is sufficient.
@@ -47,7 +51,7 @@ vi.mock('node:fs', async (importOriginal) => {
 })
 
 // Lazy import so mocks are in place
-const { installMenubarApp } = await import('../src/menubar-installer.js')
+const { installMenubarApp, parseRunningAppPids } = await import('../src/menubar-installer.js')
 type InstallResult = Awaited<ReturnType<typeof installMenubarApp>>
 
 // The regex lives in the module as a constant. We replicate it here for the
@@ -56,6 +60,14 @@ type InstallResult = Awaited<ReturnType<typeof installMenubarApp>>
 const ASSET_PATTERN = /^ExeWatcherMenubar-.*\.zip$/
 
 describe('menubar-installer', () => {
+  it('matches only the exact executable in the installed target bundle', () => {
+    const target = '/Users/test/Applications/Watcher by EXE.app'
+    const executable = `${target}/Contents/MacOS/ExeWatcherMenubar`
+    const output = `  101 ${executable}\n  202 /tmp/ExeWatcherMenubar\n  303 ${executable}-helper\n  404 /tmp/other/ExeWatcherMenubar\n`
+    expect(parseRunningAppPids(output, target)).toEqual([101])
+    expect(parseRunningAppPids(output, '/Users/test/Applications/Other.app')).toEqual([])
+  })
+
   const savedEnv: Record<string, string | undefined> = {}
 
   beforeEach(() => {
@@ -160,18 +172,17 @@ describe('menubar-installer', () => {
       process.env.EXE_WATCHER_FORCE_MACOS_MAJOR = '15'
       process.env.EXE_WATCHER_APP_LAUNCH_TIMEOUT_MS = '1'
 
-      // Simulate the app already being installed: stat resolves (file exists),
-      // and pgrep says it's running.
+      // Simulate the app already being installed; an empty process list triggers open.
       const fsMock = await import('node:fs/promises')
       vi.mocked(fsMock.stat).mockResolvedValueOnce({} as any)
 
-      // Mock spawn for pgrep (isAppRunning → code 0 = running)
+      // Mock spawn for process listing (isAppRunning → code 0 = running)
       const mockSpawn = vi.mocked(childProcess.spawn)
       const fakeProc = {
         stdout: { on: vi.fn() },
         stderr: { on: vi.fn() },
         on: vi.fn((event: string, cb: Function) => {
-          if (event === 'close') cb(0) // pgrep exit 0 = app is running
+          if (event === 'close') cb(0) // process listing exit 0 = app is running
         }),
       }
       mockSpawn.mockReturnValue(fakeProc as any)
@@ -214,7 +225,7 @@ describe('menubar-installer', () => {
           body: new ReadableStream({ start(controller) { controller.enqueue(new Uint8Array(ARCHIVE)); controller.close() } }),
         } as unknown as Response))
 
-      const pgrepOutputs = ['111\n', '', '222\n']
+      const processOutputs = ['111\n', '', '222\n']
       const spawnCalls: Array<{ command: string; args: string[] }> = []
       vi.mocked(childProcess.spawn).mockImplementation((command: string, args: readonly string[] = []) => {
         spawnCalls.push({ command, args: [...args] })
@@ -226,10 +237,10 @@ describe('menubar-installer', () => {
           if (command === '/usr/libexec/PlistBuddy') {
             proc.stdout.emit('data', Buffer.from(fixtureVersion)); proc.emit('close', 0); return
           }
-          if (command === '/usr/bin/pgrep') {
-            const out = pgrepOutputs.shift() ?? ''
-            if (out) proc.stdout.emit('data', Buffer.from(out))
-            proc.emit('close', out ? 0 : 1)
+          if (command === '/bin/ps') {
+            const out = processOutputs.shift() ?? ''
+            if (out) proc.stdout.emit('data', Buffer.from(formatProcessList(out)))
+            proc.emit('close', 0)
           } else {
             proc.emit('close', 0)
           }
@@ -243,7 +254,11 @@ describe('menubar-installer', () => {
       expect(result.launched).toBe(true)
       expect(spawnCalls).toContainEqual({ command: '/bin/kill', args: ['-TERM', '111'] })
       expect(spawnCalls).toContainEqual({ command: '/usr/bin/open', args: [expect.stringContaining('Watcher by EXE.app')] })
-      expect(spawnCalls.filter(c => c.command === '/usr/bin/pgrep').length).toBeGreaterThanOrEqual(3)
+      const processLookups = spawnCalls.filter(c => c.command === '/bin/ps')
+      expect(processLookups.length).toBeGreaterThanOrEqual(3)
+      for (const lookup of processLookups) {
+        expect(lookup.args).toEqual(['-axo', 'pid=,comm='])
+      }
       const commands = spawnCalls.map(c => c.command)
       expect(commands.indexOf('/usr/bin/codesign')).toBeLessThan(commands.indexOf('/bin/kill'))
       expect(commands.indexOf('/usr/bin/xcrun')).toBeLessThan(commands.indexOf('/bin/kill'))
@@ -270,7 +285,7 @@ describe('menubar-installer', () => {
         .mockResolvedValueOnce({ ok: true, body: new ReadableStream({ start(controller) { controller.enqueue(new Uint8Array(ARCHIVE)); controller.close() } }) } as unknown as Response)
       vi.stubGlobal('fetch', fetchMock)
 
-      const pgrepOutputs = ['111\n', '', '222\n']
+      const processOutputs = ['111\n', '', '222\n']
       const spawnCalls: Array<{ command: string; args: string[] }> = []
       vi.mocked(childProcess.spawn).mockImplementation((command: string, args: readonly string[] = []) => {
         spawnCalls.push({ command, args: [...args] })
@@ -281,9 +296,9 @@ describe('menubar-installer', () => {
           if (command === '/usr/libexec/PlistBuddy') {
             proc.stdout.emit('data', Buffer.from(fixtureVersion)); proc.emit('close', 0); return
           }
-          const out = command === '/usr/bin/pgrep' ? pgrepOutputs.shift() ?? '' : ''
-          if (out) proc.stdout.emit('data', Buffer.from(out))
-          proc.emit('close', command === '/usr/bin/pgrep' && !out ? 1 : 0)
+          const out = command === '/bin/ps' ? processOutputs.shift() ?? '' : ''
+          if (out) proc.stdout.emit('data', Buffer.from(formatProcessList(out)))
+          proc.emit('close', 0)
         })
         return proc
       })
@@ -334,7 +349,7 @@ describe('menubar-installer', () => {
       // Existing app exits; candidate never appears after first open; restored app appears
       // only after rollback opens the backup-recovered target.
       let openCount = 0
-      let initialPgrepDone = false
+      let initialProcessListDone = false
       const spawnCalls: Array<{ command: string; args: string[] }> = []
       vi.mocked(childProcess.spawn).mockImplementation((command: string, args: readonly string[] = []) => {
         spawnCalls.push({ command, args: [...args] })
@@ -349,16 +364,16 @@ describe('menubar-installer', () => {
           if (command === '/usr/bin/open') {
             openCount += 1
             proc.emit('close', 0)
-          } else if (command === '/usr/bin/pgrep') {
+          } else if (command === '/bin/ps') {
             let out = ''
-            if (!initialPgrepDone) {
-              initialPgrepDone = true
+            if (!initialProcessListDone) {
+              initialProcessListDone = true
               out = '111\n'
             } else if (openCount >= 2) {
               out = '333\n'
             }
-            if (out) proc.stdout.emit('data', Buffer.from(out))
-            proc.emit('close', out ? 0 : 1)
+            if (out) proc.stdout.emit('data', Buffer.from(formatProcessList(out)))
+            proc.emit('close', 0)
           } else {
             proc.emit('close', 0)
           }
@@ -404,9 +419,9 @@ describe('menubar-installer', () => {
           body: new ReadableStream({ start(controller) { controller.enqueue(new Uint8Array(ARCHIVE)); controller.close() } }),
         } as unknown as Response))
 
-      // Initial pgrep finds 111; wait loop repeatedly sees it still alive; after SIGKILL it exits;
-      // final launch pgrep finds the replacement 222.
-      const pgrepOutputs = ['111\n', '111\n', '111\n', '', '222\n']
+      // Initial process listing finds 111; wait loop repeatedly sees it still alive; after SIGKILL it exits;
+      // final launch process listing finds the replacement 222.
+      const processOutputs = ['111\n', '111\n', '111\n', '', '222\n']
       const spawnCalls: Array<{ command: string; args: string[] }> = []
       vi.mocked(childProcess.spawn).mockImplementation((command: string, args: readonly string[] = []) => {
         spawnCalls.push({ command, args: [...args] })
@@ -418,10 +433,10 @@ describe('menubar-installer', () => {
           if (command === '/usr/libexec/PlistBuddy') {
             proc.stdout.emit('data', Buffer.from(fixtureVersion)); proc.emit('close', 0); return
           }
-          if (command === '/usr/bin/pgrep') {
-            const out = pgrepOutputs.shift() ?? ''
-            if (out) proc.stdout.emit('data', Buffer.from(out))
-            proc.emit('close', out ? 0 : 1)
+          if (command === '/bin/ps') {
+            const out = processOutputs.shift() ?? ''
+            if (out) proc.stdout.emit('data', Buffer.from(formatProcessList(out)))
+            proc.emit('close', 0)
           } else {
             proc.emit('close', 0)
           }

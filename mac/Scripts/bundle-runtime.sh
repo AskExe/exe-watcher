@@ -3,18 +3,18 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 CONTENTS="${1:?Usage: bundle-runtime.sh /path/to/App.app/Contents}"
-NODE_VERSION="22.23.3"
+NODE_VERSION="22.23.5"
 CACHE="${ROOT}/mac/.build/node-runtime/${NODE_VERSION}"
 mkdir -p "${CACHE}" "${CONTENTS}/Helpers" "${CONTENTS}/Resources/cli" "${CONTENTS}/MacOS"
 
 for arch in arm64 x64; do
   archive="node-v${NODE_VERSION}-darwin-${arch}.tar.gz"
   case "${arch}" in
-    arm64) expected="23b25245dcfb9af7262f8ff142e9e2e0af025368117329e7a7458a51e5922f53" ;;
-    x64) expected="8a677b0219178efd6eb0e475457c4afb452b521a92f6e67845a73bd85727f2a8" ;;
+    arm64) expected="e7131995759b61a0170b646010d2ad35a5d37b4cb0d471f3e8317eac6f742f3d" ;;
+    x64) expected="c53383238206b9ae4db23c5d8a63645e2e753bec8ab51a49cc81939aa64e9422" ;;
   esac
   if [[ ! -f "${CACHE}/${archive}" ]]; then
-    curl --fail --location --retry 2 --connect-timeout 15 --max-time 180 \
+    curl --fail --location --proto '=https' --proto-redir '=https' --retry 2 --connect-timeout 15 --max-time 180 \
       "https://nodejs.org/dist/v${NODE_VERSION}/${archive}" -o "${CACHE}/${archive}.part"
     mv "${CACHE}/${archive}.part" "${CACHE}/${archive}"
   fi

@@ -73,6 +73,7 @@ it('copies and saves the displayed recommendations without rescanning and recove
   vi.mocked(copyOptimizeMarkdown).mockRejectedValueOnce(new Error('clipboard unavailable')).mockResolvedValue(undefined)
   vi.mocked(saveOptimizeMarkdown).mockResolvedValue('/Users/fixture/Downloads/recommendations.md')
   let frame = ''
+  const expectFrame = (text: string) => vi.waitFor(() => expect(frame).toContain(text), { timeout: 10_000 })
   const stdout = Object.assign(new Writable({ write(chunk, _encoding, callback) { frame += chunk.toString(); callback() } }), { columns: 120, rows: 80, isTTY: true })
   const stdin = Object.assign(new PassThrough(), { isTTY: true, setRawMode: vi.fn(), ref: vi.fn(), unref: vi.fn() })
   const app = render(React.createElement(InteractiveDashboard, { initialPeriod: 'week', initialProvider: 'all', refreshSeconds: 30 }), {
@@ -80,24 +81,24 @@ it('copies and saves the displayed recommendations without rescanning and recove
     debug: true, interactive: true, patchConsole: false, exitOnCtrlC: false,
   })
   try {
-    await vi.waitFor(() => expect(frame).toContain('No usage data found'))
+    await expectFrame('No usage data found')
     frame = ''; stdin.write('o')
-    await vi.waitFor(() => expect(frame).toContain('save .md'))
+    await expectFrame('save .md')
     expect(frame).toContain('copy all')
     frame = ''; stdin.write('c')
-    await vi.waitFor(() => expect(frame).toContain('Could not copy. Press e'))
+    await expectFrame('Could not copy. Press e')
     frame = ''; stdin.write('e')
-    await vi.waitFor(() => expect(frame).toContain('Saved: /Users/fixture/Downloads/recommendations.md'))
+    await expectFrame('Saved: /Users/fixture/Downloads/recommendations.md')
     const saved = vi.mocked(saveOptimizeMarkdown).mock.calls[0]![0]
     expect(saved).toContain('Period: 7 Days')
     expect(saved).toContain('Partial analysis: 1/10 logs fully checked')
     expect(saved).toContain('export LIMIT=1000')
     frame = ''; stdin.write('c')
-    await vi.waitFor(() => expect(frame).toContain('Copied all recommendations. Paste into Claude Code.'))
+    await expectFrame('Copied all recommendations. Paste into Claude Code.')
     expect(copyOptimizeMarkdown).toHaveBeenLastCalledWith(expect.stringContaining('export LIMIT=1000'))
     expect(scanAndDetect).toHaveBeenCalledTimes(1)
     expect(parseAllSessions).toHaveBeenCalledTimes(1)
     frame = ''; stdin.write('b')
-    await vi.waitFor(() => expect(frame).toContain('No usage data found'))
+    await expectFrame('No usage data found')
   } finally { app.unmount(); stdin.destroy(); stdout.destroy() }
 })

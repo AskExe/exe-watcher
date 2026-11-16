@@ -68,35 +68,32 @@ enum SafeFile {
     /// Refuses to read through a symlink. `maxBytes` bounds the read so a tampered cache file
     /// can't balloon the process.
     static func read(from path: String, maxBytes: Int = defaultReadLimit) throws -> Data {
-        var linkInfo = stat()
-        guard lstat(path, &linkInfo) == 0 else {
-            throw Error.readFailed(path, errno)
-        }
-        if (linkInfo.st_mode & S_IFMT) == S_IFLNK {
-            throw Error.symlinkDetected(path)
-        }
-
-        let fd = Darwin.open(path, O_RDONLY | O_NOFOLLOW)
+        let fd = Darwin.open(path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC)
         guard fd >= 0 else {
             throw Error.readFailed(path, errno)
         }
         defer { Darwin.close(fd) }
 
-        let size = Int(linkInfo.st_size)
+        var info = stat()
+        guard fstat(fd, &info) == 0, (info.st_mode & S_IFMT) == S_IFREG, info.st_size >= 0 else {
+            throw Error.readFailed(path, EINVAL)
+        }
+        let size = Int(info.st_size)
         if size > maxBytes {
             throw Error.sizeLimitExceeded(path, size)
         }
 
-        var data = Data(count: size)
-        let readBytes: Int = data.withUnsafeMutableBytes { buffer -> Int in
-            guard let base = buffer.baseAddress else { return 0 }
-            return Darwin.read(fd, base, buffer.count)
-        }
-        guard readBytes >= 0 else {
-            throw Error.readFailed(path, errno)
-        }
-        if readBytes < size {
-            data = data.prefix(readBytes)
+        var data = Data()
+        data.reserveCapacity(size)
+        var buffer = [UInt8](repeating: 0, count: min(max(size, 1), 64 * 1024))
+        while data.count < size {
+            let count = Darwin.read(fd, &buffer, min(buffer.count, size - data.count))
+            if count == 0 { break }
+            if count < 0 {
+                if errno == EINTR { continue }
+                throw Error.readFailed(path, errno)
+            }
+            data.append(contentsOf: buffer.prefix(count))
         }
         return data
     }

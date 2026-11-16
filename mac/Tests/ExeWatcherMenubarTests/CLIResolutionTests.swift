@@ -46,6 +46,18 @@ struct ExeWatcherCLIResolutionTests {
         #expect(!FileManager.default.fileExists(atPath: url.path))
     }
 
+    @Test("bundled CLI ignores inherited Node loader and heap overrides")
+    func inheritedNodeOptionsAreNotTrusted() {
+        let previous = ProcessInfo.processInfo.environment["NODE_OPTIONS"]
+        setenv("NODE_OPTIONS", "--require /tmp/untrusted.js --max-old-space-size=4096", 1)
+        defer {
+            if let previous { setenv("NODE_OPTIONS", previous, 1) }
+            else { unsetenv("NODE_OPTIONS") }
+        }
+        let process = ExeWatcherCLI.makeProcess(subcommand: ["status"])
+        #expect(process.environment?["NODE_OPTIONS"] == "--max-old-space-size=256")
+    }
+
     @Test("skips broken latest NVM bins and falls back to the newest working install")
     func resolvesNewestWorkingNvmBinary() {
         let fs = ExeWatcherCLI.ResolverFilesystem(

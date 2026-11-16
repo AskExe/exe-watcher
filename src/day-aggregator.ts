@@ -269,7 +269,7 @@ export function buildPeriodDataFromDays(days: DailyEntry[], label: string): Peri
     cacheWriteTokens,
     categories: Object.entries(catTotals)
       .sort(([, a], [, b]) => b.cost - a.cost)
-      .map(([cat, d]) => ({ name: CATEGORY_LABELS[cat as TaskCategory] ?? cat, ...d })),
+      .map(([cat, d]) => ({ name: Object.hasOwn(CATEGORY_LABELS, cat) ? CATEGORY_LABELS[cat as TaskCategory] : cat, ...d })),
     models: Object.entries(modelTotals)
       .sort(([, a], [, b]) => b.cost - a.cost)
       .map(([name, d]) => ({ name, ...d })),

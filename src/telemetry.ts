@@ -24,7 +24,7 @@ export async function createTelemetry(config: TelemetryConfig | undefined, versi
   if (process.env['EXE_WATCHER_PARENT_PID']) return silent()
   const initial = resolveTelemetry(config)
   // The product presents its first-run notice before applying a default-on choice.
-  if (initial.usageEnabled && config?.usageEnabled === undefined && config?.basicNoticeVersion !== 1 && config?.diagnosticsEnabled !== true) return silent()
+  if (initial.usageEnabled && config?.usageEnabled === undefined && config?.basicNoticeVersion !== 1) return silent()
   const root = dirname(getConfigFilePath()), directory = join(root, 'telemetry-cli'), file = join(directory, 'state.json')
   if (!initial.usageEnabled && !initial.diagnosticsEnabled) {
     try { await readFile(file) } catch { return silent() }
@@ -57,7 +57,7 @@ export async function createTelemetry(config: TelemetryConfig | undefined, versi
           finally { await unlink(temp).catch(() => {}) }
         },
       },
-      send: (url, options) => fetch(url, { ...options, signal: AbortSignal.any([options!.signal!, AbortSignal.timeout(1500)]) }),
+      send: (url, options) => fetch(url, { ...options, redirect: 'error', signal: AbortSignal.any([options!.signal!, AbortSignal.timeout(1500)]) }),
     })
     // Existing client IDs remain stable; the first newly generated UUID is identity only
     // when consent transitions on. Event UUIDs must never reuse the installation ID.

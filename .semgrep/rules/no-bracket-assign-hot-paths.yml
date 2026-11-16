@@ -16,7 +16,6 @@ rules:
       - pattern-not-inside: |
           const $MAP = Object.create(null)
           ...
-    paths:
-      include:
-        - '/src/providers/*.ts'
-        - '/src/parser.ts'
+      - pattern-not-inside: |
+          const $MAP: $TYPE = Object.create(null)
+          ...

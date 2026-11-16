@@ -38,7 +38,7 @@ beforeAll(async () => {
 })
 afterAll(async () => { if (home) await rm(home, { recursive: true, force: true }) })
 
-describe.sequential('clean install local usage and API-equivalent pricing', { timeout: 60_000 }, () => {
+describe('clean install local usage and API-equivalent pricing', { timeout: 60_000 }, () => {
   it('returns an honest empty report before any supported tool has recorded usage', async () => {
     const report = await run()
     expect(report.overview.calls).toBe(0)

@@ -47,6 +47,13 @@ struct SubscriptionCredentialTests {
         }
     }
 
+    @Test("provider errors contain only a status code")
+    func providerErrorsCannotCarryResponseBodies() {
+        #expect(SubscriptionError.refreshFailed(500).errorDescription == "Token refresh failed (500)")
+        #expect(SubscriptionError.usageFetchFailed(503).errorDescription == "Usage fetch failed (503)")
+        #expect(String(describing: SubscriptionError.usageFetchFailed(503)) == "usageFetchFailed(503)")
+    }
+
     @Test("silent Keychain denial allows immediate explicit refresh")
     @MainActor func explicitAccessAfterSilentRead() async {
         let store = AppStore(fetchSubscription: { prompt in

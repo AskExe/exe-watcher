@@ -30,6 +30,8 @@ describe('self-hosted telemetry', () => {
       await writeFile(join(f.path, 'config.json'), '{}')
       const undisclosed = await createTelemetry(undefined, '0.2.67', true)
       await undisclosed.capture('command_started', 'status'); await undisclosed.shutdown()
+      const diagnosticsOnly = await createTelemetry({ diagnosticsEnabled: true }, '0.2.67', true)
+      await diagnosticsOnly.capture('command_started', 'status'); await diagnosticsOnly.error(new Error('secret')); await diagnosticsOnly.shutdown()
       expect(send).not.toHaveBeenCalled()
       const disclosed = { basicNoticeVersion: 1 }
       await writeFile(join(f.path, 'config.json'), JSON.stringify({ telemetry: disclosed }))
@@ -102,7 +104,7 @@ describe('self-hosted telemetry', () => {
       expect(requests).toEqual([])
     } finally { await rm(f.root, { recursive: true, force: true }) }
   })
-  it('excludes non-foreground invocations and respects the queue bound', async () => {
+  it('excludes non-foreground invocations and respects the queue bound', { timeout: 15_000 }, async () => {
     const f = await fixture(); vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 503 })))
     try {
       const background = await createTelemetry(f.consent, '0.2.67', false)

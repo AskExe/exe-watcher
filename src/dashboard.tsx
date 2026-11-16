@@ -251,8 +251,8 @@ function Overview({ projects, label, width, planUsage, recovery }: { projects: P
 }
 
 function DailyActivity({ projects, days = 14, pw, bw }: { projects: ProjectSummary[]; days?: number; pw: number; bw: number }) {
-  const dailyCosts: Record<string, number> = {}
-  const dailyCalls: Record<string, number> = {}
+  const dailyCosts: Record<string, number> = Object.create(null)
+  const dailyCalls: Record<string, number> = Object.create(null)
   for (const project of projects) {
     for (const session of project.sessions) {
       if (session.reportSummary) {
@@ -341,7 +341,7 @@ const MODEL_COL_CALLS = 7
 const MODEL_NAME_WIDTH = 14
 
 function ModelBreakdown({ projects, pw, bw }: { projects: ProjectSummary[]; pw: number; bw: number }) {
-  const modelTotals: Record<string, { calls: number; costUSD: number; freshInput: number; cacheRead: number; cacheWrite: number }> = {}
+  const modelTotals: Record<string, { calls: number; costUSD: number; freshInput: number; cacheRead: number; cacheWrite: number }> = Object.create(null)
   for (const project of projects) {
     for (const session of project.sessions) {
       for (const [model, data] of Object.entries(session.modelBreakdown)) {
@@ -379,7 +379,7 @@ function ModelBreakdown({ projects, pw, bw }: { projects: ProjectSummary[]; pw: 
 }
 
 function ActivityBreakdown({ projects, pw, bw }: { projects: ProjectSummary[]; pw: number; bw: number }) {
-  const categoryTotals: Record<string, { turns: number; costUSD: number; editTurns: number; oneShotTurns: number }> = {}
+  const categoryTotals: Record<string, { turns: number; costUSD: number; editTurns: number; oneShotTurns: number }> = Object.create(null)
   for (const project of projects) {
     for (const session of project.sessions) {
       for (const [cat, data] of Object.entries(session.categoryBreakdown)) {
@@ -401,7 +401,7 @@ function ActivityBreakdown({ projects, pw, bw }: { projects: ProjectSummary[]; p
         return (
           <Text key={cat} wrap="truncate-end">
             <HBar value={data.costUSD} max={maxCost} width={bw} />
-            <Text color={CATEGORY_COLORS[cat as TaskCategory] ?? '#666666'}> {fit(CATEGORY_LABELS[cat as TaskCategory] ?? cat, 13)}</Text>
+            <Text color={Object.hasOwn(CATEGORY_COLORS, cat) ? CATEGORY_COLORS[cat as TaskCategory] : '#666666'}> {fit(Object.hasOwn(CATEGORY_LABELS, cat) ? CATEGORY_LABELS[cat as TaskCategory] : cat, 13)}</Text>
             <Text color={GOLD}>{formatCost(data.costUSD).padStart(8)}</Text>
             <Text>{String(data.turns).padStart(6)}</Text>
             <Text color={data.editTurns === 0 ? DIM : oneShotPct === '100%' ? '#86EFAC' : ORANGE}>{String(oneShotPct).padStart(7)}</Text>
@@ -413,7 +413,7 @@ function ActivityBreakdown({ projects, pw, bw }: { projects: ProjectSummary[]; p
 }
 
 function ToolBreakdown({ projects, pw, bw, title, filterPrefix }: { projects: ProjectSummary[]; pw: number; bw: number; title?: string; filterPrefix?: string }) {
-  const toolTotals: Record<string, number> = {}
+  const toolTotals: Record<string, number> = Object.create(null)
   for (const project of projects) {
     for (const session of project.sessions) {
       for (const [tool, data] of Object.entries(session.toolBreakdown)) {
@@ -430,7 +430,7 @@ function ToolBreakdown({ projects, pw, bw, title, filterPrefix }: { projects: Pr
       <Text dimColor wrap="truncate-end">{''.padEnd(bw + 1 + nw)}{'calls'.padStart(7)}</Text>
       {sorted.slice(0, 10).map(([tool, calls]) => {
         const raw = filterPrefix ? tool.slice(filterPrefix.length) : tool
-        const display = filterPrefix ? (LANG_DISPLAY_NAMES[raw] ?? raw) : raw
+        const display = filterPrefix ? ((Object.hasOwn(LANG_DISPLAY_NAMES, raw) ? LANG_DISPLAY_NAMES[raw] : undefined) ?? raw) : raw
         return (
           <Text key={tool} wrap="truncate-end">
             <HBar value={calls} max={maxCalls} width={bw} />
@@ -482,7 +482,7 @@ function TopSessions({ projects, pw, bw }: { projects: ProjectSummary[]; pw: num
 }
 
 function McpBreakdown({ projects, pw, bw }: { projects: ProjectSummary[]; pw: number; bw: number }) {
-  const mcpTotals: Record<string, number> = {}
+  const mcpTotals: Record<string, number> = Object.create(null)
   for (const project of projects) { for (const session of project.sessions) { for (const [server, data] of Object.entries(session.mcpBreakdown)) { mcpTotals[server] = (mcpTotals[server] ?? 0) + data.calls } } }
   const sorted = Object.entries(mcpTotals).sort(([, a], [, b]) => b - a)
   if (sorted.length === 0) return <Panel title="MCP Servers" color={PANEL_COLORS.mcp} width={pw}><Text dimColor>No MCP usage</Text></Panel>
@@ -499,7 +499,7 @@ function McpBreakdown({ projects, pw, bw }: { projects: ProjectSummary[]; pw: nu
 }
 
 function BashBreakdown({ projects, pw, bw }: { projects: ProjectSummary[]; pw: number; bw: number }) {
-  const bashTotals: Record<string, number> = {}
+  const bashTotals: Record<string, number> = Object.create(null)
   for (const project of projects) { for (const session of project.sessions) { for (const [cmd, data] of Object.entries(session.bashBreakdown)) { bashTotals[cmd] = (bashTotals[cmd] ?? 0) + data.calls } } }
   const sorted = Object.entries(bashTotals).sort(([, a], [, b]) => b - a)
   if (sorted.length === 0) return <Panel title="Shell Commands" color={PANEL_COLORS.bash} width={pw}><Text dimColor>No shell commands</Text></Panel>

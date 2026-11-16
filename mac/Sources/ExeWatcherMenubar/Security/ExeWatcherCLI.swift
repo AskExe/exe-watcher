@@ -92,9 +92,9 @@ enum ExeWatcherCLI {
             process.arguments = ["--", defaultBinaryName] + subcommand
         }
 
-        // Keep background scans inside a small V8 heap and collect transient JSON promptly.
-        // Last option wins over an inherited larger heap setting.
-        environment["NODE_OPTIONS"] = (environment["NODE_OPTIONS"] ?? "") + " --max-old-space-size=256"
+        // The app owns its CLI runtime. Inherited loader flags could execute arbitrary modules
+        // or override the resource limit inside an otherwise signed bundle.
+        environment["NODE_OPTIONS"] = "--max-old-space-size=256"
         environment["EXE_WATCHER_PARENT_PID"] = String(ProcessInfo.processInfo.processIdentifier)
         if let executable = Bundle.main.executableURL {
             environment["EXE_WATCHER_KEYCHAIN_HELPER"] = executable.path
