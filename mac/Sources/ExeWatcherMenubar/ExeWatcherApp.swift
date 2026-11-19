@@ -96,6 +96,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             return
         }
 
+        WatcherWelcomeWindow.openDashboard = { [weak self] in
+            guard let self else { return }
+            if self.popover != nil, !self.popover.isShown { self.handleButtonClick(nil) }
+        }
+        if ProcessInfo.processInfo.arguments.contains("--welcome-preview") {
+            WatcherWelcomeWindow.show(preview: true)
+            return
+        }
+
         WatcherTelemetry.start()
         oddBackup.start()
         ProcessInfo.processInfo.automaticTerminationSupportEnabled = false
@@ -128,6 +137,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         healthMonitor = monitor
         store.healthMonitor = monitor
         RefreshTracer.shared.instant(name: "app_launched", category: "lifecycle", tid: .lifecycle)
+        if WatcherWelcomeModel.needsWelcome() { WatcherWelcomeWindow.show() }
     }
 
     private func setupWakeObservers() {

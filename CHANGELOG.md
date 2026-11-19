@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.78 (2026-11-19)
+
+- Guide new and existing users through Watcher’s menu bar dashboard, usage sources, API-equivalent estimates and Odd sign-in. Reopen the guide through Settings.
+- Check supported local sources automatically using the same readers as the dashboard, with a rescan and a private, copyable help prompt for Claude or Codex. Make setup reachable from the empty usage state.
+- Explain partial histories, missing model prices and provider coverage limits before users interpret their totals.
+
 ## 0.2.77 (2026-11-17)
 
 ### Mac installer and Odd account

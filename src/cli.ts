@@ -41,6 +41,7 @@ import { formatDuration, summarizeTime, type TimeReport } from './time-tracking.
 import { buildTimeSnapshots } from './time-snapshots.js'
 import { readActivityHistory } from './personal-activity.js'
 import { accountCommand } from './cloud/command.js'
+import { checkUsageSources } from './usage-check.js'
 
 const require = createRequire(import.meta.url)
 const { version } = require('../package.json')
@@ -192,7 +193,7 @@ const program = new Command()
 
 program.hook('preAction', async (thisCommand, command) => {
   const config = await readConfig()
-  if (!['telemetry', 'account'].includes(command.name()) && process.stdin.isTTY && resolveTelemetry(config.telemetry).usageEnabled && config.telemetry?.basicNoticeVersion !== 1) {
+  if (!['telemetry', 'account', 'doctor'].includes(command.name()) && process.stdin.isTTY && resolveTelemetry(config.telemetry).usageEnabled && config.telemetry?.basicNoticeVersion !== 1) {
     const noticePath = join(dirname(getConfigFilePath()), 'basic-analytics-notice-v1')
     if (!existsSync(noticePath)) console.error(`\n${BASIC_NOTICE}\n`)
     config.telemetry = { ...config.telemetry, basicNoticeVersion: 1 }
@@ -203,7 +204,7 @@ program.hook('preAction', async (thisCommand, command) => {
       catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error }
     } catch { config.telemetry.usageEnabled = false }
   }
-  telemetry = ['telemetry', 'account'].includes(command.name()) ? undefined : await createTelemetry(config.telemetry, version)
+  telemetry = ['telemetry', 'account', 'doctor'].includes(command.name()) ? undefined : await createTelemetry(config.telemetry, version)
   telemetryCommand = command.name()
   await telemetry?.capture('command_started', telemetryCommand)
   setModelAliases(config.modelAliases ?? {})
@@ -211,7 +212,7 @@ program.hook('preAction', async (thisCommand, command) => {
   if (thisCommand.opts<{ verbose?: boolean }>().verbose) {
     process.env['EXE_WATCHER_VERBOSE'] = '1'
   }
-  if (command.name() !== 'account' && !command.opts().cachedOnly) await loadCurrency()
+  if (!['account', 'doctor'].includes(command.name()) && !command.opts().cachedOnly) await loadCurrency()
 })
 
 function buildJsonReport(projects: ProjectSummary[], period: string, periodKey: string) {
@@ -432,6 +433,21 @@ function buildPeriodData(label: string, projects: ProjectSummary[]): PeriodData 
       .map(([name, d]) => ({ name, ...d })),
   }
 }
+
+program
+  .command('doctor')
+  .description('Check which supported local usage sources Watcher can discover')
+  .option('--json', 'Output source counts and availability as JSON')
+  .action(async (opts) => {
+    const result = await checkUsageSources()
+    if (opts.json) console.log(JSON.stringify(result))
+    else {
+      for (const provider of result.providers) {
+        console.log(`${provider.name}: ${provider.state === 'found' ? `${provider.sources} local sources found` : provider.state === 'not-found' ? 'no compatible sources discovered' : 'check incomplete; retry when the Mac is less busy'}`)
+      }
+      console.log('Source discovery checks saved logs. Token coverage depends on the records each tool retained. Open Watcher’s report for the same date range and provider to inspect token totals and warnings.')
+    }
+  })
 
 program
   .command('status')
