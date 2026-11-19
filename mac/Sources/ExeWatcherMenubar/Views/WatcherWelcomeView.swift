@@ -79,7 +79,7 @@ final class WatcherWelcomeModel {
         Watcher’s automatic source check returned these results.
         \(summary)
 
-        Run \(command) --version and \(command) doctor --json first. Use the CLI bundled in this app so its version matches the dashboard. Inspect the report for the same provider and date range I am comparing. Costs are API-equivalent estimates at available model rates. Check input, output, cache tokens, missing-price warnings, partial history and duplicated or archived sessions separately.
+        Run \(command) --version and \(command) doctor --json first. Use the CLI bundled in this app so its version matches the dashboard. Inspect the report for the same provider and date range I am comparing. Costs are API-equivalent estimates at available model rates. Check input, output, cache tokens, missing-price warnings, partial history and duplicated or archived sessions separately. For All Time with Claude Code and Codex, verify each provider separately and then All tools. Inspect recoverable Claude lifetime counters and archived Codex sessions, and verify recovery adds only token counters missing from retained logs.
 
         Check standard and custom log locations, including CLAUDE_CONFIG_DIR, CODEX_HOME and extra Claude profiles configured in Watcher. Finder-launched apps can have different environment variables from Terminal. Confirm the actual retained formats and read permissions before recommending a change. Tell me which sources contain token records and which are missing. Explain whether the issue is source discovery, incomplete logs, pricing, date range or a parser problem.
 
@@ -228,6 +228,7 @@ struct WatcherWelcomeView: View {
             .controlSize(.small)
             Divider().opacity(0.4)
             explanation("Understand the totals", "Tokens come from saved tool records. Costs use available API rates and can differ from your subscription bill. Cache reads and writes have their own rates.")
+            explanation("When you choose All Time", "Watcher combines retained Claude Code and Codex history. Claude may also retain lifetime token counters after older transcripts disappear. Recovered history is marked incomplete for calls and dates. Codex archives are included when their saved session records are available.")
             explanation("If something is missing", "Open Report and check the same provider and dates. Look for partial history, unreadable files or missing model prices. Unknown prices leave tokens counted while excluding their cost. Copilot records output tokens only, and Cursor Auto uses estimates.")
             Text("If the expected tool has no sources, create a new session and scan again. Custom profiles, another computer or deleted logs can leave gaps. Paste the help prompt into Claude or Codex to investigate locally.")
                 .foregroundStyle(.secondary)
