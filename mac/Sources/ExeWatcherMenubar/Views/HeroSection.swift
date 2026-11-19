@@ -42,6 +42,10 @@ struct HeroSection: View {
             Text("No recorded usage in this period · supported tools are found automatically")
                 .font(.system(size: 10))
                 .foregroundStyle(.secondary)
+            Button("Check missing usage…") { WatcherWelcomeWindow.show(step: 1) }
+                .font(.system(size: 11))
+                .buttonStyle(.plain)
+                .foregroundStyle(Theme.brandAccent)
         }
         if store.selectedPeriod == .all {
             if let warning = store.payload.diagnostics?.warnings.first(where: { $0.contains("historical Claude token counters") }) {

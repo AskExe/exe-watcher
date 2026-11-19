@@ -447,6 +447,7 @@ struct FooterBar: View {
             .noFocusRing()
 
             Menu {
+                Button("Welcome & usage setup…") { WatcherWelcomeWindow.show() }
                 Button("Odd account & private history…") { OddAccountWindow.show() }
                 Button("Check for Updates…") { updateChecker.checkForUpdates() }
                     .disabled(!updateChecker.isAvailable)
